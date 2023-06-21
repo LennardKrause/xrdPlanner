@@ -41,4 +41,11 @@
   - 2022-04-25 Bugfix: Calculation of the beamcenter (rotation and tilt).
   - 2022-04-25 Bugfix: Unresponsive radio buttons / redrawing the figure.
 
+## Examples
+#### A PILATUS3 2M detector and a Silicon sample.
+![Preview](https://github.com/LennardKrause/xrdPlanner/blob/main/PILATUS3_2M_Si.png)
+
+#### A rotated EIGER2 4M detector and a Aluminium sample.
+![Preview](https://github.com/LennardKrause/xrdPlanner/blob/main/EIGER2_4M_Al.png)
+
 #### I hope this turns out to be useful for someone!
