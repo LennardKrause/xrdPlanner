@@ -25,60 +25,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setAcceptDrops(True)
         
         # set path to settings file
-        self.file_dump = os.path.join(self.path, 'settings.json')
-        # save parameters to file
-        self.init_par()
+        self.path_settings = os.path.join(self.path, 'settings.json')
+        # set path to detector database
+        self.path_detdb = os.path.join(self.path, 'detector_db.json')
 
-        # experimental darkmode?
-        if self.plo.darkmode:
-            self.init_darkmode()
-        
-        # set window color
-        pg.setConfigOptions(background=self.plo.plot_bg_color, antialias=True)
-
-        ###########
-        # CONTOUR #
-        ###########
-        # generate contour levels
-        self.cont_geom_num = np.linspace(self.plo.conic_tth_min, self.plo.conic_tth_max, self.plo.conic_tth_num)
-
-        # get colormap
-        self.cont_cmap = pg.colormap.get(self.plo.conic_colormap)
-        
-        # reverse the colormap useful to increase visibility in darkmode
-        if self.plo.reverse_cmap:
-            self.cont_cmap.reverse()
-        
-        # What standards should be available as reference
-        # The d spacings will be imported from pyFAI
-        self.geo.ref_library = calibrant.names()
-        # dict to store custom reference data
-        self.geo.ref_custom = {}
-        self.geo.ref_custom_hkl = {}
-        
-        # get the detector specs
-        # - update: overwrite existing file after load
-        # - reset: overwrite existing file with defaults
-        self.detectors = self.get_det_library(update=self.plo.update_det_bank, reset=self.plo.reset_det_bank)
-
-        # pick current detector
-        self.det = self.get_specs_det(self.detectors, self.geo.det_type, self.geo.det_size)
-
-        # translate unit for plot title
-        self.geo.unit_names = ['2\U0001D6F3 [\u00B0]', 'd [\u212B\u207B\u00B9]', 'q [\u212B]', 'sin(\U0001D6F3)/\U0001D706 [\u212B]']
-        if self.geo.unit >= len(self.geo.unit_names):
-            print(f'Error: Valid geo.unit range is from 0 to {len(self.geo.unit_names)-1}, geo.unit={self.geo.unit}')
-            raise SystemExit
-
-        # init the hkl tooltip
-        font = QtGui.QFont()
-        font.setPixelSize(self.plo.conic_hkl_label_size)
-        font.setBold(True)
-        QtWidgets.QToolTip.setFont(font)
-
-        ###########
-        # GENERAL #
-        ###########
+        # initialise all that depends on the settings
+        # call this function to apply changes were made
+        # to the settings file -> apply_settings()
+        self.init_modifiables()
 
         # menubar is displayed within the main window on Windows
         # so we need to make space for it
@@ -117,7 +71,58 @@ class MainWindow(QtWidgets.QMainWindow):
         self.init_screen()
 
         # add the slider frame
+        # this calls draw_conics(), 
+        # make sure that everything
+        # that is needed is initialised
         self.sliderWidget = SliderWidget(self, self.geo, self.plo, self.lmt)
+
+    def init_modifiables(self):
+        # save/load parameters to/from file
+        self.init_par()
+        
+        # experimental darkmode?
+        if self.plo.darkmode:
+            self.init_darkmode()
+        
+        # set window color
+        pg.setConfigOptions(background=self.plo.plot_bg_color, antialias=True)
+
+        # generate contour levels
+        self.cont_geom_num = np.linspace(self.plo.conic_tth_min, self.plo.conic_tth_max, self.plo.conic_tth_num)
+
+        # translate unit for plot title
+        self.geo.unit_names = ['2\U0001D6F3 [\u00B0]', 'd [\u212B\u207B\u00B9]', 'q [\u212B]', 'sin(\U0001D6F3)/\U0001D706 [\u212B]']
+        if self.geo.unit >= len(self.geo.unit_names):
+            print(f'Error: Valid geo.unit range is from 0 to {len(self.geo.unit_names)-1}, geo.unit={self.geo.unit}')
+            raise SystemExit
+
+        # get colormap
+        self.cont_cmap = pg.colormap.get(self.plo.conic_colormap, skipCache=True)
+        
+        # reverse the colormap useful to increase visibility in darkmode
+        if self.plo.reverse_cmap:
+            self.cont_cmap.reverse()
+        
+        # What standards should be available as reference
+        # The d spacings will be imported from pyFAI
+        self.geo.ref_library = calibrant.names()
+        # dict to store custom reference data
+        self.geo.ref_custom = {}
+        self.geo.ref_custom_hkl = {}
+        
+        # get the detector specs
+        # - update: overwrite existing file after load
+        # - reset: overwrite existing file with defaults
+        self.detectors = self.get_det_library(update=self.plo.update_det_bank, reset=self.plo.reset_det_bank)
+
+        # pick current detector
+        self.det = self.get_specs_det(self.detectors, self.geo.det_type, self.geo.det_size)
+
+        # init the hkl tooltip
+        font = QtGui.QFont()
+        font.setPixelSize(self.plo.conic_hkl_label_size)
+        font.setBold(True)
+        QtWidgets.QToolTip.setFont(font)
 
     def init_darkmode(self):
         # set window color
@@ -268,6 +273,35 @@ class MainWindow(QtWidgets.QMainWindow):
             group_unit.addAction(unit_action)
             if unit_index == self.geo.unit:
                 unit_action.setChecked(True)
+        
+        # menu Settings
+        menu_edit = menuBar.addMenu('Settings')
+        if sys.platform == 'win32':
+            tokens = [('Edit Settings', os.system, f'notepad {self.path_settings}'),
+                      ('Edit Detector db', os.system, f'notepad {self.path_detdb}'),
+                      ('Apply Changes', self.apply_settings, None)]
+        elif sys.platform == 'linux':
+            tokens = [('Edit Settings', os.system, f'xdg-open {self.path_settings}'),
+                      ('Edit Detector db', os.system, f'xdg-open {self.path_detdb}'),
+                      ('Apply Changes', self.apply_settings, None)]
+        else:
+            tokens = [('Edit Settings', os.system, f'open -t {self.path_settings}'),
+                      ('Edit Detector db', os.system, f'open -t {self.path_detdb}'),
+                      ('Apply Changes', self.apply_settings, None)]
+        for (name, funct, command) in tokens:
+            edit_action = QtGui.QAction(name, self)
+            self.set_menu_action(edit_action, funct, command)
+            menu_edit.addAction(edit_action)
+    
+    def apply_settings(self, token):
+        # apply changes
+        self.init_modifiables()
+        # clear the screen
+        self.ax.clear()
+        # re-initialise
+        self.init_screen()
+        # center the slider frame
+        self.sliderWidget.center_frame()
 
     def add_unit_label(self):
         font = QtGui.QFont()
@@ -311,15 +345,19 @@ class MainWindow(QtWidgets.QMainWindow):
             self.setWindowTitle(f'{self.det.name} - {self.geo.reference}')
 
     def change_detector(self, det_name, det_size):
+        # get new detector specs
         self.det = self.get_specs_det(self.detectors, det_name, det_size)
+        # clear the screen
         self.ax.clear()
+        # re-initialise
         self.init_screen()
+        # center the slider frame
         self.sliderWidget.center_frame()
 
     def change_units(self, unit_index):
         self.geo.unit = unit_index
         self.unit_label.setText(self.geo.unit_names[unit_index])
-        self.draw_contours()
+        self.draw_conics()
 
     def change_reference(self, ref_name):
         self.geo.reference = ref_name
@@ -627,17 +665,16 @@ class MainWindow(QtWidgets.QMainWindow):
             }
         
         # make file dump
-        det_db = os.path.join(self.path, 'detector_db.json')
-        if not os.path.exists(det_db) or reset:
-            with open(det_db, 'w') as wf:
+        if not os.path.exists(self.path_detdb) or reset:
+            with open(self.path_detdb, 'w') as wf:
                 json.dump(detectors, wf, indent=4)
         else:
-            with open(det_db, 'r') as of:
+            with open(self.path_detdb, 'r') as of:
                 for key, vals in json.load(of).items():
                     detectors[key] = vals
         
         if update:
-            with open(det_db, 'w') as wf:
+            with open(self.path_detdb, 'w') as wf:
                 json.dump(detectors, wf, indent=4)
         
         return detectors
@@ -671,7 +708,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 rect_item.setOpacity(self.plo.det_module_alpha)
                 self.ax.addItem(rect_item)
 
-    def draw_contours(self):
+    def draw_conics(self):
         # calculate the offset of the contours resulting from yoff and rotation
         # shift the grid to draw the cones, to make sure the contours are drawn
         # within the visible area
@@ -898,7 +935,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.geo.ener = float(val)
 
         # re-calculate cones and re-draw contours
-        self.draw_contours()
+        self.draw_conics()
         # draw reference contours
         if self.geo.reference != 'None':
             self.get_reference()
@@ -924,7 +961,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.get_defaults()
         # file name to store current settings
         # if file_dump doesn't exists, make a dump
-        if not os.path.exists(self.file_dump):
+        if not os.path.exists(self.path_settings):
             self.save_par()
         # if it exists load parameters
         else:
@@ -940,12 +977,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def save_par(self):
         # Writing geo as dict to file
-        with open(self.file_dump, 'w') as wf:
+        with open(self.path_settings, 'w') as wf:
             json.dump({'geo':self.geo.__dict__, 'plo':self.plo.__dict__, 'lmt':self.lmt.__dict__}, wf, indent=4)
 
     def load_par(self):
         # Opening JSON file as dict
-        with open(self.file_dump, 'r') as of:
+        with open(self.path_settings, 'r') as of:
             pars = json.load(of)
         conv = {'geo':self.geo, 'plo':self.plo, 'lmt':self.lmt}
         for key, vals in pars.items():
