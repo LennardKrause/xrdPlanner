@@ -1,0 +1,17 @@
+[project]
+name = "xrdPlanner"
+version = "2023.06.21"
+authors = [
+  { name="Lennard Krause", email="lennard.krause@chem.au.dk" },
+]
+description = "A tool to project X-ray diffraction cones on a detector screen at different geometries (tilt, rotation, offset) and X-ray energies"
+readme = "README.md"
+requires-python = ">=3.7"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License (GPL)",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/LennardKrause/xrdPlanner"
