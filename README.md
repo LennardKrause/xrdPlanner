@@ -19,6 +19,13 @@
  - Edit the _settings.json_ file to suit your needs.
  - Add all the missing detectors to the _detectors.json_ file.
 
+## Customisation:
+  - Edit the _settings.json_ file and the _detector_db.json_ files located in the _path/to/python/**lib/site-packages/xrdPlanner/**_ folder.
+  - _"geo"_ determines the startup defaults.
+  - _"plo"_ customises the general layout and visuals.
+  - _"lmt"_ sets the limiting values of the geometry/energy sliders.
+  - I hope the variable naming is self-explanatory.
+
 ## Latest updates:
   - 2023-06-14 Update: Big speed update.
   - 2023-06-01 Update: countourpy was dropped, the conics are now calculated directly instead of being evaluated on a grid.
