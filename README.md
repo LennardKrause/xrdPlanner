@@ -16,17 +16,20 @@
  - Use the units from the _Units_ menu you are the most comfortable with.
  - Hover over the grey line at the top to show the sliders. Click it to make it stay open.
  - Drag the sliders to change energy and geometry.
- - Edit the _settings.json_ file to suit your needs.
- - Add all the missing detectors to the _detector_db.json_ file.
+ - Edit the _settings.json_ file to suit your needs (from _Settings_ menu).
+ - Add all the missing detectors to the _detector_db.json_ file (from _Settings_ menu).
 
 ## Customisation:
-  - Edit the _settings.json_ file and the _detector_db.json_ files located in the _path/to/python/**lib/site-packages/xrdPlanner/**_ folder.
+  - Edit the _settings.json_ file and the _detector_db.json_ files.
+  - Use _Settings_ -> _Edit Settings_ or _Edit Detector db_.
+  - _Apply Settings_ lets you see the changes.
   - _"geo"_ determines the startup defaults.
   - _"plo"_ customises the general layout and visuals.
   - _"lmt"_ sets the limiting values of the geometry/energy sliders.
   - I hope the variable naming is self-explanatory.
 
 ## Latest updates:
+  - 2023-06-21 Update: Settings files accessible from menu, changes can be applied on the fly.
   - 2023-06-14 Update: Big speed update.
   - 2023-06-01 Update: countourpy was dropped, the conics are now calculated directly instead of being evaluated on a grid.
   - 2023-05-25 Update: Dans_Diffraction is used in favour of gemmi as it allows the direct calculation of intensities from the cif.
