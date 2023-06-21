@@ -5,7 +5,7 @@
  - Can turn out valuable when planning beamtimes at synchrotron facilities (e.g. [DanMAX](https://www.maxiv.lu.se/beamlines-accelerators/beamlines/danmax/)).
  - Helps in deciding on the geometry of an experiment.
  - The math used is not meant to bring people to the moon but to provide a quick and simple preview.
- - The module building code is designed for [Dectris](https://www.dectris.com) [PILATUS3](https://www.dectris.com/detectors/x-ray-detectors/pilatus3/) / [EIGER2](https://www.dectris.com/detectors/x-ray-detectors/eiger2/) and [SACLA](https://sacla.xfel.jp/?lang=en) MPCCD Detectors (central hole geometry) but one-module systems like the [Bruker](https://www.bruker.com/en.html) [Photon II](https://www.bruker.com/en/products-and-solutions/diffractometers-and-scattering-systems/single-crystal-x-ray-diffractometers/sc-xrd-components/detectors.html) are possible as well.
+ - The module building code is designed for [Dectris](https://www.dectris.com) [PILATUS3](https://www.dectris.com/detectors/x-ray-detectors/pilatus3/) / [EIGER2](https://www.dectris.com/detectors/x-ray-detectors/eiger2/) and [SACLA](https://sacla.xfel.jp/?lang=en) MPCCD Detectors (central hole geometry) but one-module systems like the [Bruker](https://www.bruker.com/en.html) [Photon II](https://www.bruker.com/en/products-and-solutions/diffractometers-and-scattering-systems/single-crystal-x-ray-diffractometers/sc-xrd-components/detectors.html) and [Rayonix](https://www.rayonix.com/) [MX-HS](https://www.rayonix.com/rayonix-mx-hs-series/) are possible as well.
  - It uses [python3](https://www.python.org), [numpy](https://numpy.org), [pyqt6](https://www.riverbankcomputing.com/software/pyqt/), [pyqtgraph](https://pyqtgraph.readthedocs.io/en/latest/), [pyFAI](https://pyfai.readthedocs.io/en/v2023.1/) and [Dans_Diffraction](https://github.com/DanPorter/Dans_Diffraction).
 
 ## Short how-to:
@@ -21,7 +21,7 @@
 ## Customisation:
   - Edit the _settings.json_ file and the _detector_db.json_ files.
   - Use _Settings_ -> _Edit Settings_ or _Edit Detector db_.
-  - _Apply Changes_ lets you see the changes.
+  - A click on _Apply Changes_ lets you see the difference.
   - _"geo"_ determines the startup defaults.
   - _"plo"_ customises the general layout and visuals.
   - _"lmt"_ sets the limiting values of the geometry/energy sliders.
@@ -49,7 +49,6 @@
   - 2022-04-28 Update: Changed contour line generation to accept a list of 2-theta values as input.
   - 2022-04-27 Update: Added support for [SACLA](https://sacla.xfel.jp/?lang=en) MPCCD Detectors (central hole geometry).
   - 2022-04-25 Bugfix: Calculation of the beamcenter (rotation and tilt).
-  - 2022-04-25 Bugfix: Unresponsive radio buttons / redrawing the figure.
 
 ## Examples
 #### A PILATUS3 2M detector and a Silicon sample.
