@@ -8,6 +8,7 @@
  - It uses [python3](https://www.python.org), [numpy](https://numpy.org), [pyqt6](https://www.riverbankcomputing.com/software/pyqt/), [pyqtgraph](https://pyqtgraph.readthedocs.io/en/latest/), [pyFAI](https://pyfai.readthedocs.io/en/v2023.1/) and [Dans_Diffraction](https://github.com/DanPorter/Dans_Diffraction).
 
 ## Short how-to:
+ - pip install xrdPlanner.
  - Type _xrdPlanner_ in a terminal and hit enter.
  - Choose a detector and a model from the _Detector_ menu.
  - Pick a reference from the _Reference_ menu to plot its contours ([pyFAI](https://pyfai.readthedocs.io/en/v2023.1/)).
