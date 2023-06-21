@@ -17,7 +17,7 @@
  - Hover over the grey line at the top to show the sliders. Click it to make it stay open.
  - Drag the sliders to change energy and geometry.
  - Edit the _settings.json_ file to suit your needs.
- - Add all the missing detectors to the _detectors.json_ file.
+ - Add all the missing detectors to the _detector_db.json_ file.
 
 ## Customisation:
   - Edit the _settings.json_ file and the _detector_db.json_ files located in the _path/to/python/**lib/site-packages/xrdPlanner/**_ folder.
