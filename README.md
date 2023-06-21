@@ -28,6 +28,9 @@
   - Add all the missing detectors to the _detector_db.json_.
   - I hope the variable naming is self-explanatory.
 
+## Known Bugs:
+  - Current menu checkmark is not updated/reset when applying changes.
+
 ## Latest updates:
   - 2023-06-21 Update: Settings files accessible from menu, changes can be applied on the fly.
   - 2023-06-14 Update: Big speed update.
