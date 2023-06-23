@@ -15,6 +15,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.path = os.path.dirname(__file__)
         # add an icon
         self.setWindowIcon(QtGui.QIcon(':/icons/xrdPlanner.png'))
+        # enable antialiasing
+        pg.setConfigOptions(antialias=True)
 
         # Drag-and-Drop cif-file
         #  dropEvent()
@@ -29,10 +31,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # set path to detector database
         self.path_detdb = os.path.join(self.path, 'detector_db.json')
 
-        # initialise all that depends on the settings
-        # call this function to apply changes were made
-        # to the settings file -> apply_settings()
-        self.init_modifiables()
+        # save/load parameters to/from file
+        self.init_par()
 
         # menubar is displayed within the main window on Windows
         # so we need to make space for it
@@ -64,6 +64,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ax.viewport().setAttribute(QtCore.Qt.WidgetAttribute.WA_AcceptTouchEvents, False)
         self.layout.addWidget(self.ax)
 
+        # initialise all that depends on the settings
+        # call this function to apply changes were made
+        # to the settings file -> change_settings()
+        self.init_modifiables()
+        
         # populate the menus with detectors, references and units
         self.init_menus()
         
@@ -74,26 +79,23 @@ class MainWindow(QtWidgets.QMainWindow):
         # this calls draw_conics(), 
         # make sure that everything
         # that is needed is initialised
-        self.sliderWidget = SliderWidget(self, self.geo, self.plo, self.lmt)
+        self.sliderWidget = SliderWidget(self)
 
     def init_modifiables(self):
-        # save/load parameters to/from file
-        self.init_par()
-        
         # experimental darkmode?
         if self.plo.darkmode:
             self.init_darkmode()
         
         # set window color
-        pg.setConfigOptions(background=self.plo.plot_bg_color, antialias=True)
+        self.ax.setBackground(self.plo.plot_bg_color)
 
         # generate contour levels
         self.cont_geom_num = np.linspace(self.plo.conic_tth_min, self.plo.conic_tth_max, self.plo.conic_tth_num)
 
         # translate unit for plot title
-        self.geo.unit_names = ['2\U0001D6F3 [\u00B0]', 'd [\u212B\u207B\u00B9]', 'q [\u212B]', 'sin(\U0001D6F3)/\U0001D706 [\u212B]']
-        if self.geo.unit >= len(self.geo.unit_names):
-            print(f'Error: Valid geo.unit range is from 0 to {len(self.geo.unit_names)-1}, geo.unit={self.geo.unit}')
+        self.unit_names = ['2\U0001D6F3 [\u00B0]', 'd [\u212B\u207B\u00B9]', 'q [\u212B]', 'sin(\U0001D6F3)/\U0001D706 [\u212B]']
+        if self.geo.unit >= len(self.unit_names):
+            print(f'Error: Valid geo.unit range is from 0 to {len(self.unit_names)-1}, geo.unit={self.geo.unit}')
             raise SystemExit
 
         # get colormap
@@ -105,18 +107,18 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # What standards should be available as reference
         # The d spacings will be imported from pyFAI
-        self.geo.ref_library = calibrant.names()
+        self.ref_library = calibrant.names()
         # dict to store custom reference data
-        self.geo.ref_custom = {}
-        self.geo.ref_custom_hkl = {}
+        self.ref_custom = {}
+        self.ref_custom_hkl = {}
         
         # get the detector specs
         # - update: overwrite existing file after load
         # - reset: overwrite existing file with defaults
-        self.detectors = self.get_det_library(update=self.plo.update_det_bank, reset=self.plo.reset_det_bank)
+        self.detector_db = self.get_det_library(update=self.plo.update_det_bank, reset=self.plo.reset_det_bank)
 
         # pick current detector
-        self.det = self.get_specs_det(self.detectors, self.geo.det_type, self.geo.det_size)
+        self.det = self.get_specs_det()
 
         # init the hkl tooltip
         font = QtGui.QFont()
@@ -219,12 +221,11 @@ class MainWindow(QtWidgets.QMainWindow):
         group_det.setExclusive(True)
 
         # menu Detectors
-        for d in self.detectors:
+        for d in self.detector_db:
             d = d.upper()
             d_menu = QtWidgets.QMenu(d, self)
-            d_menu.setStatusTip('')
             menu_det.addMenu(d_menu)
-            for s in self.detectors[d]['size']:
+            for s in self.detector_db[d]['size']:
                 s = s.upper()
                 det_action = QtGui.QAction(s, self, checkable=True)
                 self.set_menu_action(det_action, self.change_detector, d, s)
@@ -249,7 +250,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sub_menu_pyFAI = QtWidgets.QMenu('pyFAI', self)
         self.sub_menu_pyFAI.setStatusTip('')
         self.menu_ref.addMenu(self.sub_menu_pyFAI)
-        for ref_name in self.geo.ref_library:
+        for ref_name in self.ref_library:
             ref_action = QtGui.QAction(ref_name, self, checkable=True)
             self.set_menu_action(ref_action, self.change_reference, ref_name)
             self.sub_menu_pyFAI.addAction(ref_action)
@@ -263,10 +264,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.menu_ref.addMenu(self.sub_menu_custom)
         
         # menu Units
-        menu_unit = menuBar.addMenu('Units')
+        menu_unit = menuBar.addMenu('Unit')
         group_unit = QtGui.QActionGroup(self)
         group_unit.setExclusive(True)
-        for unit_index, unit_name in enumerate(self.geo.unit_names):
+        for unit_index, unit_name in enumerate(self.unit_names):
             unit_action = QtGui.QAction(unit_name, self, checkable=True)
             self.set_menu_action(unit_action, self.change_units, unit_index)
             menu_unit.addAction(unit_action)
@@ -277,52 +278,56 @@ class MainWindow(QtWidgets.QMainWindow):
         # menu Settings
         menu_edit = menuBar.addMenu('Settings')
         if sys.platform == 'win32':
-            tokens = [('Edit Settings', os.system, f'notepad {self.path_settings}'),
-                      ('Edit Detector db', os.system, f'notepad {self.path_detdb}'),
-                      ('Apply Changes', self.apply_settings, None)]
+            tokens = [('Edit Detector db file', os.system, f'notepad {self.path_detdb}'),
+                      ('Edit Settings file', os.system, f'notepad {self.path_settings}'),
+                      ('Reload Settings', self.change_settings, None)]
         elif sys.platform == 'linux':
-            tokens = [('Edit Settings', os.system, f'xdg-open {self.path_settings}'),
-                      ('Edit Detector db', os.system, f'xdg-open {self.path_detdb}'),
-                      ('Apply Changes', self.apply_settings, None)]
+            tokens = [('Edit Detector db', os.system, f'xdg-open {self.path_detdb}'),
+                      ('Edit Settings', os.system, f'xdg-open {self.path_settings}'),
+                      ('Reload Settings', self.change_settings, None)]
         else:
-            tokens = [('Edit Settings', os.system, f'open -t {self.path_settings}'),
-                      ('Edit Detector db', os.system, f'open -t {self.path_detdb}'),
-                      ('Apply Changes', self.apply_settings, None)]
+            tokens = [('Edit Detector db', os.system, f'open -t {self.path_detdb}'),
+                      ('Edit Settings', os.system, f'open -t {self.path_settings}'),
+                      ('Reload Settings', self.change_settings, None)]
         for (name, funct, command) in tokens:
             edit_action = QtGui.QAction(name, self)
-            self.set_menu_action(edit_action, funct, command)
+            if command:
+                self.set_menu_action(edit_action, funct, command)
+            else:
+                self.set_menu_action(edit_action, funct)
             menu_edit.addAction(edit_action)
+        
+        # menu Default
+        # save new default values
+        menu_edit.addSeparator()
+        menu_default = menu_edit.addMenu('Defaults')
+        default_action = QtGui.QAction('Save current settings', self)
+        self.set_menu_action(default_action, self.save_par)
+        menu_default.addAction(default_action)
+        default_action = QtGui.QAction('Reset default settings', self)
+        self.set_menu_action(default_action, self.reset_to_default)
+        menu_default.addAction(default_action)
     
-    def apply_settings(self, token):
-        # apply changes
-        self.init_modifiables()
-        # clear the screen
-        self.ax.clear()
-        # re-initialise
-        self.init_screen()
-        # center the slider frame
-        self.sliderWidget.center_frame()
-
     def add_unit_label(self):
         font = QtGui.QFont()
         font.setPixelSize(self.plo.unit_label_size)
         self.unit_label = pg.TextItem(anchor=(0.0,0.0), color=self.plo.unit_label_color, fill=self.plo.unit_label_fill)
-        self.unit_label.setText(self.geo.unit_names[self.geo.unit])
+        self.unit_label.setText(self.unit_names[self.geo.unit])
         self.unit_label.setFont(font)
         self.ax.addItem(self.unit_label)
-        self.unit_label.setPos(-self.plo.xdim, self.plo.ydim)
+        self.unit_label.setPos(-self.xdim, self.ydim)
 
     def resize_window(self):
         # figure out proper plot dimensions
-        self.plo.xdim = (self.det.hms * self.det.hmn + self.det.pxs * self.det.hgp * self.det.hmn + self.det.cbh)/2
-        self.plo.ydim = (self.det.vms * self.det.vmn + self.det.pxs * self.det.vgp * self.det.vmn + self.det.cbh)/2
+        self.xdim = (self.det.hms * self.det.hmn + self.det.pxs * self.det.hgp * self.det.hmn + self.det.cbh)/2
+        self.ydim = (self.det.vms * self.det.vmn + self.det.pxs * self.det.vgp * self.det.vmn + self.det.cbh)/2
         
         # limit the axis x and y
-        self.ax.setXRange(-self.plo.xdim, self.plo.xdim, padding=0, update=True)
-        self.ax.setYRange(-self.plo.ydim, self.plo.ydim, padding=0, update=True)
+        self.ax.setXRange(-self.xdim, self.xdim, padding=0, update=True)
+        self.ax.setYRange(-self.ydim, self.ydim, padding=0, update=True)
 
         # get proper dimensions
-        width = int(np.ceil(self.plo.plot_size * self.plo.xdim / self.plo.ydim))
+        width = int(np.ceil(self.plo.plot_size * self.xdim / self.ydim))
         height = self.plo.plot_size + self.plo.slider_margin//2 + self.offset_win32
 
         # fix the window size
@@ -344,9 +349,24 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.setWindowTitle(f'{self.det.name} - {self.geo.reference}')
 
+    def change_settings(self):
+        # apply changes
+        self.load_par(skip=['geo'])
+        self.init_modifiables()
+        # clear the screen
+        self.ax.clear()
+        # re-initialise
+        self.init_screen()
+        # center the slider frame
+        self.sliderWidget.apply_style()
+        self.sliderWidget.update_sliders()
+        self.sliderWidget.center_frame()
+
     def change_detector(self, det_name, det_size):
+        self.geo.det_type = det_name
+        self.geo.det_size = det_size
         # get new detector specs
-        self.det = self.get_specs_det(self.detectors, det_name, det_size)
+        self.det = self.get_specs_det()
         # clear the screen
         self.ax.clear()
         # re-initialise
@@ -356,7 +376,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def change_units(self, unit_index):
         self.geo.unit = unit_index
-        self.unit_label.setText(self.geo.unit_names[unit_index])
+        self.unit_label.setText(self.unit_names[unit_index])
         self.draw_conics()
 
     def change_reference(self, ref_name):
@@ -379,18 +399,18 @@ class MainWindow(QtWidgets.QMainWindow):
         # pick the strongest
         ordered = ordered[:self.plo.conic_ref_num]
         # assign dspacing
-        self.plo.cont_ref_dsp = ordered[:,3]
+        self.cont_ref_dsp = ordered[:,3]
         # hkl -> integer
         # cast hkl array to list of tuples (for easy display)
         hkl = ordered[:,:3].astype(int)
         if self.plo.conic_hkl_show_int:
-            self.plo.cont_ref_hkl = list(zip(hkl[:,0], hkl[:,1], hkl[:,2], ordered[:,4].astype(int)))
+            self.cont_ref_hkl = list(zip(hkl[:,0], hkl[:,1], hkl[:,2], ordered[:,4].astype(int)))
         else:
-            self.plo.cont_ref_hkl = list(zip(hkl[:,0], hkl[:,1], hkl[:,2]))
+            self.cont_ref_hkl = list(zip(hkl[:,0], hkl[:,1], hkl[:,2]))
 
         self.geo.reference = os.path.basename(fpath)
-        self.geo.ref_custom[self.geo.reference] = self.plo.cont_ref_dsp
-        self.geo.ref_custom_hkl[self.geo.reference] = self.plo.cont_ref_hkl
+        self.ref_custom[self.geo.reference] = self.cont_ref_dsp
+        self.ref_custom_hkl[self.geo.reference] = self.cont_ref_hkl
 
         ref_action = QtGui.QAction(self.geo.reference, self, checkable=True)
         self.set_menu_action(ref_action, self.change_reference, self.geo.reference)
@@ -404,18 +424,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.draw_reference()
 
     def get_reference(self):
-        if self.geo.reference in self.geo.ref_library:
+        if self.geo.reference in self.ref_library:
             # get the d spacings for the calibrtant from pyFAI
-            self.plo.cont_ref_dsp = np.array(calibrant.get_calibrant(self.geo.reference).get_dSpacing()[:self.plo.conic_ref_num])
-            self.plo.cont_ref_hkl = None
-        elif self.geo.reference in self.geo.ref_custom:
+            self.cont_ref_dsp = np.array(calibrant.get_calibrant(self.geo.reference).get_dSpacing()[:self.plo.conic_ref_num])
+            self.cont_ref_hkl = None
+        elif self.geo.reference in self.ref_custom:
             # get custom d spacings
-            self.plo.cont_ref_dsp = self.geo.ref_custom[self.geo.reference]
-            self.plo.cont_ref_hkl = self.geo.ref_custom_hkl[self.geo.reference]
+            self.cont_ref_dsp = self.ref_custom[self.geo.reference]
+            self.cont_ref_hkl = self.ref_custom_hkl[self.geo.reference]
         else:
             # set all d-spacings to -1
-            self.plo.cont_ref_dsp = np.zeros(self.plo.conic_ref_num)
-            self.plo.cont_ref_hkl = None
+            self.cont_ref_dsp = np.zeros(self.plo.conic_ref_num)
+            self.cont_ref_hkl = None
         # update window title
         self.set_window_title()
 
@@ -452,13 +472,13 @@ class MainWindow(QtWidgets.QMainWindow):
         plo.conic_tth_num = 30              # [int]    Number of contour lines
         plo.beamcenter_marker = 'o'         # [marker] Beam center marker
         plo.beamcenter_size = 6             # [int]    Beam center size
-        plo.conic_linewidth = 3.0           # [float]  Contour linewidth
+        plo.conic_linewidth = 4.0           # [float]  Contour linewidth
         plo.conic_label_size = 14           # [int]    Contour label size
         plo.conic_label_fill = '#FFFFFF'    # [str]    Contour label fill color
         plo.conic_colormap = 'viridis'      # [cmap]   Contour colormap
         # - reference contour section - 
         plo.conic_ref_color = '#DCDCDC'     # [color]  Reference contour color
-        plo.conic_ref_linewidth = 12.0      # [float]  Reference contour linewidth
+        plo.conic_ref_linewidth = 8.0       # [float]  Reference contour linewidth
         plo.conic_ref_num = 100             # [int]    Number of reference contours
         plo.conic_ref_min_int = 0.01        # [int]    Minimum display intensity (cif)
         plo.conic_hkl_label_size = 14       # [int]    Font size of hkl tooltip
@@ -539,28 +559,28 @@ class MainWindow(QtWidgets.QMainWindow):
         # lmt: geometry limits
         self.lmt = self.get_specs_lmt()
 
-    def get_specs_det(self, detectors, det_type, det_size):
-        det_type = det_type.upper()
-        det_size = det_size.upper()
+    def get_specs_det(self):
+        det_type = self.geo.det_type.upper()
+        det_size = self.geo.det_size.upper()
 
-        if det_type not in detectors.keys():
+        if det_type not in self.detector_db.keys():
             print(f'Unknown detector type: {det_type}')
-            print(f'Current databank entries: {", ".join(detectors.keys())}.')
+            print(f'Current databank entries: {", ".join(self.detector_db.keys())}.')
             raise SystemExit
         
-        if det_size not in detectors[det_type]['size'].keys():
+        if det_size not in self.detector_db[det_type]['size'].keys():
             print(f'Unknown detector type/size combination: {det_type}/{det_size}')
-            print(f'Current {det_type} databank sizes: {", ".join(detectors[det_type]["size"].keys())}.')
+            print(f'Current {det_type} databank sizes: {", ".join(self.detector_db[det_type]["size"].keys())}.')
             raise SystemExit
         
         det = container()
-        det.hms = detectors[det_type]['hms']
-        det.vms = detectors[det_type]['vms']
-        det.pxs = detectors[det_type]['pxs']
-        det.hgp = detectors[det_type]['hgp']
-        det.vgp = detectors[det_type]['vgp']
-        det.cbh = detectors[det_type]['cbh']
-        det.hmn, det.vmn = detectors[det_type]['size'][det_size]
+        det.hms = self.detector_db[det_type]['hms']
+        det.vms = self.detector_db[det_type]['vms']
+        det.pxs = self.detector_db[det_type]['pxs']
+        det.hgp = self.detector_db[det_type]['hgp']
+        det.vgp = self.detector_db[det_type]['vgp']
+        det.cbh = self.detector_db[det_type]['cbh']
+        det.hmn, det.vmn = self.detector_db[det_type]['size'][det_size]
         det.name = f'{det_type} {det_size}'
 
         return det
@@ -763,8 +783,8 @@ class MainWindow(QtWidgets.QMainWindow):
         for _n in range(self.plo.conic_ref_num):
             self.patches['reference'][_n].setVisible(False)
             # number of d-spacings might be lower than the maximum number of allowed contours
-            if _n < len(self.plo.cont_ref_dsp):
-                _d = self.plo.cont_ref_dsp[_n]
+            if _n < len(self.cont_ref_dsp):
+                _d = self.cont_ref_dsp[_n]
                 # None adds a list of zeros
                 # catch those here
                 if _d <= 0:
@@ -797,8 +817,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 # if hkl are available
                 # put them in the proper container for the contour
                 # so indexing gets it right
-                if self.plo.cont_ref_hkl:
-                    self.patches['reference'][_n].name = self.plo.cont_ref_hkl[_n]
+                if self.cont_ref_hkl:
+                    self.patches['reference'][_n].name = self.cont_ref_hkl[_n]
                 else:
                     self.patches['reference'][_n].name = None
     
@@ -833,15 +853,15 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # add margin to slightly extend
         # conics outside of visible area
-        _xdim = self.plo.xdim * 1.05
-        _ydim = self.plo.ydim * 1.05
+        _xdim = self.xdim * 1.05
+        _ydim = self.ydim * 1.05
         # evaluate the eccentricity and parameterise
         # the resulting conic accordingly
         if abs(ecc) == 0:
             # circle
             h = (y1+y2)/2
             # check if the circle is visible
-            if h - np.sqrt(y0**2 + x0**2) > np.sqrt(self.plo.ydim**2 + self.plo.xdim**2):
+            if h - np.sqrt(y0**2 + x0**2) > np.sqrt(self.ydim**2 + self.xdim**2):
                 return False, False, False
             t = np.linspace(0, 2*np.pi, 2*steps)
             x = x0 + h * np.sin(t)
@@ -913,7 +933,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return x, y, label_pos
 
     def show_tooltip(self, widget, event):
-        if not widget.name or not self.plo.cont_ref_hkl:
+        if not widget.name or not self.cont_ref_hkl:
             return False
         pos = QtCore.QPoint(*map(int, event.screenPos()))# - QtCore.QPoint(10,20)
         QtWidgets.QToolTip.showText(pos, str(widget.name))
@@ -975,17 +995,27 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.plo.update_settings:
             self.save_par()
 
+    def reset_to_default(self):
+        # plo: plot details
+        self.plo = self.get_specs_plo()
+        # lmt: geometry limits
+        self.lmt = self.get_specs_lmt()
+        self.save_par()
+        self.change_settings()
+
     def save_par(self):
         # Writing geo as dict to file
         with open(self.path_settings, 'w') as wf:
             json.dump({'geo':self.geo.__dict__, 'plo':self.plo.__dict__, 'lmt':self.lmt.__dict__}, wf, indent=4)
 
-    def load_par(self):
+    def load_par(self, skip=[]):
         # Opening JSON file as dict
         with open(self.path_settings, 'r') as of:
             pars = json.load(of)
         conv = {'geo':self.geo, 'plo':self.plo, 'lmt':self.lmt}
         for key, vals in pars.items():
+            if key in skip:
+                continue
             for p, x in vals.items():
                 if p in conv[key].__dict__.keys():
                     setattr(conv[key], p, x)
@@ -996,79 +1026,115 @@ class container(object):
     pass
 
 class SliderWidget(QtWidgets.QFrame):
-    def __init__(self, parent, geo, plo, lmt):
+    def __init__(self, parent):
         super().__init__(parent)
-        layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        self.geo = geo
-        self.plo = plo
-        self.lmt = lmt
+        self.layout = QtWidgets.QVBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(0)
         self.leaveEvent = self.toggle_panel
         self.enterEvent = self.toggle_panel
-        frame = QtWidgets.QFrame()
-        frame.setContentsMargins(0, 0, 0, 0)
-        frame.setFixedHeight(self.plo.slider_margin)
-        layout.addWidget(frame)
-        frame.setStyleSheet(f'''
-            QFrame {{
-                border: {self.plo.slider_border_width}px solid {self.plo.slider_border_color};
-                border-radius: {self.plo.slider_border_radius}px;
-                background: {self.plo.slider_border_color};
-            }}
-        ''')
+        self.frame = QtWidgets.QFrame()
+        self.frame.setContentsMargins(0, 0, 0, 0)
+        self.frame.setFixedHeight(self.parent().plo.slider_margin)
+        self.layout.addWidget(self.frame)
         self.box = QtWidgets.QFrame()
         self.box.setContentsMargins(0, 5, 0, 5)
-        self.box.setStyleSheet(f'''
-            QFrame {{
-                border: {self.plo.slider_border_width}px solid {self.plo.slider_border_color};
-                border-radius: {self.plo.slider_border_radius}px;
-                background: {self.plo.slider_bg_color};
-            }}
-            QFrame:hover {{
-                background: {self.plo.slider_bg_hover};
-            }}
-        ''')
-        layout.addWidget(self.box)
+        self.layout.addWidget(self.box)
         self.box.setHidden(True)
         self.box_toggle = False
-        self.box_width_dynamic = 0
         self.box_height_show = int(np.ceil(parent.size().height()/3))
-        self.box_height_hide = int(np.ceil(frame.size().height()))
+        self.box_height_hide = int(np.ceil(self.frame.size().height()))
 
-        grid = QtWidgets.QGridLayout()
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setRowStretch(1,10)
-        self.box.setLayout(grid)
-        
-        _idx = 0
-        if plo.enable_slider_ener:
-            self.add_slider(grid, 'Energy\n[keV]', 'ener', _idx, self.geo.ener, lmt.ener_min, lmt.ener_max, lmt.ener_stp)
-            self.box_width_dynamic += self.plo.slider_column_width
-            _idx += 1
-        if plo.enable_slider_dist:
-            self.add_slider(grid, 'Distance\n[mm]', 'dist', _idx, self.geo.dist, lmt.dist_min, lmt.dist_max, lmt.dist_stp)
-            self.box_width_dynamic += self.plo.slider_column_width
-            _idx += 1
-        if plo.enable_slider_yoff:
-            self.add_slider(grid, 'Y offset\n[mm]', 'yoff', _idx, self.geo.yoff, lmt.yoff_min, lmt.yoff_max, lmt.yoff_stp)
-            self.box_width_dynamic += self.plo.slider_column_width
-            _idx += 1
-        if plo.enable_slider_xoff:
-            self.add_slider(grid, 'X offset\n[mm]', 'xoff', _idx, self.geo.xoff, lmt.xoff_min, lmt.xoff_max, lmt.xoff_stp)
-            self.box_width_dynamic += self.plo.slider_column_width
-            _idx += 1
-        if plo.enable_slider_tilt:
-            self.add_slider(grid, 'Tilt\n[˚]', 'tilt', _idx, self.geo.tilt, lmt.tilt_min, lmt.tilt_max, lmt.tilt_stp)
-            self.box_width_dynamic += self.plo.slider_column_width
-            _idx += 1
-        if plo.enable_slider_rota:
-            self.add_slider(grid, 'Rotation\n[˚]', 'rota', _idx, self.geo.rota, lmt.rota_min, lmt.rota_max, lmt.rota_stp)
-            self.box_width_dynamic += self.plo.slider_column_width
-            _idx += 1
-        
-        self.resize(self.box_width_dynamic, self.box_height_hide)
+        self.grid = QtWidgets.QGridLayout()
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setRowStretch(1,10)
+        self.box.setLayout(self.grid)
+
+        self.apply_style()
+        self.update_sliders()
         self.center_frame()
+
+    def apply_style(self):
+        self.box.setStyleSheet(f'''
+            QFrame {{
+                border: {self.parent().plo.slider_border_width}px solid {self.parent().plo.slider_border_color};
+                border-radius: {self.parent().plo.slider_border_radius}px;
+                background: {self.parent().plo.slider_bg_color};
+            }}
+            QFrame:hover {{
+                background: {self.parent().plo.slider_bg_hover};
+            }}
+        ''')
+        self.frame.setStyleSheet(f'''
+            QFrame {{
+                border: {self.parent().plo.slider_border_width}px solid {self.parent().plo.slider_border_color};
+                border-radius: {self.parent().plo.slider_border_radius}px;
+                background: {self.parent().plo.slider_border_color};
+            }}
+        ''')
+
+    def update_sliders(self):
+        # remove sliders and labels
+        for i in reversed(range(self.grid.count())): 
+            self.grid.itemAt(i).widget().deleteLater()
+        # add new set of sliders with updated values
+        _idx = 0
+        self.box_width_dynamic = 0
+        if self.parent().plo.enable_slider_ener:
+            self.sl_ener = self.add_slider(self.grid,
+                                           'Energy\n[keV]','ener', _idx,
+                                           self.parent().geo.ener,
+                                           self.parent().lmt.ener_min,
+                                           self.parent().lmt.ener_max,
+                                           self.parent().lmt.ener_stp)
+            self.box_width_dynamic += self.parent().plo.slider_column_width
+            _idx += 1
+        if self.parent().plo.enable_slider_dist:
+            self.sl_dist = self.add_slider(self.grid,
+                                           'Distance\n[mm]', 'dist', _idx,
+                                           self.parent().geo.dist,
+                                           self.parent().lmt.dist_min,
+                                           self.parent().lmt.dist_max,
+                                           self.parent().lmt.dist_stp)
+            self.box_width_dynamic += self.parent().plo.slider_column_width
+            _idx += 1
+        if self.parent().plo.enable_slider_yoff:
+            self.sl_yoff = self.add_slider(self.grid,
+                                           'Y offset\n[mm]', 'yoff', _idx,
+                                           self.parent().geo.yoff,
+                                           self.parent().lmt.yoff_min,
+                                           self.parent().lmt.yoff_max,
+                                           self.parent().lmt.yoff_stp)
+            self.box_width_dynamic += self.parent().plo.slider_column_width
+            _idx += 1
+        if self.parent().plo.enable_slider_xoff:
+            self.sl_xoff = self.add_slider(self.grid,
+                                           'X offset\n[mm]', 'xoff', _idx,
+                                           self.parent().geo.xoff,
+                                           self.parent().lmt.xoff_min,
+                                           self.parent().lmt.xoff_max,
+                                           self.parent().lmt.xoff_stp)
+            self.box_width_dynamic += self.parent().plo.slider_column_width
+            _idx += 1
+        if self.parent().plo.enable_slider_tilt:
+            self.sl_tilt = self.add_slider(self.grid,
+                                           'Tilt\n[˚]', 'tilt', _idx,
+                                           self.parent().geo.tilt,
+                                           self.parent().lmt.tilt_min,
+                                           self.parent().lmt.tilt_max,
+                                           self.parent().lmt.tilt_stp)
+            self.box_width_dynamic += self.parent().plo.slider_column_width
+            _idx += 1
+        if self.parent().plo.enable_slider_rota:
+            self.sl_rota = self.add_slider(self.grid,
+                                           'Rotation\n[˚]', 'rota', _idx,
+                                           self.parent().geo.rota,
+                                           self.parent().lmt.rota_min,
+                                           self.parent().lmt.rota_max,
+                                           self.parent().lmt.rota_stp)
+            self.box_width_dynamic += self.parent().plo.slider_column_width
+            _idx += 1
+        self.resize(self.box_width_dynamic, self.box_height_hide)
 
     def center_frame(self):
         self.move(int((self.parent().size().width()-self.box_width_dynamic)/2), self.parent().offset_win32)
@@ -1078,15 +1144,16 @@ class SliderWidget(QtWidgets.QFrame):
 
     def add_slider(self, layout, label, token, idx, lval, lmin, lmax, lstp):
         font = QtGui.QFont()
-        font.setPixelSize(self.plo.slider_label_size)
+        font.setPixelSize(self.parent().plo.slider_label_size)
 
         label_name = QtWidgets.QLabel(label)
         label_name.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         label_name.setFont(font)
         label_name.setStyleSheet(f'''
             QLabel {{
-                color: {self.plo.slider_label_color};
-                border: 0px solid transparent;
+                color: {self.parent().plo.slider_label_color};
+                border: 0px solid none;
+                background: transparent;
             }}
         ''')
         
@@ -1095,8 +1162,9 @@ class SliderWidget(QtWidgets.QFrame):
         label_value.setFont(font)
         label_value.setStyleSheet(f'''
             QLabel {{
-                color: {self.plo.slider_label_color};
+                color: {self.parent().plo.slider_label_color};
                 border: 0px solid transparent;
+                background: transparent;
             }}
         ''')
 
@@ -1113,7 +1181,7 @@ class SliderWidget(QtWidgets.QFrame):
         layout.addWidget(slider, 1, idx, QtCore.Qt.AlignmentFlag.AlignHCenter)
         layout.addWidget(label_value, 2, idx, QtCore.Qt.AlignmentFlag.AlignCenter)
 
-        return slider
+        return (slider, label_name, label_value)
 
     def toggle_panel(self, event):
         if type(event) == QtGui.QEnterEvent:
