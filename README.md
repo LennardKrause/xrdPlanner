@@ -32,6 +32,7 @@
   - Current menu checkmark is not updated/reset when applying changes.
 
 ## Latest updates:
+  - 2023-06-23 Bugfix: Fixed several bugs with regard to the reloading of the settings file.
   - 2023-06-21 Update: Settings files accessible from menu, changes can be applied on the fly.
   - 2023-06-14 Update: Big speed update.
   - 2023-06-01 Update: countourpy was dropped, the conics are now calculated directly instead of being evaluated on a grid.
