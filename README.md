@@ -29,7 +29,7 @@
   - I hope the variable naming is self-explanatory.
 
 ## Known Bugs:
-  - Current menu checkmark is not updated/reset when applying changes.
+  - Nothing so far. Please report if something is bothering you.
 
 ## Latest updates:
   - 2023-06-23 Bugfix: Fixed several bugs with regard to the reloading of the settings file.
