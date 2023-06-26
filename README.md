@@ -56,9 +56,9 @@
 
 ## Examples
 #### A PILATUS3 2M detector and a Silicon sample.
-![Preview](https://github.com/LennardKrause/xrdPlanner/blob/main/PILATUS3_2M_Si.png)
+![Preview](https://github.com/LennardKrause/xrdPlanner/blob/main/examples/PILATUS3_2M_Si.png)
 
 #### A rotated EIGER2 4M detector and a Aluminium sample (darkmode).
-![Preview](https://github.com/LennardKrause/xrdPlanner/blob/main/EIGER2_4M_Al.png)
+![Preview](https://github.com/LennardKrause/xrdPlanner/blob/main/examples/EIGER2_4M_Al.png)
 
 #### I hope this turns out to be useful for someone!
