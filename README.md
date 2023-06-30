@@ -29,9 +29,11 @@
   - I hope the variable naming is self-explanatory.
 
 ## Known Bugs:
-  - Nothing so far. Please report if something is bothering you.
+  - Overwriting defaults while in darkmode requires a reset to go back to light mode.
 
 ## Latest updates:
+  - 2023-06-30 Update: Reference hkl intensity determines linewidth (irel).
+  - 2023-06-30 Bugfix: Reference lines stay after settings reload.
   - 2023-06-23 Bugfix: Fixed several bugs with regard to the reloading of the settings file.
   - 2023-06-21 Update: Settings files accessible from menu, changes can be applied on the fly.
   - 2023-06-14 Update: Big speed update.
