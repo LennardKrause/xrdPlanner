@@ -64,6 +64,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ax.viewport().setAttribute(QtCore.Qt.WidgetAttribute.WA_AcceptTouchEvents, False)
         self.layout.addWidget(self.ax)
 
+        # What standards should be available as reference
+        # The d spacings will be imported from pyFAI
+        self.ref_library = calibrant.names()
+        # dict to store custom reference data
+        self.ref_custom = {}
+        self.ref_custom_hkl = {}
+        
         # initialise all that depends on the settings
         # call this function to apply changes were made
         # to the settings file -> change_settings()
@@ -104,13 +111,6 @@ class MainWindow(QtWidgets.QMainWindow):
         # reverse the colormap useful to increase visibility in darkmode
         if self.plo.reverse_cmap:
             self.cont_cmap.reverse()
-        
-        # What standards should be available as reference
-        # The d spacings will be imported from pyFAI
-        self.ref_library = calibrant.names()
-        # dict to store custom reference data
-        self.ref_custom = {}
-        self.ref_custom_hkl = {}
         
         # get the detector specs
         # - update: overwrite existing file after load
@@ -402,11 +402,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cont_ref_dsp = ordered[:,3]
         # hkl -> integer
         # cast hkl array to list of tuples (for easy display)
-        hkl = ordered[:,:3].astype(int)
-        if self.plo.conic_hkl_show_int:
-            self.cont_ref_hkl = list(zip(hkl[:,0], hkl[:,1], hkl[:,2], ordered[:,4].astype(int)))
-        else:
-            self.cont_ref_hkl = list(zip(hkl[:,0], hkl[:,1], hkl[:,2]))
+        irel = ordered[:,4]/ordered[:,4].max()
+        self.cont_ref_hkl = list(zip(ordered[:,0], ordered[:,1], ordered[:,2], ordered[:,4], irel))
 
         self.geo.reference = os.path.basename(fpath)
         self.ref_custom[self.geo.reference] = self.cont_ref_dsp
@@ -478,11 +475,13 @@ class MainWindow(QtWidgets.QMainWindow):
         plo.conic_colormap = 'viridis'      # [cmap]   Contour colormap
         # - reference contour section - 
         plo.conic_ref_color = '#DCDCDC'     # [color]  Reference contour color
-        plo.conic_ref_linewidth = 8.0       # [float]  Reference contour linewidth
+        plo.conic_ref_linewidth = 12.0      # [float]  Reference contour linewidth
         plo.conic_ref_num = 100             # [int]    Number of reference contours
         plo.conic_ref_min_int = 0.01        # [int]    Minimum display intensity (cif)
+        plo.conic_ref_use_irel = True       # [int]    Linewidth relative to intensity
+        plo.conic_ref_irel_lw_min = 2.0     # [int]    Minimum linewidth when using irel
         plo.conic_hkl_label_size = 14       # [int]    Font size of hkl tooltip
-        plo.conic_hkl_show_int = False      # [bool]   Include intensity in hkl tooltip
+        plo.conic_hkl_show_int = False      # [bool]   Show intensity in hkl tooltip
         # - module section - 
         plo.det_module_alpha = 0.20         # [float]  Detector module alpha
         plo.det_module_width = 1            # [float]  Detector module border width
@@ -810,17 +809,26 @@ class MainWindow(QtWidgets.QMainWindow):
                 if x is False:
                     continue
 
-                # plot the conic section
-                self.patches['reference'][_n].setData(x, y, pen=pg.mkPen(self.plo.conic_ref_color, width=self.plo.conic_ref_linewidth))
-                self.patches['reference'][_n].setVisible(True)
-                
                 # if hkl are available
                 # put them in the proper container for the contour
                 # so indexing gets it right
+                irel = 1.0
                 if self.cont_ref_hkl:
-                    self.patches['reference'][_n].name = self.cont_ref_hkl[_n]
+                    h, k, l, itot, irel = self.cont_ref_hkl[_n]
+                    if self.plo.conic_hkl_show_int:
+                        self.patches['reference'][_n].name = f'({h: 2.0f} {k: 2.0f} {l: 2.0f}) {round(itot, 0):.0f}'
+                    else:
+                        self.patches['reference'][_n].name = f'({h: 2.0f} {k: 2.0f} {l: 2.0f})'
+                    if not self.plo.conic_ref_use_irel:
+                        irel = 1.0
                 else:
                     self.patches['reference'][_n].name = None
+                
+                # plot the conic section
+                self.patches['reference'][_n].setData(x, y, pen=pg.mkPen(self.plo.conic_ref_color,
+                                                                         width=max(self.plo.conic_ref_irel_lw_min, 
+                                                                                   self.plo.conic_ref_linewidth * irel)))
+                self.patches['reference'][_n].setVisible(True)
     
     def calc_conic(self, omega, theta, steps=100):
         # skip drawing smaller/larger +-90 deg contours
@@ -934,6 +942,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def show_tooltip(self, widget, event):
         if not widget.name or not self.cont_ref_hkl:
+            event.ignore()
             return False
         pos = QtCore.QPoint(*map(int, event.screenPos()))# - QtCore.QPoint(10,20)
         QtWidgets.QToolTip.showText(pos, str(widget.name))
