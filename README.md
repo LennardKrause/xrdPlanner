@@ -22,11 +22,11 @@
   - Edit the _settings.json_ file and the _detector_db.json_ files.
   - Use _Settings_ -> _Edit Settings_ or _Edit Detector db_.
   - A click on _Apply Changes_ lets you see the difference.
-  - _"geo"_ determines the startup defaults.
-  - _"plo"_ customises the general layout and visuals.
-  - _"lmt"_ sets the limiting values of the geometry/energy sliders.
+  - _geo_ determines the startup defaults.
+  - _plo_ customises the general layout and visuals.
+  - _lmt_ sets the limiting values of the geometry/energy sliders.
   - Add all the missing detectors to the _detector_db.json_.
-  - I hope the variable naming is self-explanatory.
+  - Check the _Settings file documentation_ at the bottom of this page for details.
 
 ## Known Bugs:
   - Overwriting defaults while in darkmode requires a reset to go back to light mode.
@@ -62,5 +62,125 @@
 
 #### A rotated EIGER2 4M detector and a Aluminium sample (darkmode).
 ![Preview](https://github.com/LennardKrause/xrdPlanner/blob/main/examples/EIGER2_4M_Al.png)
+
+
+## Settings file documentation
+
+#### geo - startup defaults
+    det_type = 'EIGER2' # [str]  Pilatus3 / Eiger2 / etc.
+                        #        -> Detector menu entry
+    det_size = '4M'     # [str]  300K 1M 2M 6M / 1M 4M 9M 16M
+                        #        -> Detector submenu entry
+    ener = 21.0         # [keV]  Beam energy
+    dist = 75.0         # [mm]   Detector distance
+    yoff = 0.0          # [mm]   Detector offset (vertical)
+    xoff = 0.0          # [mm]   Detector offset (horizontal)
+    rota = 25.0         # [deg]  Detector rotation
+    tilt = 0.0          # [deg]  Detector tilt
+    unit = 1            # [0-3]  Contour legend
+                        #         0: 2-Theta
+                        #         1: d-spacing
+                        #         2: q-space
+                        #         3: sin(theta)/lambda
+    reference = 'None'  # [str]  Plot reference contours
+                        #          pick from pyFAI
+
+#### plo - plot settings
+    
+    # contour section
+    conic_tth_min = 5               # [int]    Minimum 2-theta contour value
+    conic_tth_max = 150             # [int]    Maximum 2-theta contour value
+    conic_tth_num = 30              # [int]    Number of contour lines
+    beamcenter_marker = 'o'         # [marker] Beam center marker
+    beamcenter_size = 6             # [int]    Beam center size
+    conic_linewidth = 4.0           # [float]  Contour linewidth
+    conic_label_size = 14           # [int]    Contour label size
+    conic_label_fill = '#FFFFFF'    # [str]    Contour label fill color
+    conic_colormap = 'viridis'      # [cmap]   Contour colormap
+    
+    # reference contour section
+    conic_ref_color = '#DCDCDC'     # [color]  Reference contour color
+    conic_ref_linewidth = 12.0      # [float]  Reference contour linewidth
+    conic_ref_num = 100             # [int]    Number of reference contours
+    conic_ref_min_int = 0.01        # [int]    Minimum display intensity (cif)
+    conic_ref_use_irel = True       # [int]    Linewidth relative to intensity
+    conic_ref_irel_lw_min = 2.0     # [int]    Minimum linewidth when using irel
+    conic_hkl_label_size = 14       # [int]    Font size of hkl tooltip
+    conic_hkl_show_int = False      # [bool]   Show intensity in hkl tooltip
+    
+    # module section
+    det_module_alpha = 0.20         # [float]  Detector module alpha
+    det_module_width = 1            # [float]  Detector module border width
+    det_module_color = '#404040'    # [color]  Detector module border color
+    det_module_fill = '#404040'     # [color]  Detector module background color
+    
+    # general section
+    conic_steps = 100               # [int]    Conic resolution
+    plot_size = 768                 # [int]    Plot size, px
+    plot_size_fixed = True          # [int]    Fix window size
+    plot_bg_color = '#FFFFFF'       # [str]    Plot background color
+    unit_label_size = 16            # [int]    Label size, px
+    unit_label_color = '#808080'    # [str]    Label color
+    unit_label_fill = '#FFFFFF'     # [str]    Label fill color
+    
+    # slider section
+    slider_margin = 12              # [int]    Slider frame top margin
+    slider_border_width = 1         # [int]    Slider frame border width
+    slider_border_radius = 1        # [int]    Slider frame border radius (px)
+    slider_border_color = '#808080' # [str]    Slider frame border color
+    slider_bg_color = '#AAC0C0C0'   # [str]    Slider frame background color
+    slider_bg_hover = '#C0C0C0'     # [str]    Slider frame hover color
+    slider_label_size = 14          # [int]    Slider frame label size
+    slider_column_width = 75        # [int]    Slider label column width
+    slider_label_color = '#000000'  # [str]    Slider frame label color
+    enable_slider_ener = True       # [bool]   Show energy slider
+    enable_slider_dist = True       # [bool]   Show distance slider
+    enable_slider_rota = True       # [bool]   Show rotation slider
+    enable_slider_yoff = True       # [bool]   Show vertical offset slider
+    enable_slider_xoff = True       # [bool]   Show horizontal offset slider
+    enable_slider_tilt = True       # [bool]   Show tilt slider
+    
+    # update/reset
+    update_settings = True          # [bool]   Update settings file after load
+    update_det_bank = True          # [bool]   Update detector bank after load
+    reset_settings = False          # [bool]   Reset settings file
+    reset_det_bank = False          # [bool]   Reset detector bank
+    
+    # debug/testing
+    set_debug = False               # [bool]   Debug mode
+    darkmode = False                # [bool]   Darkmode
+    reverse_cmap = False            # [bool]   Reverse colormap
+
+#### lmt - limits
+
+    # energy [keV]
+    ener_min =  5.0    # [float] Energy minimum [keV]
+    ener_max =  100.0  # [float] Energy maximum [keV]
+    ener_stp =  1.0    # [float] Energy step size [keV]
+    
+    # distance [mm]
+    dist_min =  40.0   # [float] Distance minimum [mm]
+    dist_max =  1000.0 # [float] Distance maximum [mm]
+    dist_stp =  1.0    # [float] Distance step size [mm]
+    
+    # X-offset [mm]
+    xoff_min = -150.0  # [float] Horizontal offset minimum [mm]
+    xoff_max =  150.0  # [float] Horizontal offset maximum [mm]
+    xoff_stp =  1.0    # [float] Horizontal offset step size [mm]
+    
+    # Y-offset [mm]
+    yoff_min = -250.0  # [float] Vertical offset minimum [mm]
+    yoff_max =  250.0  # [float] Vertical offset maximum [mm]
+    yoff_stp =  1.0    # [float] Vertical offset step size [mm]
+    
+    # rotation [deg]
+    rota_min = -60.0   # [float] Rotation minimum [deg]
+    rota_max =  60.0   # [float] Rotation maximum [deg]
+    rota_stp =  1.0    # [float] Rotation step size [deg]
+    
+    # tilt [deg]
+    tilt_min = -25.0   # [float] Tilt minimum [deg]
+    tilt_max =  25.0   # [float] Tilt maximum [deg]
+    tilt_stp =  1.0    # [float] Tilt step size [deg]
 
 #### I hope this turns out to be useful for someone!
