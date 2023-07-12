@@ -213,22 +213,10 @@ The size Entry is a dictionary {key:value,}
         "vgp": 17,
         "cbh": 0,
         "size": {
-            "300K": [
-                1,
-                3
-            ],
-            "1M": [
-                2,
-                5
-            ],
-            "2M": [
-                3,
-                8
-            ],
-            "6M": [
-                5,
-                12
-            ]
+            "300K": [1, 3],
+              "1M": [2, 5],
+              "2M": [3, 8],
+              "6M": [5,12]
         }
     },
 #### I hope this turns out to be useful for someone!
