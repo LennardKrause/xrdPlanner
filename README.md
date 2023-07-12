@@ -183,4 +183,53 @@
     tilt_max =  25.0   # [float] Tilt maximum [deg]
     tilt_stp =  1.0    # [float] Tilt step size [deg]
 
+## Detector db entries
+
+The detector_db.json is stored as a dictionary
+- key: detector name e.g. PILATUS3
+- value: dictionary {Entry:Value,}, see table below
+ 
+ | Entry |  Value  | Hint |
+ |-------|---------|------|
+ |  hms  | 83.8    | [mm]   Module size (horizontal)
+ |  vms  | 33.5    | [mm]   Module size (vertical)
+ |  pxs  | 172e-3  | [mm]   Pixel size
+ |  hgp  | 7       | [pix]  Gap between modules (horizontal)
+ |  vgp  | 17      | [pix]  Gap between modules (vertical)
+ |  cbh  | 0       | [mm]   Central beam hole
+
+The size Entry is a dictionary {key:value,}
+- key: detector size / type, e.g. 300K
+- value: list [hmn, vmn]
+  - hmn: [int]  Number of modules (horizontal)
+  - vmn: [int]  Number of modules (vertical)
+ 
+#### Example of the PILATUS3 entry
+    "PILATUS3": {
+        "hms": 83.8,
+        "vms": 33.5,
+        "pxs": 0.172,
+        "hgp": 7,
+        "vgp": 17,
+        "cbh": 0,
+        "size": {
+            "300K": [
+                1,
+                3
+            ],
+            "1M": [
+                2,
+                5
+            ],
+            "2M": [
+                3,
+                8
+            ],
+            "6M": [
+                5,
+                12
+            ]
+        }
+    },
+
 #### I hope this turns out to be useful for someone!
