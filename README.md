@@ -230,5 +230,5 @@ The size Entry is a dictionary {key:value,}
                 12
             ]
         }
-
+    },
 #### I hope this turns out to be useful for someone!
