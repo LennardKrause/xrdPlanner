@@ -31,7 +31,12 @@
 ## Known Bugs:
   - Overwriting defaults while in darkmode requires a reset to go back to light mode.
 
+## Updating:
+   Sometimes I might change the name of a parameter and you will get a warning message upon startup looking something like this: _WARNING: "conic_ref_min_int" is not a valid key_! Either that key is no longer in use or its name got changed and is now reset to the default value. The settings file is updated and the warning should no longer appear after restart. Apart from this, your edited settings file will not be altered after updating.
+
 ## Latest updates:
+  - 2023-07-14 Update: Added a key _plo.conic_ref_cif_kev_ to edit the energy for the cif intensity calculation (allow higher resolution data).
+  - 2023-07-14 Bugfix: Fixed a bug in the calculation of the conics, sections close to 90 deg. would sometimes not be drawn.
   - 2023-06-30 Update: Reference hkl intensity determines linewidth (irel).
   - 2023-06-30 Bugfix: Reference lines stay after settings reload.
   - 2023-06-23 Bugfix: Fixed several bugs with regard to the reloading of the settings file.
