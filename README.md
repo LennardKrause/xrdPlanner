@@ -31,7 +31,7 @@
 ## Known Bugs:
   - Overwriting defaults while in darkmode requires a reset to go back to light mode.
 
-## Update 1.0.3:
+## Update 1.0.4:
    Sometimes I might change the name of a parameter and you will get a warning message upon startup looking something like this: _WARNING: "conic_ref_min_int" is not a valid key_! Either that key is no longer in use or its name got changed and is now reset to the default value. The settings file is updated and the warning should no longer appear after restart. Apart from this, your edited settings file will not be altered after updating.
 #### Changed the name of the following parameters:
   - conic_ref_min_int -> conic_ref_cif_int
