@@ -389,11 +389,11 @@ class MainWindow(QtWidgets.QMainWindow):
         # :return xval: arrray : x-axis of powder scan (units)
         # :return inten: array : intensity values at each point in x-axis
         # :return reflections: (h, k, l, xval, intensity) array of reflection positions, grouped by min_overlap
-        xval, inten, reflections = xtl.Scatter.powder(scattering_type='xray', units='dspace', powder_average=True, min_overlap=0.02)
+        xval, inten, reflections = xtl.Scatter.powder(scattering_type='xray', units='dspace', powder_average=True, min_overlap=0.02, energy_kev=self.plo.conic_ref_cif_kev)
         # reject low intensities: based on median or mean?
         # median is always around unity -> useless
         # mean rejects many, add adjustable multiplicator?
-        used = reflections[reflections[:,4] > reflections[:,4].max() * self.plo.conic_ref_min_int]
+        used = reflections[reflections[:,4] > reflections[:,4].max() * self.plo.conic_ref_cif_int]
         # sort by intensity -> ascending -> flip
         ordered = used[used[:, 4].argsort()][::-1]
         # pick the strongest
@@ -475,16 +475,17 @@ class MainWindow(QtWidgets.QMainWindow):
         plo.conic_colormap = 'viridis'      # [cmap]   Contour colormap
         # - reference contour section - 
         plo.conic_ref_color = '#DCDCDC'     # [color]  Reference contour color
-        plo.conic_ref_linewidth = 12.0      # [float]  Reference contour linewidth
+        plo.conic_ref_linewidth = 10.0      # [float]  Reference contour linewidth
         plo.conic_ref_num = 100             # [int]    Number of reference contours
-        plo.conic_ref_min_int = 0.01        # [int]    Minimum display intensity (cif)
-        plo.conic_ref_use_irel = True       # [int]    Linewidth relative to intensity
-        plo.conic_ref_irel_lw_min = 2.0     # [int]    Minimum linewidth when using irel
-        plo.conic_hkl_label_size = 14       # [int]    Font size of hkl tooltip
+        plo.conic_ref_cif_int = 0.01        # [float]  Minimum display intensity (cif)
+        plo.conic_ref_cif_kev = 10.0        # [float]  Energy [keV] for intensity calculation
+        plo.conic_ref_cif_irel = True       # [int]    Linewidth relative to intensity
+        plo.conic_ref_cif_lw_min = 2.0      # [float]  Minimum linewidth when using irel
         plo.conic_hkl_show_int = False      # [bool]   Show intensity in hkl tooltip
+        plo.conic_hkl_label_size = 14       # [int]    Font size of hkl tooltip
         # - module section - 
         plo.det_module_alpha = 0.20         # [float]  Detector module alpha
-        plo.det_module_width = 1            # [float]  Detector module border width
+        plo.det_module_width = 1            # [int]    Detector module border width
         plo.det_module_color = '#404040'    # [color]  Detector module border color
         plo.det_module_fill = '#404040'     # [color]  Detector module background color
         # - general section - 
@@ -819,14 +820,14 @@ class MainWindow(QtWidgets.QMainWindow):
                         self.patches['reference'][_n].name = f'({h: 2.0f} {k: 2.0f} {l: 2.0f}) {round(itot, 0):.0f}'
                     else:
                         self.patches['reference'][_n].name = f'({h: 2.0f} {k: 2.0f} {l: 2.0f})'
-                    if not self.plo.conic_ref_use_irel:
+                    if not self.plo.conic_ref_cif_irel:
                         irel = 1.0
                 else:
                     self.patches['reference'][_n].name = None
                 
                 # plot the conic section
                 self.patches['reference'][_n].setData(x, y, pen=pg.mkPen(self.plo.conic_ref_color,
-                                                                         width=max(self.plo.conic_ref_irel_lw_min, 
+                                                                         width=max(self.plo.conic_ref_cif_lw_min, 
                                                                                    self.plo.conic_ref_linewidth * irel)))
                 self.patches['reference'][_n].setVisible(True)
     
@@ -888,6 +889,9 @@ class MainWindow(QtWidgets.QMainWindow):
             # of the plotItem
             _xlim1 = (_xdim + x0) / w
             _xlim2 = (_xdim - x0) / w
+            # check if the ellipse is visible
+            if _xlim1 < 0 and _xlim2 < 0:
+                return False, False, False
             if _xlim1 < 1 and _xlim2 < 1:
                 l = -np.arcsin(_xlim1)
                 r =  np.arcsin(_xlim2)
@@ -917,14 +921,13 @@ class MainWindow(QtWidgets.QMainWindow):
         elif abs(ecc) >= 100:
             # line
             t = np.linspace(-_xdim, _xdim, 2)
-            a = -np.sign(ecc) * min(abs(y1), abs(y2))
             x = t
-            y = y0 + np.ones(len(t)) * a
+            y = y0 + np.ones(len(t)) * y1
 
         # check if conic is visible
         cx = np.argwhere((x >= -_xdim) & (x <= _xdim))
         cy = np.argwhere((y >= -_ydim) & (y <= _ydim))
-        if len(cy) == 0 or len(cx) == 0:
+        if len(cx) == 0 or len(cy) == 0:
             # outside detector area
             return False, False, False
         
