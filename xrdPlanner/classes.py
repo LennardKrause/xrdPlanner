@@ -11,25 +11,29 @@ import xrdPlanner.resources
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
         # set path home
-        self.path = os.path.dirname(__file__)
+        self.path_home = os.path.dirname(__file__)
+
         # add an icon
         self.setWindowIcon(QtGui.QIcon(':/icons/xrdPlanner.png'))
+
         # enable antialiasing
         pg.setConfigOptions(antialias=True)
 
         # Drag-and-Drop cif-file
         #  dropEvent()
         #  - check dropped file is a cif
-        #  get_cif_reference()
-        #  - use gemmi to get cell, centring and crystal  system from cif
-        #  - use pyFAI get_d_spacings() to create contours
+        #  calc_ref_from_cif()
+        #  - use Dans_Diffraction to get d_spacings
+        #  - dif.Crystal()
+        #  - xtl.Scatter.powder()
         self.setAcceptDrops(True)
         
         # set path to settings file
-        self.path_settings = os.path.join(self.path, 'settings.json')
+        self.path_settings = os.path.join(self.path_home, 'settings.json')
         # set path to detector database
-        self.path_detdb = os.path.join(self.path, 'detector_db.json')
+        self.path_detdb = os.path.join(self.path_home, 'detector_db.json')
 
         # save/load parameters to/from file
         self.init_par()
@@ -89,28 +93,29 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sliderWidget = SliderWidget(self)
 
     def init_modifiables(self):
+        # get colormap
+        self.cont_cmap = pg.colormap.get(self.geo.colormap, skipCache=True)
+        # reverse the colormap useful to increase visibility in darkmode
+        if self.geo.darkmode:
+            self.cont_cmap.reverse()
+
         # experimental darkmode?
-        if self.plo.darkmode:
-            self.init_darkmode()
-        
+        self.apply_theme(self.geo.darkmode)
+
         # set window color
-        self.ax.setBackground(self.plo.plot_bg_color)
+        self.ax.setBackground(self.plot_bg_color)
 
         # generate contour levels
         self.cont_geom_num = np.linspace(self.plo.conic_tth_min, self.plo.conic_tth_max, self.plo.conic_tth_num)
 
         # translate unit for plot title
-        self.unit_names = ['2\U0001D6F3 [\u00B0]', 'd [\u212B\u207B\u00B9]', 'q [\u212B]', 'sin(\U0001D6F3)/\U0001D706 [\u212B]']
+        self.unit_names = ['2\U0001D6F3 [\u00B0]',
+                           'd [\u212B\u207B\u00B9]',
+                           'q [\u212B]',
+                           'sin(\U0001D6F3)/\U0001D706 [\u212B]']
         if self.geo.unit >= len(self.unit_names):
             print(f'Error: Valid geo.unit range is from 0 to {len(self.unit_names)-1}, geo.unit={self.geo.unit}')
             raise SystemExit
-
-        # get colormap
-        self.cont_cmap = pg.colormap.get(self.plo.conic_colormap, skipCache=True)
-        
-        # reverse the colormap useful to increase visibility in darkmode
-        if self.plo.reverse_cmap:
-            self.cont_cmap.reverse()
         
         # get the detector specs
         # - update: overwrite existing file after load
@@ -126,22 +131,72 @@ class MainWindow(QtWidgets.QMainWindow):
         font.setBold(True)
         QtWidgets.QToolTip.setFont(font)
 
-    def init_darkmode(self):
-        # set window color
-        self.plo.conic_label_fill = '#000000'    # [str]    Contour label fill color
-        # - reference contour section - 
-        self.plo.conic_ref_color = '#202020'     # [color]  Reference contour color
-        self.plo.det_module_color = '#EEEEEE'    # [color]  Detector module border color
-        self.plo.det_module_fill = '#EEEEEE'     # [color]  Detector module background color
-        # - general section - 
-        self.plo.plot_bg_color = '#000000'       # [str]    Plot background color
-        self.plo.unit_label_color = '#808080'    # [str]    Label color
-        self.plo.unit_label_fill = '#000000'     # [str]    Label fill color
-        # - slider section - 
-        self.plo.slider_border_color = '#202020' # [str]    Slider window border color
-        self.plo.slider_bg_color = '#AA303030'   # [str]    Slider window background color
-        self.plo.slider_bg_hover = '#303030'     # [str]    Slider window hover color
-        self.plo.slider_label_color = '#808080'  # [str]    Slider window label color
+    def apply_theme(self, use_dark, redraw=False):
+        # set darkmode
+        self.geo.darkmode = use_dark
+        _color_dark = QtGui.QColor(self.thm.color_dark)
+        _color_light = QtGui.QColor(self.thm.color_light)
+        # define color palette
+        if use_dark:
+            # reference contour
+            self.conic_label_fill = self.thm.dark_conic_label_fill
+            self.conic_ref_color = self.thm.dark_conic_ref_color
+            self.det_module_color = self.thm.dark_det_module_color
+            self.det_module_fill = self.thm.dark_det_module_fill
+            # general
+            self.plot_bg_color = self.thm.dark_plot_bg_color
+            self.unit_label_color = self.thm.dark_unit_label_color
+            self.unit_label_fill = self.thm.dark_unit_label_fill
+            # slider
+            self.slider_border_color = self.thm.dark_slider_border_color
+            self.slider_bg_color = self.thm.dark_slider_bg_color
+            self.slider_bg_hover = self.thm.dark_slider_bg_hover
+            self.slider_label_color = self.thm.dark_slider_label_color
+            # palette
+            palette = QtGui.QPalette()
+            palette.setColor(QtGui.QPalette.ColorRole.Window,          _color_dark)
+            palette.setColor(QtGui.QPalette.ColorRole.ButtonText,      _color_light)
+            palette.setColor(QtGui.QPalette.ColorRole.Base,            _color_dark)
+            palette.setColor(QtGui.QPalette.ColorRole.Text,            _color_light)
+            palette.setColor(QtGui.QPalette.ColorRole.HighlightedText, _color_dark)
+            palette.setColor(QtGui.QPalette.ColorRole.WindowText,      _color_light)
+            #palette.setColor(QtGui.QPalette.ColorRole.Button,          self.cont_cmap.map(1.0, mode='qcolor'))
+            palette.setColor(QtGui.QPalette.ColorRole.Highlight,       self.cont_cmap.map(0.0, mode='qcolor'))
+        else:
+            # reference contour
+            self.conic_label_fill = self.thm.light_conic_label_fill
+            self.conic_ref_color = self.thm.light_conic_ref_color
+            self.det_module_color = self.thm.light_det_module_color
+            self.det_module_fill = self.thm.light_det_module_fill
+            # general
+            self.plot_bg_color = self.thm.light_plot_bg_color
+            self.unit_label_color = self.thm.light_unit_label_color
+            self.unit_label_fill = self.thm.light_unit_label_fill
+            # slider
+            self.slider_border_color = self.thm.light_slider_border_color
+            self.slider_bg_color = self.thm.light_slider_bg_color
+            self.slider_bg_hover = self.thm.light_slider_bg_hover
+            self.slider_label_color = self.thm.light_slider_label_color
+
+            # palette
+            palette = QtGui.QPalette()
+            palette.setColor(QtGui.QPalette.ColorRole.Window,          _color_light)
+            palette.setColor(QtGui.QPalette.ColorRole.ButtonText,      _color_dark)
+            palette.setColor(QtGui.QPalette.ColorRole.Base,            _color_light)
+            palette.setColor(QtGui.QPalette.ColorRole.Text,            _color_dark)
+            palette.setColor(QtGui.QPalette.ColorRole.HighlightedText, _color_light)
+            palette.setColor(QtGui.QPalette.ColorRole.WindowText,      _color_dark)
+            #palette.setColor(QtGui.QPalette.ColorRole.Button,          self.cont_cmap.map(1.0, mode='qcolor'))
+            palette.setColor(QtGui.QPalette.ColorRole.Highlight,       self.cont_cmap.map(0.0, mode='qcolor'))
+
+        # apply palette to app
+        app = QtWidgets.QApplication.instance()
+        app.setPalette(palette)
+        app.setStyle('Fusion')
+        
+        # redraw the canvas
+        if redraw:
+            self.redraw_canvas()
         
     def init_screen(self):
         # init the plot for contours and beam center
@@ -189,7 +244,7 @@ class MainWindow(QtWidgets.QMainWindow):
             curve = pg.PlotCurveItem(useCache=True)
             self.ax.addItem(curve)
             self.patches['conic'].append(curve)
-            temp_label = pg.TextItem(anchor=(0.5,0.5), fill=pg.mkBrush(self.plo.conic_label_fill))
+            temp_label = pg.TextItem(anchor=(0.5,0.5), fill=pg.mkBrush(self.conic_label_fill))
             temp_label.setFont(font)
             self.patches['labels'].append(temp_label)
             self.ax.addItem(temp_label)
@@ -213,28 +268,34 @@ class MainWindow(QtWidgets.QMainWindow):
         self.set_window_title()
 
     def init_menus(self):
-        menuBar = QtWidgets.QMenuBar()
-        self.setMenuBar(menuBar)
+        # if xrdPlanner is added as a widget to a
+        # GUI use and append to the parent menuBar
+        if self.parent():
+            self.menu_bar = self.parent().menuBar()
+        else:
+            self.menu_bar = self.menuBar()
 
-        menu_det = menuBar.addMenu('Detector')
+        # self.update_menu_checkmarks() will access
+        # the menus and update the checkmarks upon
+        # settings reload via self.change_settings()
+        self.menu_det = self.menu_bar.addMenu('Detector')
         group_det = QtGui.QActionGroup(self)
         group_det.setExclusive(True)
 
         # menu Detectors
-        for d in self.detector_db:
-            d = d.upper()
+        for d in sorted(self.detector_db):
             d_menu = QtWidgets.QMenu(d, self)
-            menu_det.addMenu(d_menu)
+            self.menu_det.addMenu(d_menu)
             for s in self.detector_db[d]['size']:
-                s = s.upper()
                 det_action = QtGui.QAction(s, self, checkable=True)
                 self.set_menu_action(det_action, self.change_detector, d, s)
                 d_menu.addAction(det_action)
                 group_det.addAction(det_action)
-                if d == self.geo.det_type.upper() and s == self.geo.det_size.upper():
+                if d == self.geo.det_type and s == self.geo.det_size:
                     det_action.setChecked(True)
         
-        self.menu_ref = menuBar.addMenu('Reference')
+        # menu Reference
+        self.menu_ref = self.menu_bar.addMenu('Reference')
         self.group_ref = QtGui.QActionGroup(self)
         self.group_ref.setExclusive(True)
         
@@ -248,9 +309,8 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # menu Reference: add pyFAI library
         self.sub_menu_pyFAI = QtWidgets.QMenu('pyFAI', self)
-        self.sub_menu_pyFAI.setStatusTip('')
         self.menu_ref.addMenu(self.sub_menu_pyFAI)
-        for ref_name in self.ref_library:
+        for ref_name in sorted(self.ref_library):
             ref_action = QtGui.QAction(ref_name, self, checkable=True)
             self.set_menu_action(ref_action, self.change_reference, ref_name)
             self.sub_menu_pyFAI.addAction(ref_action)
@@ -260,23 +320,50 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # menu Reference: add Custom
         self.sub_menu_custom = QtWidgets.QMenu('Custom', self)
-        self.sub_menu_custom.setStatusTip('Drag and Drop *.cif files.')
         self.menu_ref.addMenu(self.sub_menu_custom)
         
         # menu Units
-        menu_unit = menuBar.addMenu('Unit')
+        self.menu_unit = self.menu_bar.addMenu('Unit')
         group_unit = QtGui.QActionGroup(self)
         group_unit.setExclusive(True)
         for unit_index, unit_name in enumerate(self.unit_names):
             unit_action = QtGui.QAction(unit_name, self, checkable=True)
             self.set_menu_action(unit_action, self.change_units, unit_index)
-            menu_unit.addAction(unit_action)
+            self.menu_unit.addAction(unit_action)
             group_unit.addAction(unit_action)
             if unit_index == self.geo.unit:
                 unit_action.setChecked(True)
+
+        # menu View
+        menu_view = self.menu_bar.addMenu('View')
+        # submenu Theme
+        menu_view.addSeparator()
+        self.menu_theme = menu_view.addMenu('Theme')
+        group_theme = QtGui.QActionGroup(self)
+        group_theme.setExclusive(True)
+        for (theme, invert) in [('Light', False), ('Dark', True)]:
+            theme_action = QtGui.QAction(theme, self, checkable=True)
+            self.set_menu_action(theme_action, self.apply_theme, invert, True)
+            group_theme.addAction(theme_action)
+            self.menu_theme.addAction(theme_action)
+            if invert == self.geo.darkmode:
+                theme_action.setChecked(True)
         
+        # submenu Colormap
+        self.menu_cmap = menu_view.addMenu('Colormap')
+        group_cmap = QtGui.QActionGroup(self)
+        group_cmap.setExclusive(True)
+        for cmap_name in sorted(pg.colormap.listMaps()):
+            cmap_action = QtGui.QAction(cmap_name, self, checkable=True)
+            self.set_menu_action(cmap_action, self.change_cmap, cmap_name)
+            self.menu_cmap.addAction(cmap_action)
+            group_cmap.addAction(cmap_action)
+            if cmap_name == self.geo.colormap:
+                cmap_action.setChecked(True)
+
         # menu Settings
-        menu_edit = menuBar.addMenu('Settings')
+        menu_edit = self.menu_bar.addMenu('Settings')
+        # submenu Edit
         if sys.platform == 'win32':
             tokens = [('Edit Detector db file', os.system, f'notepad {self.path_detdb}'),
                       ('Edit Settings file', os.system, f'notepad {self.path_settings}'),
@@ -296,22 +383,62 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 self.set_menu_action(edit_action, funct)
             menu_edit.addAction(edit_action)
-        
-        # menu Default
-        # save new default values
+        # submenu Defaults
         menu_edit.addSeparator()
         menu_default = menu_edit.addMenu('Defaults')
         default_action = QtGui.QAction('Save current settings', self)
-        self.set_menu_action(default_action, self.save_par)
+        self.set_menu_action(default_action, self.store_current_settings)
         menu_default.addAction(default_action)
-        default_action = QtGui.QAction('Reset default settings', self)
+        default_action = QtGui.QAction('Load default settings', self)
         self.set_menu_action(default_action, self.reset_to_default)
         menu_default.addAction(default_action)
-    
+
+    def update_menu_checkmarks(self):
+        # set checkmark: detectors
+        # - move through submenus
+        for menu in self.menu_det.actions():
+            if menu.text() == self.geo.det_type:
+                for action in menu.menu().actions():
+                    if action.text() == self.geo.det_size:
+                        action.setChecked(True)
+
+        # set checkmark: reference
+        # - check 'None'
+        # - move through submenus
+        for action in self.menu_ref.actions():
+            if action.text() == self.geo.reference:
+                action.setChecked(True)
+        # set checkmark: reference - pyFAI
+        for action in self.sub_menu_pyFAI.actions():
+            if action.text() == self.geo.reference:
+                action.setChecked(True)
+        # set checkmark: reference - custom
+        for action in self.sub_menu_custom.actions():
+            if action.text() == self.geo.reference:
+                action.setChecked(True)
+
+        # set checkmark: units
+        # - self.geo.unit is int
+        for num, action in enumerate(self.menu_unit.actions()):
+            if num == self.geo.unit:
+                action.setChecked(True)
+
+        # set checkmark: theme
+        # - self.geo.darkmode is bool
+        conv = {'Light': False, 'Dark': True}
+        for action in self.menu_theme.actions():
+            if conv[action.text()] == self.geo.darkmode:
+                action.setChecked(True)
+
+        # set checkmark: colormaps
+        for action in self.menu_cmap.actions():
+            if action.text() == self.geo.colormap:
+                action.setChecked(True)
+
     def add_unit_label(self):
         font = QtGui.QFont()
         font.setPixelSize(self.plo.unit_label_size)
-        self.unit_label = pg.TextItem(anchor=(0.0,0.0), color=self.plo.unit_label_color, fill=self.plo.unit_label_fill)
+        self.unit_label = pg.TextItem(anchor=(0.0,0.0), color=self.unit_label_color, fill=self.unit_label_fill)
         self.unit_label.setText(self.unit_names[self.geo.unit])
         self.unit_label.setFont(font)
         self.ax.addItem(self.unit_label)
@@ -349,9 +476,9 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.setWindowTitle(f'{self.det.name} - {self.geo.reference}')
 
-    def change_settings(self):
-        # apply changes
-        self.load_par(skip=['geo'])
+    def redraw_canvas(self):
+        # save darkmode toggle
+        self.save_par()
         self.init_modifiables()
         # clear the screen
         self.ax.clear()
@@ -359,8 +486,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.init_screen()
         # center the slider frame
         self.sliderWidget.apply_style()
-        self.sliderWidget.update_sliders()
+        self.sliderWidget.init_sliders()
         self.sliderWidget.center_frame()
+
+    def change_cmap(self, cmap):
+        self.geo.colormap = cmap
+        self.redraw_canvas()
+
+    def change_settings(self):
+        # load settings
+        self.load_par()
+        self.redraw_canvas()
+        self.update_menu_checkmarks()
 
     def change_detector(self, det_name, det_size):
         self.geo.det_type = det_name
@@ -384,7 +521,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.get_reference()
         self.draw_reference()
 
-    def get_cif_reference(self, fpath):
+    def calc_ref_from_cif(self, fpath):
+        # called when a cif is dropped onto the window
         xtl = dif.Crystal(fpath)
         # :return xval: arrray : x-axis of powder scan (units)
         # :return inten: array : intensity values at each point in x-axis
@@ -436,29 +574,31 @@ class MainWindow(QtWidgets.QMainWindow):
         # update window title
         self.set_window_title()
 
-    def get_specs_geo(self):
+    def get_defaults_geo(self):
         ######################
         # Setup the geometry #
         ######################
         geo = container()
-        geo.det_type = 'EIGER2' # [str]  Pilatus3 / Eiger2
-        geo.det_size = '4M'     # [str]  300K 1M 2M 6M / 1M 4M 9M 16M
-        geo.ener = 21.0         # [keV]  Beam energy
-        geo.dist = 75.0         # [mm]   Detector distance
-        geo.yoff = 0.0          # [mm]   Detector offset (vertical)
-        geo.xoff = 0.0          # [mm]   Detector offset (horizontal)
-        geo.rota = 25.0         # [deg]  Detector rotation
-        geo.tilt = 0.0          # [deg]  Detector tilt
-        geo.unit = 1            # [0-3]  Contour legend
-                                #          0: 2-Theta
-                                #          1: d-spacing
-                                #          2: q-space
-                                #          3: sin(theta)/lambda
-        geo.reference = 'None'  # [str]  Plot reference contours
-                                #          pick from pyFAI
+        geo.det_type = 'EIGER2'  # [str]  Pilatus3 / Eiger2
+        geo.det_size = '4M'      # [str]  300K 1M 2M 6M / 1M 4M 9M 16M
+        geo.ener = 21.0          # [keV]  Beam energy
+        geo.dist = 75.0          # [mm]   Detector distance
+        geo.yoff = 0.0           # [mm]   Detector offset (vertical)
+        geo.xoff = 0.0           # [mm]   Detector offset (horizontal)
+        geo.rota = 25.0          # [deg]  Detector rotation
+        geo.tilt = 0.0           # [deg]  Detector tilt
+        geo.unit = 1             # [0-3]  Contour legend
+                                 #          0: 2-Theta
+                                 #          1: d-spacing
+                                 #          2: q-space
+                                 #          3: sin(theta)/lambda
+        geo.reference = 'None'   # [str]  Plot reference contours
+                                 #          pick from pyFAI
+        geo.darkmode = False     # [bool] Darkmode
+        geo.colormap = 'viridis' # [cmap] Contour colormap
         return geo
 
-    def get_specs_plo(self):
+    def get_defaults_plo(self):
         ################
         # Plot Details #
         ################
@@ -471,10 +611,7 @@ class MainWindow(QtWidgets.QMainWindow):
         plo.beamcenter_size = 6             # [int]    Beam center size
         plo.conic_linewidth = 4.0           # [float]  Contour linewidth
         plo.conic_label_size = 14           # [int]    Contour label size
-        plo.conic_label_fill = '#FFFFFF'    # [str]    Contour label fill color
-        plo.conic_colormap = 'viridis'      # [cmap]   Contour colormap
         # - reference contour section - 
-        plo.conic_ref_color = '#DCDCDC'     # [color]  Reference contour color
         plo.conic_ref_linewidth = 10.0      # [float]  Reference contour linewidth
         plo.conic_ref_num = 100             # [int]    Number of reference contours
         plo.conic_ref_cif_int = 0.01        # [float]  Minimum display intensity (cif)
@@ -486,26 +623,17 @@ class MainWindow(QtWidgets.QMainWindow):
         # - module section - 
         plo.det_module_alpha = 0.20         # [float]  Detector module alpha
         plo.det_module_width = 1            # [int]    Detector module border width
-        plo.det_module_color = '#404040'    # [color]  Detector module border color
-        plo.det_module_fill = '#404040'     # [color]  Detector module background color
         # - general section - 
         plo.conic_steps = 100               # [int]    Conic resolution
         plo.plot_size = 768                 # [int]    Plot size, px
         plo.plot_size_fixed = True          # [int]    Fix window size
-        plo.plot_bg_color = '#FFFFFF'       # [str]    Plot background color
         plo.unit_label_size = 16            # [int]    Label size, px
-        plo.unit_label_color = '#808080'    # [str]    Label color
-        plo.unit_label_fill = '#FFFFFF'     # [str]    Label fill color
         # - slider section - 
         plo.slider_margin = 12              # [int]    Slider frame top margin
         plo.slider_border_width = 1         # [int]    Slider frame border width
         plo.slider_border_radius = 1        # [int]    Slider frame border radius (px)
-        plo.slider_border_color = '#808080' # [str]    Slider frame border color
-        plo.slider_bg_color = '#AAC0C0C0'   # [str]    Slider frame background color
-        plo.slider_bg_hover = '#C0C0C0'     # [str]    Slider frame hover color
         plo.slider_label_size = 14          # [int]    Slider frame label size
         plo.slider_column_width = 75        # [int]    Slider label column width
-        plo.slider_label_color = '#000000'  # [str]    Slider frame label color
         plo.enable_slider_ener = True       # [bool]   Show energy slider
         plo.enable_slider_dist = True       # [bool]   Show distance slider
         plo.enable_slider_rota = True       # [bool]   Show rotation slider
@@ -519,12 +647,44 @@ class MainWindow(QtWidgets.QMainWindow):
         plo.reset_det_bank = False          # [bool]   Reset detector bank
         # - debug/testing -
         plo.set_debug = False               # [bool]   Debug mode
-        plo.darkmode = False                # [bool]   Darkmode
-        plo.reverse_cmap = False            # [bool]   Reverse colormap
 
         return plo
+    
+    def get_defaults_thm(self):
+        #################
+        # Theme Details #
+        #################
+        thm = container()
+        thm.color_dark = '#404040'                # [color]  Global dark color
+        thm.color_light = '#EEEEEE'               # [color]  Global light color
+        # light mode
+        thm.light_conic_label_fill = '#FFFFFF'    # [str]    Contour label fill color
+        thm.light_conic_ref_color = '#DCDCDC'     # [color]  Reference contour color
+        thm.light_det_module_color = '#404040'    # [color]  Detector module border color
+        thm.light_det_module_fill = '#404040'     # [color]  Detector module background color
+        thm.light_plot_bg_color = '#FFFFFF'       # [str]    Plot background color
+        thm.light_unit_label_color = '#808080'    # [str]    Label color
+        thm.light_unit_label_fill = '#FFFFFF'     # [str]    Label fill color
+        thm.light_slider_border_color = '#808080' # [str]    Slider frame border color
+        thm.light_slider_bg_color = '#AAC0C0C0'   # [str]    Slider frame background color
+        thm.light_slider_bg_hover = '#C0C0C0'     # [str]    Slider frame hover color
+        thm.light_slider_label_color = '#000000'  # [str]    Slider frame label color
+        # dark mode
+        thm.dark_conic_label_fill = '#000000'     # [str]    Contour label fill color
+        thm.dark_conic_ref_color = '#202020'      # [color]  Reference contour color
+        thm.dark_det_module_color = '#EEEEEE'     # [color]  Detector module border color
+        thm.dark_det_module_fill = '#EEEEEE'      # [color]  Detector module background color
+        thm.dark_plot_bg_color = '#000000'        # [str]    Plot background color
+        thm.dark_unit_label_color = '#C0C0C0'     # [str]    Label color
+        thm.dark_unit_label_fill = '#000000'      # [str]    Label fill color
+        thm.dark_slider_border_color = '#202020'  # [str]    Slider frame border color
+        thm.dark_slider_bg_color = '#AA303030'    # [str]    Slider frame background color
+        thm.dark_slider_bg_hover = '#303030'      # [str]    Slider frame hover color
+        thm.dark_slider_label_color = '#C0C0C0'   # [str]    Slider frame label color
 
-    def get_specs_lmt(self):
+        return thm
+    
+    def get_defaults_lmt(self):
         ##########
         # Limits #
         ##########
@@ -550,18 +710,21 @@ class MainWindow(QtWidgets.QMainWindow):
         
         return lmt
 
-    def get_defaults(self):
+    def get_defaults_all(self):
         # load the defaults
         # geo: geometry and detector specs
-        self.geo = self.get_specs_geo()
+        self.geo = self.get_defaults_geo()
+        self._geo = container()
         # plo: plot details
-        self.plo = self.get_specs_plo()
+        self.plo = self.get_defaults_plo()
+        # thm: theme details
+        self.thm = self.get_defaults_thm()
         # lmt: geometry limits
-        self.lmt = self.get_specs_lmt()
+        self.lmt = self.get_defaults_lmt()
 
     def get_specs_det(self):
-        det_type = self.geo.det_type.upper()
-        det_size = self.geo.det_size.upper()
+        det_type = self.geo.det_type
+        det_size = self.geo.det_size
 
         if det_type not in self.detector_db.keys():
             print(f'Unknown detector type: {det_type}')
@@ -600,7 +763,10 @@ class MainWindow(QtWidgets.QMainWindow):
             'hgp' : 7,       # [pix] Gap between modules (horizontal)
             'vgp' : 17,      # [pix] Gap between modules (vertical)
             'cbh' : 0,       # [mm]  Central beam hole
-            'size' : {'300K':(1,3),'1M':(2,5),'2M':(3,8),'6M':(5,12)},
+            'size' : {'300K':(1,3),
+                      '1M':(2,5),
+                      '2M':(3,8),
+                      '6M':(5,12)},
             }
         ###############################
         # Specifications for Pilatus4 #
@@ -616,7 +782,9 @@ class MainWindow(QtWidgets.QMainWindow):
             'hgp' : 19,      # [pix] Gap between modules (horizontal)
             'vgp' : 6,       # [pix] Gap between modules (vertical)
             'cbh' : 0,       # [mm]  Central beam hole
-            'size' : {'1M':(2,4),'2M':(3,6),'4M':(4,8)}
+            'size' : {'1M':(2,4),
+                      '2M':(3,6),
+                      '4M':(4,8)}
             }
         
         #############################
@@ -629,7 +797,10 @@ class MainWindow(QtWidgets.QMainWindow):
             'hgp' : 38,      # [pix] Gap between modules (horizontal)
             'vgp' : 12,      # [pix] Gap between modules (vertical)
             'cbh' : 0,       # [mm]  Central beam hole
-            'size' : {'1M':(1,2),'4M':(2,4),'9M':(3,6),'16M':(4,8)},
+            'size' : {'1M':(1,2),
+                      '4M':(2,4),
+                      '9M':(3,6),
+                      '16M':(4,8)},
             }
         
         #############################
@@ -655,7 +826,8 @@ class MainWindow(QtWidgets.QMainWindow):
             'hgp' : 0,      # [pix] Gap between modules (horizontal)
             'vgp' : 0,      # [pix] Gap between modules (vertical)
             'cbh' : 0,      # [mm]  Central beam hole
-            'size' : {'MX225-HS':(3,3),'MX300-HS':(4,4)},
+            'size' : {'MX225-HS':(3,3),
+                      'MX300-HS':(4,4)},
             }
         
         #############################
@@ -668,7 +840,9 @@ class MainWindow(QtWidgets.QMainWindow):
             'hgp' : 0,      # [pix] Gap between modules (horizontal)
             'vgp' : 0,      # [pix] Gap between modules (vertical)
             'cbh' : 0,      # [mm]  Central beam hole
-            'size' : {'7':(1,1),'14':(1,2),'28':(2,2)},
+            'size' : {'7':(1,1),
+                      '14':(1,2),
+                      '28':(2,2)},
             }
         
         #############################
@@ -681,7 +855,39 @@ class MainWindow(QtWidgets.QMainWindow):
             'hgp' : 0,      # [pix] Gap between modules (horizontal)
             'vgp' : 0,      # [pix] Gap between modules (vertical)
             'cbh' : 0,      # [mm]  Central beam hole
-            'size' : {'7':(1,1),'14':(1,2)},
+            'size' : {'7':(1,1),
+                      '14':(1,2)},
+            }
+        
+        ###################################
+        # Specifications for Perkin-Elmer #
+        ###################################
+        detectors['Perkin-Elmer XRD'] = {
+            'hms' : 204.8,  # [mm]  Module size (horizontal)
+            'vms' : 204.8,  # [mm]  Module size (vertical)
+            'pxs' : 100e-3, # [mm]  Pixel size
+            'hgp' : 0,      # [pix] Gap between modules (horizontal)
+            'vgp' : 0,      # [pix] Gap between modules (vertical)
+            'cbh' : 0,      # [mm]  Central beam hole
+            'size' : {'0822':(1,1),
+                      '1611':(2,2),
+                      '1620':(2,2),
+                      '1621':(2,2),
+                      '1622':(2,2),
+                      '1642':(2,2)},
+            }
+        
+        ############################
+        # Specifications for Varex #
+        ############################
+        detectors['VAREX XRpad2'] = {
+            'hms' : 428.8,  # [mm]  Module size (horizontal)
+            'vms' : 428.8,  # [mm]  Module size (vertical)
+            'pxs' : 100e-3, # [mm]  Pixel size
+            'hgp' : 0,      # [pix] Gap between modules (horizontal)
+            'vgp' : 0,      # [pix] Gap between modules (vertical)
+            'cbh' : 0,      # [mm]  Central beam hole
+            'size' : {'4343':(1,1)},
             }
         
         # make file dump
@@ -689,9 +895,13 @@ class MainWindow(QtWidgets.QMainWindow):
             with open(self.path_detdb, 'w') as wf:
                 json.dump(detectors, wf, indent=4)
         else:
-            with open(self.path_detdb, 'r') as of:
-                for key, vals in json.load(of).items():
-                    detectors[key] = vals
+            try:
+                with open(self.path_detdb, 'r') as of:
+                    for key, vals in json.load(of).items():
+                        detectors[key] = vals
+            except: # any error is critical here!
+                print(f"Error parsing Detector db at: {self.path_detdb}")
+                raise SystemExit
         
         if update:
             with open(self.path_detdb, 'w') as wf:
@@ -723,8 +933,8 @@ class MainWindow(QtWidgets.QMainWindow):
                              + (self.det.cbh/2) * (1-2*(i & self.det.hmn) // self.det.hmn)
                 # add the module
                 rect_item = QtWidgets.QGraphicsRectItem(origin_x, origin_y,  self.det.hms, self.det.vms)
-                rect_item.setPen(pg.mkPen(color = self.plo.det_module_color, width = self.plo.det_module_width))
-                rect_item.setBrush(pg.mkBrush(color = self.plo.det_module_fill))
+                rect_item.setPen(pg.mkPen(color = self.det_module_color, width = self.plo.det_module_width))
+                rect_item.setBrush(pg.mkBrush(color = self.det_module_fill))
                 rect_item.setOpacity(self.plo.det_module_alpha)
                 self.ax.addItem(rect_item)
 
@@ -817,7 +1027,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 if self.cont_ref_hkl:
                     h, k, l, itot, irel = self.cont_ref_hkl[_n]
                     if self.plo.conic_hkl_show_int:
-                        self.patches['reference'][_n].name = f'({h: 2.0f} {k: 2.0f} {l: 2.0f}) {round(itot, 0):.0f}'
+                        # alignment of the tooltip text is far from trivial
+                        # detour via QTextEdit -> setAlignment and toHtml
+                        # hence the <br> instead of \n
+                        # 
+                        # self.setStyleSheet('''QToolTip {... ) didn't work
+                        self.patches['reference'][_n].name = f'({h: 2.0f} {k: 2.0f} {l: 2.0f})<br>{round(itot, 0):,.0f}'
                     else:
                         self.patches['reference'][_n].name = f'({h: 2.0f} {k: 2.0f} {l: 2.0f})'
                     if not self.plo.conic_ref_cif_irel:
@@ -826,7 +1041,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     self.patches['reference'][_n].name = None
                 
                 # plot the conic section
-                self.patches['reference'][_n].setData(x, y, pen=pg.mkPen(self.plo.conic_ref_color,
+                self.patches['reference'][_n].setData(x, y, pen=pg.mkPen(self.conic_ref_color,
                                                                          width=max(self.plo.conic_ref_cif_lw_min, 
                                                                                    self.plo.conic_ref_linewidth * irel)))
                 self.patches['reference'][_n].setVisible(True)
@@ -947,8 +1162,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if not widget.name or not self.cont_ref_hkl:
             event.ignore()
             return False
+        text = QtWidgets.QTextEdit(str(widget.name))
+        text.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         pos = QtCore.QPoint(*map(int, event.screenPos()))# - QtCore.QPoint(10,20)
-        QtWidgets.QToolTip.showText(pos, str(widget.name))
+        QtWidgets.QToolTip.showText(pos, text.toHtml())
         event.ignore()
 
     def update_screen(self, val=None):
@@ -986,11 +1203,11 @@ class MainWindow(QtWidgets.QMainWindow):
         #  - check dropped file is a cif
         fpath = event.mimeData().urls()[0].toLocalFile()
         if os.path.splitext(fpath)[1] == '.cif':
-            self.get_cif_reference(fpath)
+            self.calc_ref_from_cif(fpath)
 
     def init_par(self):
         # fetch the geometry, detector, plot specifications and limits
-        self.get_defaults()
+        self.get_defaults_all()
         # file name to store current settings
         # if file_dump doesn't exists, make a dump
         if not os.path.exists(self.path_settings):
@@ -1000,7 +1217,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.load_par()
         # reset to default if requested
         if self.plo.reset_settings:
-            self.get_defaults()
+            self.get_defaults_all()
             self.save_par()
         # update with default if requested
         #  - e.g. to add missing entries
@@ -1009,22 +1226,38 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def reset_to_default(self):
         # plo: plot details
-        self.plo = self.get_specs_plo()
+        self.plo = self.get_defaults_plo()
         # lmt: geometry limits
-        self.lmt = self.get_specs_lmt()
+        self.lmt = self.get_defaults_lmt()
+        # thm: theme
+        self.thm = self.get_defaults_thm()
         self.save_par()
-        self.change_settings()
+        self.redraw_canvas()
+
+    def store_current_settings(self):
+        # self.geo is edited with the sliders
+        # self._geo holds the initial values
+        # usually I do not want to overwrite 
+        # the startup values -> I write _geo
+        # to the settings file.
+        # unless this function is called!
+        self._geo.__dict__.update(self.geo.__dict__)
+        self.save_par()
 
     def save_par(self):
         # Writing geo as dict to file
         with open(self.path_settings, 'w') as wf:
-            json.dump({'geo':self.geo.__dict__, 'plo':self.plo.__dict__, 'lmt':self.lmt.__dict__}, wf, indent=4)
+            json.dump({'geo':self._geo.__dict__, 'plo':self.plo.__dict__, 'thm':self.thm.__dict__, 'lmt':self.lmt.__dict__}, wf, indent=4)
 
     def load_par(self, skip=[]):
         # Opening JSON file as dict
-        with open(self.path_settings, 'r') as of:
-            pars = json.load(of)
-        conv = {'geo':self.geo, 'plo':self.plo, 'lmt':self.lmt}
+        try:
+            with open(self.path_settings, 'r') as of:
+                pars = json.load(of)
+        except: # any error is critical here!
+            print(f"Error parsing Detector db at: {self.path_detdb}")
+            raise SystemExit
+        conv = {'geo':self.geo, 'plo':self.plo, 'thm':self.thm, 'lmt':self.lmt}
         for key, vals in pars.items():
             if key in skip:
                 continue
@@ -1033,6 +1266,9 @@ class MainWindow(QtWidgets.QMainWindow):
                     setattr(conv[key], p, x)
                 else:
                     print(f'WARNING: "{p}" is not a valid key!')
+        if 'geo' not in skip:
+            # store the initial values of geo
+            self._geo.__dict__.update(self.geo.__dict__)
 
 class container(object):
     pass
@@ -1057,35 +1293,39 @@ class SliderWidget(QtWidgets.QFrame):
         self.box_height_show = int(np.ceil(parent.size().height()/3))
         self.box_height_hide = int(np.ceil(self.frame.size().height()))
 
+        # prevent moving the window
+        # when clicking the sliders
+        self.startPos = None
+
         self.grid = QtWidgets.QGridLayout()
         self.grid.setContentsMargins(0, 0, 0, 0)
         self.grid.setRowStretch(1,10)
         self.box.setLayout(self.grid)
 
         self.apply_style()
-        self.update_sliders()
+        self.init_sliders()
         self.center_frame()
 
     def apply_style(self):
         self.box.setStyleSheet(f'''
             QFrame {{
-                border: {self.parent().plo.slider_border_width}px solid {self.parent().plo.slider_border_color};
+                border: {self.parent().plo.slider_border_width}px solid {self.parent().slider_border_color};
                 border-radius: {self.parent().plo.slider_border_radius}px;
-                background: {self.parent().plo.slider_bg_color};
+                background: {self.parent().slider_bg_color};
             }}
             QFrame:hover {{
-                background: {self.parent().plo.slider_bg_hover};
+                background: {self.parent().slider_bg_hover};
             }}
         ''')
         self.frame.setStyleSheet(f'''
             QFrame {{
-                border: {self.parent().plo.slider_border_width}px solid {self.parent().plo.slider_border_color};
+                border: {self.parent().plo.slider_border_width}px solid {self.parent().slider_border_color};
                 border-radius: {self.parent().plo.slider_border_radius}px;
-                background: {self.parent().plo.slider_border_color};
+                background: {self.parent().slider_border_color};
             }}
         ''')
 
-    def update_sliders(self):
+    def init_sliders(self):
         # remove sliders and labels
         for i in reversed(range(self.grid.count())): 
             self.grid.itemAt(i).widget().deleteLater()
@@ -1163,7 +1403,7 @@ class SliderWidget(QtWidgets.QFrame):
         label_name.setFont(font)
         label_name.setStyleSheet(f'''
             QLabel {{
-                color: {self.parent().plo.slider_label_color};
+                color: {self.parent().slider_label_color};
                 border: 0px solid none;
                 background: transparent;
             }}
@@ -1174,7 +1414,7 @@ class SliderWidget(QtWidgets.QFrame):
         label_value.setFont(font)
         label_value.setStyleSheet(f'''
             QLabel {{
-                color: {self.parent().plo.slider_label_color};
+                color: {self.parent().slider_label_color};
                 border: 0px solid transparent;
                 background: transparent;
             }}
@@ -1188,7 +1428,7 @@ class SliderWidget(QtWidgets.QFrame):
         slider.setSingleStep(int(lstp))
         slider.setPageStep(int(lstp))
         slider.setValue(int(lval))
-        
+
         layout.addWidget(label_name, 0, idx, QtCore.Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(slider, 1, idx, QtCore.Qt.AlignmentFlag.AlignHCenter)
         layout.addWidget(label_value, 2, idx, QtCore.Qt.AlignmentFlag.AlignCenter)
@@ -1207,12 +1447,17 @@ class SliderWidget(QtWidgets.QFrame):
             pass
 
     def mousePressEvent(self, event):
+        super().mousePressEvent(event)
         if event.button() == QtCore.Qt.MouseButton.LeftButton:
             self.startPos = event.pos()
             self.box_toggle = not self.box_toggle
 
     def mouseMoveEvent(self, event):
+        super().mouseMoveEvent(event)
         if event.buttons() == QtCore.Qt.MouseButton.LeftButton:
+            if not self.startPos:
+                event.ignore()
+                return
             # relative movement
             delta = event.pos() - self.startPos
             # window limits
@@ -1236,3 +1481,7 @@ class SliderWidget(QtWidgets.QFrame):
             self.move(self.pos() + delta)
             # keep the box open after dragging
             self.box_toggle = True
+
+    def mouseReleaseEvent(self, event):
+        super().mouseReleaseEvent(event)
+        self.startPos = None

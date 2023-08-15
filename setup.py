@@ -6,7 +6,7 @@ long_description = (this_directory / 'README.md').read_text()
 
 setup(
     name='xrdPlanner',
-    version='1.0.4',
+    version='1.0.5',
     description='A tool to project X-ray diffraction cones on a detector screen at different geometries (tilt, rotation, offset) and X-ray energies.',
     long_description=long_description,
     long_description_content_type='text/markdown',
