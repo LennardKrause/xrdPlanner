@@ -4,6 +4,7 @@
  - Is able to project diffraction cones for standard samples or directly from cif files.
  - Can turn out valuable when planning beamtimes at synchrotron facilities (e.g. [DanMAX](https://www.maxiv.lu.se/beamlines-accelerators/beamlines/danmax/)).
  - Helps in deciding on the geometry of an experiment.
+ - Is readily [insertable](add_as_widget) as a widget into an existing PyQt6 GUI.
  - The math used is not meant to bring people to the moon but to provide a quick and simple preview.
  - The module building code is designed for [Dectris](https://www.dectris.com) [PILATUS3](https://www.dectris.com/detectors/x-ray-detectors/pilatus3/) / [EIGER2](https://www.dectris.com/detectors/x-ray-detectors/eiger2/) or [SACLA](https://sacla.xfel.jp/?lang=en) MPCCD Detectors (central hole geometry) but one-module systems like the [Bruker](https://www.bruker.com/en.html) [Photon II](https://www.bruker.com/en/products-and-solutions/diffractometers-and-scattering-systems/single-crystal-x-ray-diffractometers/sc-xrd-components/detectors.html) and [Rayonix](https://www.rayonix.com/) [MX-HS](https://www.rayonix.com/rayonix-mx-hs-series/) are possible as well.
  - It uses [python3](https://www.python.org), [numpy](https://numpy.org), [pyqt6](https://www.riverbankcomputing.com/software/pyqt/), [pyqtgraph](https://pyqtgraph.readthedocs.io/en/latest/), [pyFAI](https://pyfai.readthedocs.io/en/v2023.1/) and [Dans_Diffraction](https://github.com/DanPorter/Dans_Diffraction).
@@ -26,7 +27,7 @@
   - _plo_ customises the general layout and visuals.
   - _lmt_ sets the limiting values of the geometry/energy sliders.
   - Add all the missing detectors to the _detector_db.json_.
-  - Check the _Settings file documentation_ at the bottom of this page for details.
+  - Check the [settings file documentation](settings_documentation).
 
 ## Known Bugs:
   - On Windows: Switching Dark/Light mode requires restart to change the window frame color.
@@ -76,7 +77,7 @@
 #### A rotated EIGER2 4M detector and a Aluminium sample (darkmode).
 ![Preview](https://github.com/LennardKrause/xrdPlanner/blob/main/examples/EIGER2_4M_Al.png)
 
-
+<!----><a name="settings_documentation"></a>
 ## Settings file documentation
 
 #### geo - startup defaults
@@ -250,8 +251,7 @@ The size Entry is a dictionary {key:value,}
               "6M": [5,12]
         }
     },
-
-
+<!----><a name="add_as_widget"></a>
 #### Example code for adding xrdPlanner as a widget into an existing GUI
 ###### xrdPlanner uses its own menu bar, setting the GUI as the parent for xrdPlanner makes it add its menus to the parents menu bar, and likely more in the future.
 
