@@ -34,10 +34,6 @@
 
 ## After the Update:
    Sometimes I might change the name of a parameter and you will get a warning message upon startup looking something like this: _WARNING: "conic_ref_min_int" is not a valid key_! Either that key is no longer in use or its name got changed and is now reset to the default value. The settings file is updated and the warning should no longer appear after restart. Apart from this, your edited settings file will not be altered after updating.
-#### Changed the name of the following parameters:
-  - conic_ref_min_int -> conic_ref_cif_int
-  - conic_ref_irel_lw_min -> conic_ref_cif_lw_min
-  - conic_ref_use_irel -> conic_ref_cif_irel
 #### Added a new key:
   - conic_ref_cif_kev: this key sets the energy at which Dans_Dffraction calculates the intensities from a cif, increasing the value allows for higher resolution reference conics. However, the calculation will get slower.
 
@@ -50,7 +46,6 @@
 <details>
 <summary>Older updates</summary>
   
-## Older updates
   - 2023-06-30 Update: Reference hkl intensity determines linewidth (irel).
   - 2023-06-30 Bugfix: Reference lines stay after settings reload.
   - 2023-06-23 Bugfix: Fixed several bugs with regard to the reloading of the settings file.
