@@ -46,6 +46,11 @@
   - 2023-08-15 Update: Changed the way themes / styles and customisation works internally.
   - 2023-07-14 Update: Added a key _plo.conic_ref_cif_kev_ to edit the energy for the cif intensity calculation.
   - 2023-07-14 Bugfix: Fixed a bug in the calculation of the conics, sections close to 90 deg. would sometimes not be drawn.
+
+<details>
+<summary>Older updates</summary>
+  
+## Older updates
   - 2023-06-30 Update: Reference hkl intensity determines linewidth (irel).
   - 2023-06-30 Bugfix: Reference lines stay after settings reload.
   - 2023-06-23 Bugfix: Fixed several bugs with regard to the reloading of the settings file.
@@ -61,14 +66,13 @@
   - 2023-04-10 Bugfix: Large angle (2-Theta > 90) contour label positions.
   - 2023-04-09 Update: Drop a cif file onto the window to draw its contours (uses [Dans_Diffraction](https://github.com/DanPorter/Dans_Diffraction)).
   - 2023-04-05 Update: Uses pyqt6, pyqtgraph and contourpy, dropped matplotlib backend.
-
-## Older updates
   - 2023-03-23 Update: Settings are saved to (if doesn't exist) or loaded from (if exists) a 'settings.json' file.
   - 2023-03-23 Update: Added horizontal offset support and slider.
   - 2022-06-07 Update: Added functionality to plot Standard (LaB6, CeO2, ...) contours (needs [pyFAI](https://pyfai.readthedocs.io/en/master/)).
   - 2022-04-28 Update: Changed contour line generation to accept a list of 2-theta values as input.
   - 2022-04-27 Update: Added support for [SACLA](https://sacla.xfel.jp/?lang=en) MPCCD Detectors (central hole geometry).
   - 2022-04-25 Bugfix: Calculation of the beamcenter (rotation and tilt).
+</details>
 
 ## Examples
 #### A PILATUS3 2M detector and a Silicon sample.
@@ -251,8 +255,8 @@ The size Entry is a dictionary {key:value,}
         }
     },
 
-#### Example code for adding xrdPlanner as a widget into an existing GUI
-###### xrdPlanner uses its own menu bar, setting the GUI as the parent for xrdPlanner makes it add its menus to the parents menu bar, and likely more in the future.
+## Example code for adding xrdPlanner as a widget into an existing GUI
+#### xrdPlanner uses its own menu bar, setting the GUI as the parent for xrdPlanner makes it add its menus to the parents menu bar, and likely more in the future.
 
     import sys
     from PyQt6 import QtWidgets
