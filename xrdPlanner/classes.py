@@ -474,7 +474,6 @@ class MainWindow(QtWidgets.QMainWindow):
         for menu, token in self.menus_to_update:
             for action in menu.actions():
                 if action.text() == token:
-                    print(action.text(), token)
                     action.setChecked(True)
         
         # set checkmark: detectors
@@ -681,7 +680,6 @@ class MainWindow(QtWidgets.QMainWindow):
         plo.conic_tth_min = 5               # [int]    Minimum 2-theta contour line
         plo.conic_tth_max = 150             # [int]    Maximum 2-theta contour line
         plo.conic_tth_num = 30              # [int]    Number of contour lines
-        plo.beamstop_shape = 'o'            # [marker] Beam stop shape
         plo.beamcenter_marker = 'o'         # [marker] Beam center marker
         plo.beamcenter_size = 6             # [int]    Beam center size
         plo.conic_linewidth = 4.0           # [float]  Contour linewidth
