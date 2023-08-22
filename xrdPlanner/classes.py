@@ -68,6 +68,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ax.viewport().setAttribute(QtCore.Qt.WidgetAttribute.WA_AcceptTouchEvents, False)
         self.layout.addWidget(self.ax)
 
+        # Add current beamstop size to list
+        if self.geo.bssz and self.geo.bssz != 'None' and self.geo.bssz not in self.geo.bs_list:
+            self.geo.bs_list.append(self.geo.bssz)
+            self.geo.bs_list.sort()
+
         # What standards should be available as reference
         # The d spacings will be imported from pyFAI
         self.ref_library = calibrant.names()
@@ -110,9 +115,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # translate unit for plot title
         self.unit_names = ['2\U0001D6F3 [\u00B0]',
-                           'd [\u212B\u207B\u00B9]',
-                           'q [\u212B]',
-                           'sin(\U0001D6F3)/\U0001D706 [\u212B]']
+                           'd [\u212B]',
+                           'q [\u212B\u207B\u00B9]',
+                           'sin(\U0001D6F3)/\U0001D706 [\u212B\u207B\u00B9]']
         if self.geo.unit >= len(self.unit_names):
             print(f'Error: Valid geo.unit range is from 0 to {len(self.unit_names)-1}, geo.unit={self.geo.unit}')
             raise SystemExit
@@ -145,6 +150,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.det_module_fill = self.thm.dark_det_module_fill
             # general
             self.plot_bg_color = self.thm.dark_plot_bg_color
+            self.beamstop_color = self.thm.dark_beamstop_color
+            self.beamstop_edge_color = self.thm.dark_beamstop_edge_color
             self.unit_label_color = self.thm.dark_unit_label_color
             self.unit_label_fill = self.thm.dark_unit_label_fill
             # slider
@@ -170,6 +177,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.det_module_fill = self.thm.light_det_module_fill
             # general
             self.plot_bg_color = self.thm.light_plot_bg_color
+            self.beamstop_color = self.thm.light_beamstop_color
+            self.beamstop_edge_color = self.thm.light_beamstop_edge_color
             self.unit_label_color = self.thm.light_unit_label_color
             self.unit_label_fill = self.thm.light_unit_label_fill
             # slider
@@ -217,13 +226,26 @@ class MainWindow(QtWidgets.QMainWindow):
             self.ax.setMouseEnabled(x=True, y=True)
             # disable right click  context menu
             self.ax.setMenuEnabled(True)
-        
-        # container for contour lines
-        self.patches = {'beamcenter':None, 'conic':[], 'reference':[], 'labels':[]}
 
-        # add beam center scatter plot
-        self.patches['beamcenter'] = pg.ScatterPlotItem()
-        self.ax.addItem(self.patches['beamcenter'])
+        # container for contour lines
+        self.patches = {'beamcenter':None,
+                        'beamstop':None,
+                        'bs_label':None,
+                        'conic':[],
+                        'reference':[],
+                        'labels':[]}
+
+        # add beam stop scatter plot
+        # pxMode=False
+        # Size is in scene coordinates and the spots scale with the
+        # view. Otherwise, spots are always the same size regardless
+        # of scaling, and size is given in px.
+        self.patches['beamstop'] = pg.PlotDataItem(useCache=True,
+                                                   pen=pg.mkPen(self.beamstop_edge_color,
+                                                                width=self.plo.conic_linewidth),
+                                                   brush=pg.mkBrush(self.beamstop_color),
+                                                   fillOutline=True)
+        self.ax.addItem(self.patches['beamstop'])
 
         # add empty plot per reference contour line
         for i in range(self.plo.conic_ref_num):
@@ -248,7 +270,22 @@ class MainWindow(QtWidgets.QMainWindow):
             temp_label.setFont(font)
             self.patches['labels'].append(temp_label)
             self.ax.addItem(temp_label)
-        
+
+        # add beam center scatter plot
+        self.patches['beamcenter'] = pg.ScatterPlotItem(symbol = self.plo.beamcenter_marker,
+                                                        size = self.plo.beamcenter_size,
+                                                        brush = pg.mkBrush(self.cont_cmap.map(0, mode='qcolor')),
+                                                        pen = pg.mkPen(None))
+        self.ax.addItem(self.patches['beamcenter'])
+
+        # label for beamstop contour
+        bs_label = pg.TextItem(anchor=(0.5,0.5),
+                               color=self.unit_label_color,
+                               fill=pg.mkBrush(self.conic_label_fill))
+        bs_label.setFont(font)
+        self.patches['bs_label'] = bs_label
+        self.ax.addItem(bs_label)
+
         # build detector modules
         self.build_detector()
 
@@ -275,6 +312,18 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.menu_bar = self.menuBar()
 
+        # append 'menu' and 'value' (string!) as tuple to this list
+        # update_menu_checkmarks() will then reset the
+        # checkmark to the active entry after reload of
+        # settings.
+        #
+        # set checkmark: standard menus
+        # for menu, token in self.menus_to_update:
+        #     for action in menu.actions():
+        #         if action.text() == token:
+        #             action.setChecked(True)
+        self.menus_to_update = []
+
         # self.update_menu_checkmarks() will access
         # the menus and update the checkmarks upon
         # settings reload via self.change_settings()
@@ -298,15 +347,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.menu_ref = self.menu_bar.addMenu('Reference')
         self.group_ref = QtGui.QActionGroup(self)
         self.group_ref.setExclusive(True)
-        
         # menu Reference: add None
         ref_action = QtGui.QAction('None', self, checkable=True)
         self.set_menu_action(ref_action, self.change_reference, 'None')
         self.menu_ref.addAction(ref_action)
         self.group_ref.addAction(ref_action)
-        if 'None' == self.geo.reference:
+        if self.geo.reference == 'None':
             ref_action.setChecked(True)
-        
+        self.menus_to_update.append((self.menu_ref, self.geo.reference))
         # menu Reference: add pyFAI library
         self.sub_menu_pyFAI = QtWidgets.QMenu('pyFAI', self)
         self.menu_ref.addMenu(self.sub_menu_pyFAI)
@@ -317,12 +365,39 @@ class MainWindow(QtWidgets.QMainWindow):
             self.group_ref.addAction(ref_action)
             if ref_name == self.geo.reference:
                 ref_action.setChecked(True)
+        self.menus_to_update.append((self.sub_menu_pyFAI, self.geo.reference ))
 
         # menu Reference: add Custom
         self.sub_menu_custom = QtWidgets.QMenu('Custom', self)
         self.menu_ref.addMenu(self.sub_menu_custom)
+        self.menus_to_update.append((self.sub_menu_custom, self.geo.reference ))
+        
+        # menu Beamstop
+        self.menu_bs = self.menu_bar.addMenu('Beamstop')
+        self.group_bs = QtGui.QActionGroup(self)
+        self.group_bs.setExclusive(True)
+        # menu Beamstop: add None
+        bs_action = QtGui.QAction('None', self, checkable=True)
+        self.set_menu_action(bs_action, self.change_beamstop, 'None')
+        self.menu_bs.addAction(bs_action)
+        self.group_bs.addAction(bs_action)
+        if self.geo.bssz == 'None':
+            bs_action.setChecked(True)
+        self.menus_to_update.append((self.menu_bs, str(self.geo.bssz)))
+        # menu Beamstop: add sizes list
+        self.sub_menu_bs = QtWidgets.QMenu('Sizes [mm]', self)
+        self.menu_bs.addMenu(self.sub_menu_bs)
+        for bs_size in sorted(self.geo.bs_list):
+            bs_sub_action = QtGui.QAction(str(bs_size), self, checkable=True)
+            self.set_menu_action(bs_sub_action, self.change_beamstop, bs_size)
+            self.sub_menu_bs.addAction(bs_sub_action)
+            self.group_bs.addAction(bs_sub_action)
+            if bs_size == self.geo.bssz:
+                bs_sub_action.setChecked(True)
+        self.menus_to_update.append((self.sub_menu_bs, str(self.geo.bssz)))
         
         # menu Units
+        # non-standard menu -> self.geo.unit is int
         self.menu_unit = self.menu_bar.addMenu('Unit')
         group_unit = QtGui.QActionGroup(self)
         group_unit.setExclusive(True)
@@ -337,7 +412,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # menu View
         menu_view = self.menu_bar.addMenu('View')
         # submenu Theme
-        menu_view.addSeparator()
+        # non-standard menu -> self.geo.darkmode is bool
         self.menu_theme = menu_view.addMenu('Theme')
         group_theme = QtGui.QActionGroup(self)
         group_theme.setExclusive(True)
@@ -348,7 +423,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.menu_theme.addAction(theme_action)
             if invert == self.geo.darkmode:
                 theme_action.setChecked(True)
-        
+
         # submenu Colormap
         self.menu_cmap = menu_view.addMenu('Colormap')
         group_cmap = QtGui.QActionGroup(self)
@@ -360,7 +435,8 @@ class MainWindow(QtWidgets.QMainWindow):
             group_cmap.addAction(cmap_action)
             if cmap_name == self.geo.colormap:
                 cmap_action.setChecked(True)
-
+        self.menus_to_update.append((self.menu_cmap, self.geo.colormap))
+        
         # menu Settings
         menu_edit = self.menu_bar.addMenu('Settings')
         # submenu Edit
@@ -394,6 +470,13 @@ class MainWindow(QtWidgets.QMainWindow):
         menu_default.addAction(default_action)
 
     def update_menu_checkmarks(self):
+        # set checkmark: standard menus
+        for menu, token in self.menus_to_update:
+            for action in menu.actions():
+                if action.text() == token:
+                    print(action.text(), token)
+                    action.setChecked(True)
+        
         # set checkmark: detectors
         # - move through submenus
         for menu in self.menu_det.actions():
@@ -401,22 +484,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 for action in menu.menu().actions():
                     if action.text() == self.geo.det_size:
                         action.setChecked(True)
-
-        # set checkmark: reference
-        # - check 'None'
-        # - move through submenus
-        for action in self.menu_ref.actions():
-            if action.text() == self.geo.reference:
-                action.setChecked(True)
-        # set checkmark: reference - pyFAI
-        for action in self.sub_menu_pyFAI.actions():
-            if action.text() == self.geo.reference:
-                action.setChecked(True)
-        # set checkmark: reference - custom
-        for action in self.sub_menu_custom.actions():
-            if action.text() == self.geo.reference:
-                action.setChecked(True)
-
+        
         # set checkmark: units
         # - self.geo.unit is int
         for num, action in enumerate(self.menu_unit.actions()):
@@ -428,11 +496,6 @@ class MainWindow(QtWidgets.QMainWindow):
         conv = {'Light': False, 'Dark': True}
         for action in self.menu_theme.actions():
             if conv[action.text()] == self.geo.darkmode:
-                action.setChecked(True)
-
-        # set checkmark: colormaps
-        for action in self.menu_cmap.actions():
-            if action.text() == self.geo.colormap:
                 action.setChecked(True)
 
     def add_unit_label(self):
@@ -488,6 +551,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sliderWidget.apply_style()
         self.sliderWidget.init_sliders()
         self.sliderWidget.center_frame()
+
+    def change_beamstop(self, size):
+        self.geo.bssz = size
+        self.redraw_canvas()
 
     def change_cmap(self, cmap):
         self.geo.colormap = cmap
@@ -587,6 +654,8 @@ class MainWindow(QtWidgets.QMainWindow):
         geo.xoff = 0.0           # [mm]   Detector offset (horizontal)
         geo.rota = 25.0          # [deg]  Detector rotation
         geo.tilt = 0.0           # [deg]  Detector tilt
+        geo.bssz = 'None'        # [mm]   Current beamstop size (or 'None')
+        geo.bsdx = 40.0          # [mm]   Beamstop distance
         geo.unit = 1             # [0-3]  Contour legend
                                  #          0: 2-Theta
                                  #          1: d-spacing
@@ -596,6 +665,11 @@ class MainWindow(QtWidgets.QMainWindow):
                                  #          pick from pyFAI
         geo.darkmode = False     # [bool] Darkmode
         geo.colormap = 'viridis' # [cmap] Contour colormap
+        geo.bs_list = [1.5,      # [list] Available beamstop sizes
+                       2.0,
+                       2.5,
+                       3.0,
+                       5.0]
         return geo
 
     def get_defaults_plo(self):
@@ -607,6 +681,7 @@ class MainWindow(QtWidgets.QMainWindow):
         plo.conic_tth_min = 5               # [int]    Minimum 2-theta contour line
         plo.conic_tth_max = 150             # [int]    Maximum 2-theta contour line
         plo.conic_tth_num = 30              # [int]    Number of contour lines
+        plo.beamstop_shape = 'o'            # [marker] Beam stop shape
         plo.beamcenter_marker = 'o'         # [marker] Beam center marker
         plo.beamcenter_size = 6             # [int]    Beam center size
         plo.conic_linewidth = 4.0           # [float]  Contour linewidth
@@ -640,6 +715,7 @@ class MainWindow(QtWidgets.QMainWindow):
         plo.enable_slider_yoff = True       # [bool]   Show vertical offset slider
         plo.enable_slider_xoff = True       # [bool]   Show horizontal offset slider
         plo.enable_slider_tilt = True       # [bool]   Show tilt slider
+        plo.enable_slider_bsdx = True       # [bool]   Show beamstop distance slider
         # - update/reset - 
         plo.update_settings = True          # [bool]   Update settings file after load
         plo.update_det_bank = True          # [bool]   Update detector bank after load
@@ -660,6 +736,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # light mode
         thm.light_conic_label_fill = '#FFFFFF'    # [str]    Contour label fill color
         thm.light_conic_ref_color = '#DCDCDC'     # [color]  Reference contour color
+        thm.light_beamstop_color = '#DCDCDC'      # [color]  Beamstop color
+        thm.light_beamstop_edge_color = '#EEEEEE' # [color]  Beamstop edge color
         thm.light_det_module_color = '#404040'    # [color]  Detector module border color
         thm.light_det_module_fill = '#404040'     # [color]  Detector module background color
         thm.light_plot_bg_color = '#FFFFFF'       # [str]    Plot background color
@@ -672,6 +750,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # dark mode
         thm.dark_conic_label_fill = '#000000'     # [str]    Contour label fill color
         thm.dark_conic_ref_color = '#202020'      # [color]  Reference contour color
+        thm.dark_beamstop_color = '#202020'       # [color]  Beamstop color
+        thm.dark_beamstop_edge_color = '#404040'  # [color]  Beamstop edge color
         thm.dark_det_module_color = '#EEEEEE'     # [color]  Detector module border color
         thm.dark_det_module_fill = '#EEEEEE'      # [color]  Detector module background color
         thm.dark_plot_bg_color = '#000000'        # [str]    Plot background color
@@ -692,21 +772,30 @@ class MainWindow(QtWidgets.QMainWindow):
         lmt.ener_min =  5.0    # [float] Energy minimum [keV]
         lmt.ener_max =  100.0  # [float] Energy maximum [keV]
         lmt.ener_stp =  1.0    # [float] Energy step size [keV]
+
         lmt.dist_min =  40.0   # [float] Distance minimum [mm]
         lmt.dist_max =  1000.0 # [float] Distance maximum [mm]
         lmt.dist_stp =  1.0    # [float] Distance step size [mm]
+
         lmt.xoff_min = -150.0  # [float] Horizontal offset minimum [mm]
         lmt.xoff_max =  150.0  # [float] Horizontal offset maximum [mm]
         lmt.xoff_stp =  1.0    # [float] Horizontal offset step size [mm]
+
         lmt.yoff_min = -250.0  # [float] Vertical offset minimum [mm]
         lmt.yoff_max =  250.0  # [float] Vertical offset maximum [mm]
         lmt.yoff_stp =  1.0    # [float] Vertical offset step size [mm]
+
         lmt.rota_min = -60.0   # [float] Rotation minimum [deg]
         lmt.rota_max =  60.0   # [float] Rotation maximum [deg]
         lmt.rota_stp =  1.0    # [float] Rotation step size [deg]
+
         lmt.tilt_min = -25.0   # [float] Tilt minimum [deg]
         lmt.tilt_max =  25.0   # [float] Tilt maximum [deg]
         lmt.tilt_stp =  1.0    # [float] Tilt step size [deg]
+
+        lmt.bsdx_min =   5.0   # [float] Beamstop distance minimum [mm]
+        lmt.bsdx_max = 1000.0  # [float] Beamstop distance maximum [mm]
+        lmt.bsdx_stp =   1.0   # [float] Beamstop distance step size [mm]
         
         return lmt
 
@@ -943,12 +1032,47 @@ class MainWindow(QtWidgets.QMainWindow):
         # shift the grid to draw the cones, to make sure the contours are drawn
         # within the visible area
         _comp_shift = -(self.geo.yoff + np.tan(np.deg2rad(self.geo.rota))*self.geo.dist)
+
+        # convert theta in degrees to radians
+        # for some reason I defined it negative some time ago
+        # now there's no turning back!
+        omega = -np.deg2rad(self.geo.tilt + self.geo.rota)
+        
         # update beam center
-        self.patches['beamcenter'].setData([self.geo.xoff],[_comp_shift],
-                                            symbol = self.plo.beamcenter_marker,
-                                            size = self.plo.beamcenter_size,
-                                            brush = pg.mkBrush(self.cont_cmap.map(0, mode='qcolor')),
-                                            pen = pg.mkPen(None))
+        self.patches['beamcenter'].setData([self.geo.xoff],[_comp_shift])
+
+        if self.geo.bssz and self.geo.bssz != 'None':
+            # update beam stop
+            bs_theta = np.tan((self.geo.bssz/2) / self.geo.bsdx)
+
+            # calculate the conic section corresponding to the theta angle
+            # :returns False is conic is outside of visiblee area
+            x, y, label_pos = self.calc_conic(omega, bs_theta, steps=self.plo.conic_steps)
+            if x is False:
+                self.patches['beamstop'].setVisible(False)
+                self.patches['bs_label'].setVisible(False)
+            else:
+                # plot the conic section
+                self.patches['beamstop'].setData(x, y, fillLevel=y.max())
+                self.patches['beamstop'].setVisible(True)
+
+                # Conversion factor keV to Angstrom: 12.398
+                # sin(t)/l: np.sin(Theta) / lambda -> (12.398/geo_energy)
+                stl = np.sin(bs_theta/2)/(12.398/self.geo.ener)
+
+                # d-spacing: l = 2 d sin(t) -> 1/2(sin(t)/l)
+                dsp = 1/(2*stl)
+
+                # prepare the values in the different units / labels
+                #_units = {0:np.rad2deg(theta), 1:_dsp, 2:_stl*4*np.pi, 3:_stl}
+                _units = {0:np.rad2deg(bs_theta), 1:dsp, 2:stl*4*np.pi, 3:stl}
+                self.patches['bs_label'].setPos(self.geo.xoff, label_pos)
+                self.patches['bs_label'].setText(f'{_units[self.geo.unit]:.2f}')
+                self.patches['bs_label'].setVisible(True)
+        else:
+            self.patches['beamstop'].setVisible(False)
+            self.patches['bs_label'].setVisible(False)
+
         for _n, _ttd in enumerate(self.cont_geom_num):
             self.patches['conic'][_n].setVisible(False)
             self.patches['labels'][_n].setVisible(False)
@@ -957,11 +1081,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
             # convert theta in degrees to radians
             theta = np.deg2rad(_ttd)
-
-            # convert theta in degrees to radians
-            # for some reason I defined it negative some time ago
-            # now there's no turning back!
-            omega = -np.deg2rad(self.geo.tilt + self.geo.rota)
 
             # calculate the conic section corresponding to the theta angle
             # :returns False is conic is outside of visiblee area
@@ -1127,6 +1246,8 @@ class MainWindow(QtWidgets.QMainWindow):
         elif 1 < abs(ecc) < 100:
             # hyperbola
             h = np.sign(omega) * (y1+y2)/2
+            if h == 0:
+                return False, False, False
             w = h * np.sqrt(e21)
             l = -np.arcsinh((_xdim + x0) / w)
             r =  np.arcsinh((_xdim - x0) / w)
@@ -1172,6 +1293,13 @@ class MainWindow(QtWidgets.QMainWindow):
         if val is not None:
             if self.sender().objectName() == 'dist':
                 self.geo.dist = float(val)
+                if self.plo.enable_slider_bsdx:
+                    # set beamstop max distance to current detector distance
+                    # or the maximum allowed value, whichever is smaller
+                    current_max = min(self.geo.dist, self.lmt.bsdx_max)
+                    self.sliderWidget.update_slider_limits(self.sliderWidget.sl_bsdx,
+                                                           self.lmt.bsdx_min,
+                                                           current_max)
             elif self.sender().objectName() == 'rota':
                 self.geo.rota = float(val)
             elif self.sender().objectName() == 'tilt':
@@ -1182,6 +1310,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.geo.xoff = float(val)
             elif self.sender().objectName() == 'ener':
                 self.geo.ener = float(val)
+            elif self.sender().objectName() == 'bsdx':
+                self.geo.bsdx = float(val)
 
         # re-calculate cones and re-draw contours
         self.draw_conics()
@@ -1263,6 +1393,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 continue
             for p, x in vals.items():
                 if p in conv[key].__dict__.keys():
+                    # make sure the strings are in order.
+                    # this is bad!
+                    if type(x) == str and x.lower() == 'none':
+                        x = 'None'
                     setattr(conv[key], p, x)
                 else:
                     print(f'WARNING: "{p}" is not a valid key!')
@@ -1386,13 +1520,28 @@ class SliderWidget(QtWidgets.QFrame):
                                            self.parent().lmt.rota_stp)
             self.box_width_dynamic += self.parent().plo.slider_column_width
             _idx += 1
+        if self.parent().plo.enable_slider_bsdx:
+            self.sl_bsdx = self.add_slider(self.grid,
+                                           'Beamstop\ndistance\n[mm]', 'bsdx', _idx,
+                                           self.parent().geo.bsdx,
+                                           self.parent().lmt.bsdx_min,
+                                           self.parent().lmt.bsdx_max,
+                                           self.parent().lmt.bsdx_stp)
+            self.box_width_dynamic += self.parent().plo.slider_column_width
+            # set beamstop distance slider max limit to detector distance
+            self.update_slider_limits(self.sl_bsdx, self.parent().lmt.bsdx_min, self.parent().geo.dist)
+            _idx += 1
+        
         self.resize(self.box_width_dynamic, self.box_height_hide)
 
     def center_frame(self):
         self.move(int((self.parent().size().width()-self.box_width_dynamic)/2), self.parent().offset_win32)
 
-    def update_slider(self, label, value):
+    def update_slider_label(self, label, value):
         label.setText(str(int(value)))
+
+    def update_slider_limits(self, slider, lmin, lmax):
+        slider.setRange(int(lmin), int(lmax))
 
     def add_slider(self, layout, label, token, idx, lval, lmin, lmax, lstp):
         font = QtGui.QFont()
@@ -1412,6 +1561,7 @@ class SliderWidget(QtWidgets.QFrame):
         label_value = QtWidgets.QLabel()
         label_value.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         label_value.setFont(font)
+        label_value.setText(str(int(lval)))
         label_value.setStyleSheet(f'''
             QLabel {{
                 color: {self.parent().slider_label_color};
@@ -1421,19 +1571,18 @@ class SliderWidget(QtWidgets.QFrame):
         ''')
 
         slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Vertical, objectName=token)
-        slider.setValue(999)
-        slider.valueChanged.connect(self.parent().update_screen)
-        slider.valueChanged.connect(lambda value: self.update_slider(label_value, value))
         slider.setRange(int(lmin), int(lmax))
         slider.setSingleStep(int(lstp))
         slider.setPageStep(int(lstp))
         slider.setValue(int(lval))
+        slider.valueChanged.connect(self.parent().update_screen)
+        slider.valueChanged.connect(lambda value: self.update_slider_label(label_value, value))
 
         layout.addWidget(label_name, 0, idx, QtCore.Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(slider, 1, idx, QtCore.Qt.AlignmentFlag.AlignHCenter)
         layout.addWidget(label_value, 2, idx, QtCore.Qt.AlignmentFlag.AlignCenter)
 
-        return (slider, label_name, label_value)
+        return slider#(slider, label_name, label_value)
 
     def toggle_panel(self, event):
         if type(event) == QtGui.QEnterEvent:

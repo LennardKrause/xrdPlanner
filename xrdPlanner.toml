@@ -1,6 +1,6 @@
 [project]
 name = "xrdPlanner"
-version = "1.0.5"
+version = "1.1.0"
 authors = [
   { name="Lennard Krause", email="lennard.krause@chem.au.dk" },
 ]
