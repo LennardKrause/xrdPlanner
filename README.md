@@ -113,7 +113,6 @@
     conic_tth_min = 5               # [int]    Minimum 2-theta contour line
     conic_tth_max = 150             # [int]    Maximum 2-theta contour line
     conic_tth_num = 30              # [int]    Number of contour lines
-    beamstop_shape = 'o'            # [marker] Beam stop shape
     beamcenter_marker = 'o'         # [marker] Beam center marker
     beamcenter_size = 6             # [int]    Beam center size
     conic_linewidth = 4.0           # [float]  Contour linewidth
