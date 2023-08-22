@@ -41,7 +41,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # menubar is displayed within the main window on Windows
         # so we need to make space for it
         # no idea about other OS, if there are issues fix them here
-        if sys.platform == 'win32':
+        if sys.platform in ['win32', 'linux', 'linux2']:
             self.offset_win32 = self.menuBar().height() - int(round(self.plo.slider_margin/2, 0))
         else:
             self.offset_win32 = 0
@@ -114,10 +114,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cont_geom_num = np.linspace(self.plo.conic_tth_min, self.plo.conic_tth_max, self.plo.conic_tth_num)
 
         # translate unit for plot title
-        self.unit_names = ['2\U0001D6F3 [\u00B0]',
+        self.unit_names = ['2\u03B8 [\u00B0]',
                            'd [\u212B]',
                            'q [\u212B\u207B\u00B9]',
-                           'sin(\U0001D6F3)/\U0001D706 [\u212B\u207B\u00B9]']
+                           'sin(\u03B8)/\u03BB [\u212B\u207B\u00B9]']
         if self.geo.unit >= len(self.unit_names):
             print(f'Error: Valid geo.unit range is from 0 to {len(self.unit_names)-1}, geo.unit={self.geo.unit}')
             raise SystemExit
