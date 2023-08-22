@@ -38,6 +38,7 @@
   - conic_ref_cif_kev: this key sets the energy at which Dans_Dffraction calculates the intensities from a cif, increasing the value allows for higher resolution reference conics. However, the calculation will get slower.
 
 ## Latest updates:
+  - 2023-08-22 Update: Added a beamstop, define distance to sample with a slider and pick a size from the menu.
   - 2023-08-15 Bugfix: Fixed several bugs with regard to the save/load of the settings file (Again).
   - 2023-08-15 Update: Changed the way themes / styles and customisation works internally.
   - 2023-07-14 Update: Added a key _plo.conic_ref_cif_kev_ to edit the energy for the cif intensity calculation.
@@ -89,6 +90,8 @@
     xoff = 0.0           # [mm]   Detector offset (horizontal)
     rota = 25.0          # [deg]  Detector rotation
     tilt = 0.0           # [deg]  Detector tilt
+    bssz = 'None'        # [mm]   Current beamstop size (or 'None')
+    bsdx = 40.0          # [mm]   Beamstop distance
     unit = 1             # [0-3]  Contour legend
                          #         0: 2-Theta
                          #         1: d-spacing
@@ -98,12 +101,18 @@
                          #          pick from pyFAI
     darkmode = False     # [bool] Darkmode
     colormap = 'viridis' # [cmap] Contour colormap
+    bs_list = [1.5,      # [list] Available beamstop sizes
+               2.0,
+               2.5,
+               3.0,
+               5.0]
 
 #### plo - plot settings
     # - geometry contour section - 
     conic_tth_min = 5               # [int]    Minimum 2-theta contour line
     conic_tth_max = 150             # [int]    Maximum 2-theta contour line
     conic_tth_num = 30              # [int]    Number of contour lines
+    beamstop_shape = 'o'            # [marker] Beam stop shape
     beamcenter_marker = 'o'         # [marker] Beam center marker
     beamcenter_size = 6             # [int]    Beam center size
     conic_linewidth = 4.0           # [float]  Contour linewidth
@@ -141,7 +150,8 @@
     enable_slider_yoff = True       # [bool]   Show vertical offset slider
     enable_slider_xoff = True       # [bool]   Show horizontal offset slider
     enable_slider_tilt = True       # [bool]   Show tilt slider
-    
+    enable_slider_bsdx = True       # [bool]   Show beamstop distance slider
+            
     # - update/reset - 
     update_settings = True          # [bool]   Update settings file after load
     update_det_bank = True          # [bool]   Update detector bank after load
@@ -158,6 +168,8 @@
     # light mode
     light_conic_label_fill = '#FFFFFF'    # [str]    Contour label fill color
     light_conic_ref_color = '#DCDCDC'     # [color]  Reference contour color
+    light_beamstop_color = '#DCDCDC'      # [color]  Beamstop color
+    light_beamstop_edge_color = '#EEEEEE' # [color]  Beamstop edge color
     light_det_module_color = '#404040'    # [color]  Detector module border color
     light_det_module_fill = '#404040'     # [color]  Detector module background color
     light_plot_bg_color = '#FFFFFF'       # [str]    Plot background color
@@ -171,6 +183,8 @@
     # dark mode
     dark_conic_label_fill = '#000000'     # [str]    Contour label fill color
     dark_conic_ref_color = '#202020'      # [color]  Reference contour color
+    dark_beamstop_color = '#202020'       # [color]  Beamstop color
+    dark_beamstop_edge_color = '#404040'  # [color]  Beamstop edge color
     dark_det_module_color = '#EEEEEE'     # [color]  Detector module border color
     dark_det_module_fill = '#EEEEEE'      # [color]  Detector module background color
     dark_plot_bg_color = '#000000'        # [str]    Plot background color
@@ -212,6 +226,10 @@
     tilt_min = -25.0   # [float] Tilt minimum [deg]
     tilt_max =  25.0   # [float] Tilt maximum [deg]
     tilt_stp =  1.0    # [float] Tilt step size [deg]
+
+    bsdx_min =   5.0   # [float] Beamstop distance minimum [mm]
+    bsdx_max = 1000.0  # [float] Beamstop distance maximum [mm]
+    bsdx_stp =   1.0   # [float] Beamstop distance step size [mm]
 
 ## Detector db entries
 
