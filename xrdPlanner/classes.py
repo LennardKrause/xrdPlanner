@@ -1,6 +1,8 @@
 import os
 import sys
 import json
+import glob
+import shutil
 import numpy as np
 import pyqtgraph as pg
 import Dans_Diffraction as dif
@@ -29,11 +31,23 @@ class MainWindow(QtWidgets.QMainWindow):
         #  - dif.Crystal()
         #  - xtl.Scatter.powder()
         self.setAcceptDrops(True)
-        
-        # set path to settings file
-        self.path_settings = os.path.join(self.path_home, 'settings.json')
+
+        # set path to settings folder
+        self.path_settings = os.path.join(self.path_home, 'settings',)
+        # set path to active settings token
+        self.path_settings_token = os.path.join(self.path_settings, '.active',)
+        # set path to default settings file
+        self.path_settings_default = os.path.join(self.path_settings, 'default.json')
+        # set path to current settings file
+        self.active_settings = self.get_active_settings_file()
+        self.path_settings_current = os.path.join(self.path_settings, self.active_settings)
         # set path to detector database
         self.path_detdb = os.path.join(self.path_home, 'detector_db.json')
+
+        # move settings file from old location
+        _old_settings_file = os.path.join(self.path_home, 'settings.json')
+        if os.path.exists(_old_settings_file):
+            shutil.move(_old_settings_file, self.path_settings_default)
 
         # save/load parameters to/from file
         self.init_par()
@@ -82,7 +96,7 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # initialise all that depends on the settings
         # call this function to apply changes were made
-        # to the settings file -> change_settings()
+        # to the settings file -> reload_settings()
         self.init_modifiables()
         
         # populate the menus with detectors, references and units
@@ -96,6 +110,23 @@ class MainWindow(QtWidgets.QMainWindow):
         # make sure that everything
         # that is needed is initialised
         self.sliderWidget = SliderWidget(self)
+
+    def get_active_settings_file(self):
+        if os.path.exists(self.path_settings_token):
+            with open(self.path_settings_token, 'r') as rf:
+                name = rf.read()
+            if os.path.exists(os.path.join(self.path_settings, name)):
+                return name
+        # otherwise return default
+        _default = os.path.basename(self.path_settings_default)
+        self.set_active_settings_file(_default)
+        return _default
+    
+    def set_active_settings_file(self, active):
+        if not os.path.exists(self.path_settings):
+            os.makedirs(self.path_settings)
+        with open(self.path_settings_token, 'w') as wf:
+            wf.write(active)
 
     def init_modifiables(self):
         # get colormap
@@ -326,7 +357,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # self.update_menu_checkmarks() will access
         # the menus and update the checkmarks upon
-        # settings reload via self.change_settings()
+        # settings reload via self.reload_settings()
         self.menu_det = self.menu_bar.addMenu('Detector')
         group_det = QtGui.QActionGroup(self)
         group_det.setExclusive(True)
@@ -354,7 +385,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.group_ref.addAction(ref_action)
         if self.geo.reference == 'None':
             ref_action.setChecked(True)
-        self.menus_to_update.append((self.menu_ref, self.geo.reference))
         # menu Reference: add pyFAI library
         self.sub_menu_pyFAI = QtWidgets.QMenu('pyFAI', self)
         self.menu_ref.addMenu(self.sub_menu_pyFAI)
@@ -365,12 +395,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self.group_ref.addAction(ref_action)
             if ref_name == self.geo.reference:
                 ref_action.setChecked(True)
-        self.menus_to_update.append((self.sub_menu_pyFAI, self.geo.reference ))
 
         # menu Reference: add Custom
         self.sub_menu_custom = QtWidgets.QMenu('Custom', self)
         self.menu_ref.addMenu(self.sub_menu_custom)
-        self.menus_to_update.append((self.sub_menu_custom, self.geo.reference ))
         
         # menu Beamstop
         self.menu_bs = self.menu_bar.addMenu('Beamstop')
@@ -383,7 +411,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.group_bs.addAction(bs_action)
         if self.geo.bssz == 'None':
             bs_action.setChecked(True)
-        self.menus_to_update.append((self.menu_bs, str(self.geo.bssz)))
         # menu Beamstop: add sizes list
         self.sub_menu_bs = QtWidgets.QMenu('Sizes [mm]', self)
         self.menu_bs.addMenu(self.sub_menu_bs)
@@ -394,7 +421,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self.group_bs.addAction(bs_sub_action)
             if bs_size == self.geo.bssz:
                 bs_sub_action.setChecked(True)
-        self.menus_to_update.append((self.sub_menu_bs, str(self.geo.bssz)))
         
         # menu Units
         # non-standard menu -> self.geo.unit is int
@@ -435,47 +461,108 @@ class MainWindow(QtWidgets.QMainWindow):
             group_cmap.addAction(cmap_action)
             if cmap_name == self.geo.colormap:
                 cmap_action.setChecked(True)
-        self.menus_to_update.append((self.menu_cmap, self.geo.colormap))
         
         # menu Settings
-        menu_edit = self.menu_bar.addMenu('Settings')
+        menu_Settings = self.menu_bar.addMenu('Settings')
+        # import action
+        import_action = QtGui.QAction('Import settings file', self)
+        self.set_menu_action(import_action, self.import_settings_file)
+        menu_Settings.addAction(import_action)
+        # submenu Settings files
+        self.menu_custom_settings = menu_Settings.addMenu('Load settings file')
+        self.group_cset = QtGui.QActionGroup(self)
+        self.group_cset.setExclusive(True)
+        for cset_name in self.get_settings_files():
+            cset_action = QtGui.QAction(cset_name, self, checkable=True)
+            self.set_menu_action(cset_action, self.change_settings_file, cset_name)
+            self.menu_custom_settings.addAction(cset_action)
+            self.group_cset.addAction(cset_action)
+            if cset_name == self.active_settings:
+                cset_action.setChecked(True)
+        # save action
+        save_action = QtGui.QAction('Save current settings', self)
+        self.set_menu_action(save_action, self.save_current_settings)
+        menu_Settings.addAction(save_action)
+        # submenu Edit files
+        menu_Settings.addSeparator()
         # submenu Edit
+        menu_Edit = menu_Settings.addMenu('Edit files')
+        # prepare platform dependent file reader
         if sys.platform == 'win32':
-            tokens = [('Edit Detector db file', os.system, f'notepad {self.path_detdb}'),
-                      ('Edit Settings file', os.system, f'notepad {self.path_settings}'),
-                      ('Reload Settings', self.change_settings, None)]
+            tokens = [('Edit detector db file', os.system, f'notepad {self.path_detdb}'),
+                      ('Edit current settings file', self.edit_settings_file, f'notepad')]
         elif sys.platform == 'linux':
-            tokens = [('Edit Detector db', os.system, f'xdg-open {self.path_detdb}'),
-                      ('Edit Settings', os.system, f'xdg-open {self.path_settings}'),
-                      ('Reload Settings', self.change_settings, None)]
+            tokens = [('Edit detector db file', os.system, f'xdg-open {self.path_detdb}'),
+                      ('Edit current settings file', self.edit_settings_file, f'xdg-open')]
         else:
-            tokens = [('Edit Detector db', os.system, f'open -t {self.path_detdb}'),
-                      ('Edit Settings', os.system, f'open -t {self.path_settings}'),
-                      ('Reload Settings', self.change_settings, None)]
+            tokens = [('Edit detector db file', os.system, f'open -t {self.path_detdb}'),
+                      ('Edit current settings file', self.edit_settings_file, f'open -t')]
         for (name, funct, command) in tokens:
             edit_action = QtGui.QAction(name, self)
-            if command:
-                self.set_menu_action(edit_action, funct, command)
-            else:
-                self.set_menu_action(edit_action, funct)
-            menu_edit.addAction(edit_action)
-        # submenu Defaults
-        menu_edit.addSeparator()
-        menu_default = menu_edit.addMenu('Defaults')
-        default_action = QtGui.QAction('Save current settings', self)
-        self.set_menu_action(default_action, self.store_current_settings)
-        menu_default.addAction(default_action)
-        default_action = QtGui.QAction('Load default settings', self)
-        self.set_menu_action(default_action, self.reset_to_default)
-        menu_default.addAction(default_action)
+            self.set_menu_action(edit_action, funct, command)
+            menu_Edit.addAction(edit_action)
+        # reset action
+        #reset_action = QtGui.QAction('Reset to default settings', self)
+        #self.set_menu_action(reset_action, self.reset_to_default)
+        #menu_default.addAction(reset_action)
+
+    def edit_settings_file(self, command):
+        os.system(f'{command} {self.path_settings_current}')
+
+    def get_settings_files(self):
+        return sorted(map(os.path.basename, glob.glob(os.path.join(self.path_settings, '*.json'))))
+
+    def change_settings_file(self, name):
+        self.active_settings = name
+        self.path_settings_current = os.path.join(self.path_settings, name)
+        self.set_active_settings_file(name)
+        self.reload_settings()
+    
+    def import_settings_file(self):
+        fname, filter = QtWidgets.QFileDialog.getOpenFileName(self, 'Import settings file', '', "Settings files (*.json)")
+        if fname:
+            # copy to settings folder
+            shutil.copy(fname, self.path_settings)
+            bname = os.path.basename(fname)
+            # Add to menu
+            cset_action = QtGui.QAction(bname, self, checkable=True)
+            self.set_menu_action(cset_action, self.change_settings_file, bname)
+            self.menu_custom_settings.addAction(cset_action)
+            self.group_cset.addAction(cset_action)
+            cset_action.setChecked(True)
+            # change settings and reload
+            self.change_settings_file(bname)
 
     def update_menu_checkmarks(self):
-        # set checkmark: standard menus
-        for menu, token in self.menus_to_update:
-            for action in menu.actions():
-                if action.text() == token:
-                    action.setChecked(True)
-        
+        # set checkmark: references none
+        for action in self.menu_ref.actions():
+            if action.text() == self.geo.reference:
+                action.setChecked(True)
+        # set checkmark: references pyFAI
+        for action in self.sub_menu_pyFAI.actions():
+            if action.text() == self.geo.reference :
+                action.setChecked(True)
+        # set checkmark: references custom
+        for action in self.sub_menu_custom.actions():
+            if action.text() == self.geo.reference :
+                action.setChecked(True)
+        # set checkmark: beamstop none
+        for action in self.menu_bs.actions():
+            if action.text() == str(self.geo.bssz):
+                action.setChecked(True)
+        # set checkmark: beamstop custom
+        for action in self.sub_menu_bs.actions():
+            if action.text() == str(self.geo.bssz):
+                action.setChecked(True)
+        # set checkmark: colormap
+        for action in self.menu_cmap.actions():
+            if action.text() == self.geo.colormap:
+                action.setChecked(True)
+        # set checkmark: active settings
+        for action in self.menu_custom_settings.actions():
+            if action.text() == self.active_settings:
+                action.setChecked(True)
+
         # set checkmark: detectors
         # - move through submenus
         for menu in self.menu_det.actions():
@@ -534,9 +621,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def set_window_title(self):
         if self.geo.reference == 'None':
-            self.setWindowTitle(self.det.name)
+            self.setWindowTitle(f'{self.det.name} - {self.active_settings}')
         else:
-            self.setWindowTitle(f'{self.det.name} - {self.geo.reference}')
+            self.setWindowTitle(f'{self.det.name} - {self.geo.reference} - {self.active_settings}')
 
     def redraw_canvas(self):
         # save darkmode toggle
@@ -559,7 +646,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.geo.colormap = cmap
         self.redraw_canvas()
 
-    def change_settings(self):
+    def reload_settings(self):
         # load settings
         self.load_par()
         self.redraw_canvas()
@@ -1338,7 +1425,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.get_defaults_all()
         # file name to store current settings
         # if file_dump doesn't exists, make a dump
-        if not os.path.exists(self.path_settings):
+        if not os.path.exists(self.path_settings_current):
             self.save_par()
         # if it exists load parameters
         else:
@@ -1352,17 +1439,17 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.plo.update_settings:
             self.save_par()
 
-    def reset_to_default(self):
-        # plo: plot details
-        self.plo = self.get_defaults_plo()
-        # lmt: geometry limits
-        self.lmt = self.get_defaults_lmt()
-        # thm: theme
-        self.thm = self.get_defaults_thm()
-        self.save_par()
-        self.redraw_canvas()
+    #def reset_to_default(self):
+    #    # plo: plot details
+    #    self.plo = self.get_defaults_plo()
+    #    # lmt: geometry limits
+    #    self.lmt = self.get_defaults_lmt()
+    #    # thm: theme
+    #    self.thm = self.get_defaults_thm()
+    #    self.save_par()
+    #    self.redraw_canvas()
 
-    def store_current_settings(self):
+    def save_current_settings(self):
         # self.geo is edited with the sliders
         # self._geo holds the initial values
         # usually I do not want to overwrite 
@@ -1374,16 +1461,16 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def save_par(self):
         # Writing geo as dict to file
-        with open(self.path_settings, 'w') as wf:
+        with open(self.path_settings_current, 'w') as wf:
             json.dump({'geo':self._geo.__dict__, 'plo':self.plo.__dict__, 'thm':self.thm.__dict__, 'lmt':self.lmt.__dict__}, wf, indent=4)
 
     def load_par(self, skip=[]):
         # Opening JSON file as dict
         try:
-            with open(self.path_settings, 'r') as of:
+            with open(self.path_settings_current, 'r') as of:
                 pars = json.load(of)
         except: # any error is critical here!
-            print(f"Error parsing Detector db at: {self.path_detdb}")
+            print(f"Error parsing settings file at: {self.path_settings_current}")
             raise SystemExit
         conv = {'geo':self.geo, 'plo':self.plo, 'thm':self.thm, 'lmt':self.lmt}
         for key, vals in pars.items():
