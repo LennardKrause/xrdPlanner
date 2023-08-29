@@ -38,6 +38,7 @@
   - conic_ref_cif_kev: this key sets the energy at which Dans_Dffraction calculates the intensities from a cif, increasing the value allows for higher resolution reference conics. However, the calculation will get slower.
 
 ## Latest updates:
+  - 2023-08-29 Update: Added a feature to import and switch between settings files.
   - 2023-08-22 Bugfix: Fixed missing symbols and the slider bar on Linux.
   - 2023-08-22 Update: Added a beamstop, define distance to sample with a slider and pick a size from the menu.
   - 2023-08-15 Bugfix: Fixed several bugs with regard to the save/load of the settings file (Again).
