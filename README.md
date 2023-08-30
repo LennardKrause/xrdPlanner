@@ -29,6 +29,11 @@
   - Add all the missing detectors to the _detector_db.json_.
   - Check the [settings file documentation](#settings-file-documentation).
 
+## Use pre-set beamline settings files:
+  - Download a settings file from here (e.g. settings/DanMAX.json).
+  - Use the import settings function from the GUI to import.
+  - You can switch between all imported settings.
+
 ## Known Bugs:
   - On Windows: Switching Dark/Light mode requires restart to change the window frame color.
   - As of now, there is no consistency check performed on the imported .json file.
