@@ -36,7 +36,7 @@ $$\Delta y_{PONI} = SDD \cdot tilt$$
 The vertical shift of the point of beam incidence (POBI) in the detector reference frame ($\Delta y_{POBI}$) can be described by the side length of the right-angle triangle spanned by the goniometer origin, the PONI, and the POBI, subtracted from the vertical shift of the PONI.
 $$\Delta y_{POBI} = SDD \cdot \left( tilt - tan \left( rotation + tilt \right) \right)$$
 
-[**pyFAI**](https://pyfai.readthedocs.io/en/v2023.1/geometry.html#geometry) uses three rotations, $rot1$, $rot2$, and $rot3$, and three translations, $dist$, $poni1$, and $poni2$, to define the detector position. xrdPlanner uses the same translations ($SDD$, $y_{offset}$, and $x_{offset}$), but only one of the rotations ($rot2$), as well as the additional $tilt$. Apart from a change in sign, the pyFAI $rot2$ and xrdPlanner $rotation$ are equivalent, however, the $tilt$ in pyFAI convention is described by a combination of $rot2$ and shift of $poni1$:
+[**pyFAI**](https://pyfai.readthedocs.io/en/v2023.1/geometry.html#geometry) uses three rotations, $rot1$, $rot2$, and $rot3$, and three translations, $dist$, $poni1$, and $poni2$, to define the detector position. xrdPlanner uses the same translations ($SDD$, $y_{offset}$, and $x_{offset}$), but only one of the rotations ($rot2$). $tilt$ can be considered a convenience function as it is eqivalent to the combination of $rotation$ and $y_{offset}$. Apart from the change in sign, the pyFAI $rot2$ and xrdPlanner $rotation$ are equivalent, however, the $tilt$ in pyFAI convention is described by a combination of $rot2$ and shift of $poni1$:
 $$rot2 = -\left( rotation + tilt\right)$$
 combined with
 $$\Delta poni1 = SDD \cdot tilt + y_{offset}$$
