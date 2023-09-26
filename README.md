@@ -44,6 +44,11 @@
   - conic_ref_cif_kev: this key sets the energy at which Dans_Dffraction calculates the intensities from a cif, increasing the value allows for higher resolution reference conics. However, the calculation will get slower.
 
 ## Latest updates:
+  - 2023-09-26 Update: Added a PONI marker.
+  - 2023-09-26 Update: Added the option to add custom labels to the sliders.
+  - 2023-09-26 Update: Added the option to automatically find a reasonable window size (set plot_size to 0).
+  - 2023-09-26 Bugfix: Fixed a bug that prevented the beamstop menu from updating upon changing the available beamstop list.
+  - 2023-09-26 Bugfix: Fixed a bug in the calculation of the beamcenter for the combination of rotation and tilt.
   - 2023-08-29 Update: Added a feature to import and switch between settings files.
   - 2023-08-22 Bugfix: Fixed missing symbols and the slider bar on Linux.
   - 2023-08-22 Update: Added a beamstop, define distance to sample with a slider and pick a size from the menu.
@@ -79,11 +84,11 @@
 </details>
 
 ## Examples
-#### A PILATUS3 2M detector and a Silicon sample.
-![Preview](https://github.com/LennardKrause/xrdPlanner/blob/main/examples/PILATUS3_2M_Si.png)
+#### A PILATUS3 300K detector and a Rubrene sample.
+![Preview](https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_2_example_light.png)
 
-#### A rotated EIGER2 4M detector and a Aluminium sample (darkmode).
-![Preview](https://github.com/LennardKrause/xrdPlanner/blob/main/examples/EIGER2_4M_Al.png)
+#### A rotated EIGER2 9M detector and a Rubrene sample (darkmode).
+![Preview](https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_1_example_dark.png)
 
 ## Settings file documentation
 
@@ -92,14 +97,14 @@
                          #        -> Detector menu entry
     det_size = '4M'      # [str]  300K 1M 2M 6M / 1M 4M 9M 16M
                          #        -> Detector submenu entry
-    ener = 21.0          # [keV]  Beam energy
-    dist = 75.0          # [mm]   Detector distance
-    yoff = 0.0           # [mm]   Detector offset (vertical)
-    xoff = 0.0           # [mm]   Detector offset (horizontal)
-    rota = 25.0          # [deg]  Detector rotation
-    tilt = 0.0           # [deg]  Detector tilt
+    ener = 21            # [keV]  Beam energy
+    dist = 75            # [mm]   Detector distance
+    yoff = 0             # [mm]   Detector offset (vertical)
+    xoff = 0             # [mm]   Detector offset (horizontal)
+    rota = 25            # [deg]  Detector rotation
+    tilt = 0             # [deg]  Detector tilt
     bssz = 'None'        # [mm]   Current beamstop size (or 'None')
-    bsdx = 40.0          # [mm]   Beamstop distance
+    bsdx = 40            # [mm]   Beamstop distance
     unit = 1             # [0-3]  Contour legend
                          #         0: 2-Theta
                          #         1: d-spacing
@@ -118,20 +123,23 @@
 #### plo - plot settings
     # - geometry contour section - 
     conic_tth_min = 5               # [int]    Minimum 2-theta contour line
-    conic_tth_max = 150             # [int]    Maximum 2-theta contour line
-    conic_tth_num = 30              # [int]    Number of contour lines
-    beamcenter_marker = 'o'         # [marker] Beam center marker
-    beamcenter_size = 6             # [int]    Beam center size
-    conic_linewidth = 4.0           # [float]  Contour linewidth
+    conic_tth_max = 100             # [int]    Maximum 2-theta contour line
+    conic_tth_num = 15              # [int]    Number of contour lines
+    beamcenter_marker = 'o'         # [marker] Beamcenter marker
+    beamcenter_size = 6             # [int]    Beamcenter size
+    poni_marker = 'x'               # [marker] Poni marker
+    poni_size = 8                   # [int]    Poni size
+    conic_linewidth = 2.0           # [float]  Contour linewidth
     conic_label_size = 14           # [int]    Contour label size
     
     # - reference contour section - 
-    conic_ref_linewidth = 10.0      # [float]  Reference contour linewidth
+    conic_ref_linewidth = 2.0      # [float]  Reference contour linewidth
     conic_ref_num = 100             # [int]    Number of reference contours
     conic_ref_cif_int = 0.01        # [float]  Minimum display intensity (cif)
     conic_ref_cif_kev = 10.0        # [float]  Energy [keV] for intensity calculation
     conic_ref_cif_irel = True       # [int]    Linewidth relative to intensity
-    conic_ref_cif_lw_min = 2.0      # [float]  Minimum linewidth when using irel
+    conic_ref_cif_lw_min = 0.1      # [float]  Minimum linewidth when using irel
+    conic_ref_cif_lw_mult = 3       # [float]  Linewidth multiplier when using irel
     conic_hkl_show_int = False      # [bool]   Show intensity in hkl tooltip
     conic_hkl_label_size = 14       # [int]    Font size of hkl tooltip
     
@@ -141,7 +149,7 @@
     
     # - general section - 
     conic_steps = 100               # [int]    Conic resolution
-    plot_size = 768                 # [int]    Plot size, px
+    plot_size = 0                   # [int]    Plot size, px (0 for auto)
     plot_size_fixed = True          # [int]    Fix window size
     unit_label_size = 16            # [int]    Label size, px
     
@@ -158,6 +166,15 @@
     enable_slider_xoff = True       # [bool]   Show horizontal offset slider
     enable_slider_tilt = True       # [bool]   Show tilt slider
     enable_slider_bsdx = True       # [bool]   Show beamstop distance slider
+    
+    # - slider labels - 
+    slider_label_ener = 'Energy\n[keV]'            # [str] Label for energy slider
+    slider_label_dist = 'Distance\n[mm]'           # [str] Label for distance slider
+    slider_label_rota = 'Rotation\n[\u02da]'       # [str] Label for rotation slider
+    slider_label_voff = 'Vertical\noffset\n[mm]'   # [str] Label for vertical offset slider
+    slider_label_hoff = 'Horizontal\noffset\n[mm]' # [str] Label for horizontal offset slider
+    slider_label_tilt = 'Tilt\n[\u02da]'           # [str] Label for tilt slider
+    slider_label_bsdx = 'Beamstop\ndistance\n[mm]' # [str] Label for beamstop distance slider
             
     # - update/reset - 
     update_settings = True          # [bool]   Update settings file after load
@@ -175,8 +192,8 @@
     # light mode
     light_conic_label_fill = '#FFFFFF'    # [str]    Contour label fill color
     light_conic_ref_color = '#DCDCDC'     # [color]  Reference contour color
-    light_beamstop_color = '#DCDCDC'      # [color]  Beamstop color
-    light_beamstop_edge_color = '#EEEEEE' # [color]  Beamstop edge color
+    light_beamstop_color = '#FF000080'    # [color]  Beamstop color
+    light_beamstop_edge_color = '#FF0000' # [color]  Beamstop edge color
     light_det_module_color = '#404040'    # [color]  Detector module border color
     light_det_module_fill = '#404040'     # [color]  Detector module background color
     light_plot_bg_color = '#FFFFFF'       # [str]    Plot background color
@@ -189,9 +206,9 @@
     
     # dark mode
     dark_conic_label_fill = '#000000'     # [str]    Contour label fill color
-    dark_conic_ref_color = '#202020'      # [color]  Reference contour color
-    dark_beamstop_color = '#202020'       # [color]  Beamstop color
-    dark_beamstop_edge_color = '#404040'  # [color]  Beamstop edge color
+    dark_conic_ref_color = '#505050'      # [color]  Reference contour color
+    dark_beamstop_color = '#FF000080'     # [color]  Beamstop color
+    dark_beamstop_edge_color = '#FF0000'  # [color]  Beamstop edge color
     dark_det_module_color = '#EEEEEE'     # [color]  Detector module border color
     dark_det_module_fill = '#EEEEEE'      # [color]  Detector module background color
     dark_plot_bg_color = '#000000'        # [str]    Plot background color
@@ -205,38 +222,38 @@
 #### lmt - limits
 
     # energy [keV]
-    ener_min =  5.0    # [float] Energy minimum [keV]
-    ener_max =  100.0  # [float] Energy maximum [keV]
-    ener_stp =  1.0    # [float] Energy step size [keV]
+    ener_min =  5    # [int] Energy minimum [keV]
+    ener_max =  100  # [int] Energy maximum [keV]
+    ener_stp =  1    # [int] Energy step size [keV]
     
     # distance [mm]
-    dist_min =  40.0   # [float] Distance minimum [mm]
-    dist_max =  1000.0 # [float] Distance maximum [mm]
-    dist_stp =  1.0    # [float] Distance step size [mm]
+    dist_min =  40   # [int] Distance minimum [mm]
+    dist_max =  1000 # [int] Distance maximum [mm]
+    dist_stp =  1    # [int] Distance step size [mm]
     
     # X-offset [mm]
-    xoff_min = -150.0  # [float] Horizontal offset minimum [mm]
-    xoff_max =  150.0  # [float] Horizontal offset maximum [mm]
-    xoff_stp =  1.0    # [float] Horizontal offset step size [mm]
+    xoff_min = -150  # [int] Horizontal offset minimum [mm]
+    xoff_max =  150  # [int] Horizontal offset maximum [mm]
+    xoff_stp =  1    # [int] Horizontal offset step size [mm]
     
     # Y-offset [mm]
-    yoff_min = -250.0  # [float] Vertical offset minimum [mm]
-    yoff_max =  250.0  # [float] Vertical offset maximum [mm]
-    yoff_stp =  1.0    # [float] Vertical offset step size [mm]
+    yoff_min = -250  # [int] Vertical offset minimum [mm]
+    yoff_max =  250  # [int] Vertical offset maximum [mm]
+    yoff_stp =  1    # [int] Vertical offset step size [mm]
     
     # rotation [deg]
-    rota_min = -60.0   # [float] Rotation minimum [deg]
-    rota_max =  60.0   # [float] Rotation maximum [deg]
-    rota_stp =  1.0    # [float] Rotation step size [deg]
+    rota_min = -45   # [int] Rotation minimum [deg]
+    rota_max =  45   # [int] Rotation maximum [deg]
+    rota_stp =  1    # [int] Rotation step size [deg]
     
     # tilt [deg]
-    tilt_min = -25.0   # [float] Tilt minimum [deg]
-    tilt_max =  25.0   # [float] Tilt maximum [deg]
-    tilt_stp =  1.0    # [float] Tilt step size [deg]
+    tilt_min = -40   # [int] Tilt minimum [deg]
+    tilt_max =  40   # [int] Tilt maximum [deg]
+    tilt_stp =  1    # [int] Tilt step size [deg]
 
-    bsdx_min =   5.0   # [float] Beamstop distance minimum [mm]
-    bsdx_max = 1000.0  # [float] Beamstop distance maximum [mm]
-    bsdx_stp =   1.0   # [float] Beamstop distance step size [mm]
+    bsdx_min = 5     # [int] Beamstop distance minimum [mm]
+    bsdx_max = 1000  # [int] Beamstop distance maximum [mm]
+    bsdx_stp = 1     # [int] Beamstop distance step size [mm]
 
 ## Detector db entries
 
