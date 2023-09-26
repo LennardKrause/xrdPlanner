@@ -1,8 +1,8 @@
 [project]
 name = "xrdPlanner"
-version = "1.2.0"
+version = "1.3.0"
 authors = [
-  { name="Lennard Krause", email="lennard.krause@chem.au.dk" },
+  { name="Lennard Krause", email="lkrause@chem.au.dk" },
 ]
 description = "A tool to project X-ray diffraction cones on a detector screen at different geometries (tilt, rotation, offset) and X-ray energies"
 readme = "README.md"

@@ -258,9 +258,15 @@ class MainWindow(QtWidgets.QMainWindow):
             # disable right click  context menu
             self.ax.setMenuEnabled(True)
 
+        # define font to label conics
+        font = QtGui.QFont()
+        font.setPixelSize(self.plo.conic_label_size)
+        font.setBold(True)
+
         # container for contour lines
         self.patches = {'beamcenter':None,
                         'beamstop':None,
+                        'poni':None,
                         'bs_label':None,
                         'conic':[],
                         'reference':[],
@@ -286,11 +292,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self.patches['reference'][i].setClickable(True, width=self.plo.conic_ref_linewidth)
             self.patches['reference'][i].sigClicked.connect(self.show_tooltip)
             self.patches['reference'][i].name = None
-        
-        # define font to label conics
-        font = QtGui.QFont()
-        font.setPixelSize(self.plo.conic_label_size)
-        font.setBold(True)
 
         # add empty plot per contour line
         for i in range(self.plo.conic_tth_num):
@@ -302,6 +303,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self.patches['labels'].append(temp_label)
             self.ax.addItem(temp_label)
 
+        # add poni scatter plot
+        self.patches['poni'] = pg.ScatterPlotItem(symbol = self.plo.poni_marker,
+                                                  size = self.plo.poni_size,
+                                                  brush = pg.mkBrush(self.cont_cmap.map(0, mode='qcolor')),
+                                                  pen = pg.mkPen(None))
+        self.ax.addItem(self.patches['poni'])
+
         # add beam center scatter plot
         self.patches['beamcenter'] = pg.ScatterPlotItem(symbol = self.plo.beamcenter_marker,
                                                         size = self.plo.beamcenter_size,
@@ -312,7 +320,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # label for beamstop contour
         bs_label = pg.TextItem(anchor=(0.5,0.5),
                                color=self.unit_label_color,
-                               fill=pg.mkBrush(self.conic_label_fill))
+                               fill=self.conic_label_fill)
         bs_label.setFont(font)
         self.patches['bs_label'] = bs_label
         self.ax.addItem(bs_label)
@@ -344,18 +352,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self.menu_bar = self.menuBar()
 
         # append 'menu' and 'value' (string!) as tuple to this list
-        # update_menu_checkmarks() will then reset the
+        # update_menu_entries() will then reset the
         # checkmark to the active entry after reload of
         # settings.
-        #
-        # set checkmark: standard menus
-        # for menu, token in self.menus_to_update:
-        #     for action in menu.actions():
-        #         if action.text() == token:
-        #             action.setChecked(True)
-        self.menus_to_update = []
 
-        # self.update_menu_checkmarks() will access
+        # self.update_menu_entries() will access
         # the menus and update the checkmarks upon
         # settings reload via self.reload_settings()
         self.menu_det = self.menu_bar.addMenu('Detector')
@@ -506,6 +507,27 @@ class MainWindow(QtWidgets.QMainWindow):
         #self.set_menu_action(reset_action, self.reset_to_default)
         #menu_default.addAction(reset_action)
 
+        # menu About
+        self.menu_help = self.menu_bar.addMenu('Help')
+        self.action_about = QtGui.QAction('xrdPlanner', self)
+        self.set_menu_action(self.action_about, self.about_window)
+        self.menu_help.addAction(self.action_about)
+
+    def about_window(self):
+        msgBox = QtWidgets.QMessageBox()
+        msgBox.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        msgBox.setStandardButtons(QtWidgets.QMessageBox.StandardButton.NoButton)
+        msgBox.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.LinksAccessibleByMouse)
+        windowIcon = QtGui.QIcon()
+        windowIcon.addPixmap(QtGui.QPixmap(':/icons/xrdPlanner.png'))
+        msgBox.setWindowIcon(windowIcon)
+        msgBox.setIconPixmap(QtGui.QPixmap(':/icons/xrdPlanner.png'))
+        msgBox.setWindowTitle('About')
+        msgBox.setText('xrdPlanner 1.3.0')
+        msgBox.setDetailedText("<a href='https://github.com/LennardKrause/xrdPlanner'>https://github.com/LennardKrause/xrdPlanner</a>")
+        msgBox.setInformativeText('Author:\nLennard Krause, 2023\nlkrause@chem.au.dk')
+        msgBox.exec()
+
     def edit_settings_file(self, command):
         os.system(f'{command} {self.path_settings_current}')
 
@@ -533,7 +555,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # change settings and reload
             self.change_settings_file(bname)
 
-    def update_menu_checkmarks(self):
+    def update_menu_entries(self):
         # set checkmark: references none
         for action in self.menu_ref.actions():
             if action.text() == self.geo.reference:
@@ -583,6 +605,21 @@ class MainWindow(QtWidgets.QMainWindow):
         for action in self.menu_theme.actions():
             if conv[action.text()] == self.geo.darkmode:
                 action.setChecked(True)
+        
+        # menu Beamstop: add sizes list
+        if self.geo.bssz not in self.geo.bs_list:
+            self.geo.bs_list.append(self.geo.bssz)
+            self.geo.bs_list.sort()
+        
+        # update menu Beamstop
+        self.sub_menu_bs.clear()
+        for bs_size in sorted(self.geo.bs_list):
+            bs_sub_action = QtGui.QAction(str(bs_size), self, checkable=True)
+            self.set_menu_action(bs_sub_action, self.change_beamstop, bs_size)
+            self.sub_menu_bs.addAction(bs_sub_action)
+            self.group_bs.addAction(bs_sub_action)
+            if bs_size == self.geo.bssz:
+                bs_sub_action.setChecked(True)
 
     def add_unit_label(self):
         font = QtGui.QFont()
@@ -602,6 +639,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ax.setXRange(-self.xdim, self.xdim, padding=0, update=True)
         self.ax.setYRange(-self.ydim, self.ydim, padding=0, update=True)
 
+        if self.plo.plot_size <= 0:
+            _app = QtWidgets.QApplication.instance()
+            _height = _app.primaryScreen().availableGeometry().height()
+            self.plo.plot_size = int(np.ceil(_height*0.9))
+        
         # get proper dimensions
         width = int(np.ceil(self.plo.plot_size * self.xdim / self.ydim))
         height = self.plo.plot_size + self.plo.slider_margin//2 + self.offset_win32
@@ -650,7 +692,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # load settings
         self.load_par()
         self.redraw_canvas()
-        self.update_menu_checkmarks()
+        self.update_menu_entries()
 
     def change_detector(self, det_name, det_size):
         self.geo.det_type = det_name
@@ -734,14 +776,14 @@ class MainWindow(QtWidgets.QMainWindow):
         geo = container()
         geo.det_type = 'EIGER2'  # [str]  Pilatus3 / Eiger2
         geo.det_size = '4M'      # [str]  300K 1M 2M 6M / 1M 4M 9M 16M
-        geo.ener = 21.0          # [keV]  Beam energy
-        geo.dist = 75.0          # [mm]   Detector distance
-        geo.yoff = 0.0           # [mm]   Detector offset (vertical)
-        geo.xoff = 0.0           # [mm]   Detector offset (horizontal)
-        geo.rota = 25.0          # [deg]  Detector rotation
-        geo.tilt = 0.0           # [deg]  Detector tilt
+        geo.ener = 21            # [keV]  Beam energy
+        geo.dist = 75            # [mm]   Detector distance
+        geo.voff = 0             # [mm]   Detector offset (vertical)
+        geo.hoff = 0             # [mm]   Detector offset (horizontal)
+        geo.rota = 25            # [deg]  Detector rotation
+        geo.tilt = 0             # [deg]  Detector tilt
         geo.bssz = 'None'        # [mm]   Current beamstop size (or 'None')
-        geo.bsdx = 40.0          # [mm]   Beamstop distance
+        geo.bsdx = 40            # [mm]   Beamstop distance
         geo.unit = 1             # [0-3]  Contour legend
                                  #          0: 2-Theta
                                  #          1: d-spacing
@@ -765,19 +807,22 @@ class MainWindow(QtWidgets.QMainWindow):
         plo = container()
         # - geometry contour section - 
         plo.conic_tth_min = 5               # [int]    Minimum 2-theta contour line
-        plo.conic_tth_max = 150             # [int]    Maximum 2-theta contour line
-        plo.conic_tth_num = 30              # [int]    Number of contour lines
-        plo.beamcenter_marker = 'o'         # [marker] Beam center marker
-        plo.beamcenter_size = 6             # [int]    Beam center size
-        plo.conic_linewidth = 4.0           # [float]  Contour linewidth
-        plo.conic_label_size = 14           # [int]    Contour label size
+        plo.conic_tth_max = 100             # [int]    Maximum 2-theta contour line
+        plo.conic_tth_num = 15              # [int]    Number of contour lines
+        plo.beamcenter_marker = 'o'         # [marker] Beamcenter marker
+        plo.beamcenter_size = 6             # [int]    Beamcenter size
+        plo.poni_marker = 'x'               # [marker] Poni marker
+        plo.poni_size = 8                   # [int]    Poni size
+        plo.conic_linewidth = 2.0           # [float]  Contour linewidth (lw)
+        plo.conic_label_size = 14           # [int]    Contour labelsize
         # - reference contour section - 
-        plo.conic_ref_linewidth = 10.0      # [float]  Reference contour linewidth
-        plo.conic_ref_num = 100             # [int]    Number of reference contours
+        plo.conic_ref_linewidth = 2.0       # [float]  Reference contour linewidth
+        plo.conic_ref_num = 250             # [int]    Number of reference contours
         plo.conic_ref_cif_int = 0.01        # [float]  Minimum display intensity (cif)
         plo.conic_ref_cif_kev = 10.0        # [float]  Energy [keV] for intensity calculation
         plo.conic_ref_cif_irel = True       # [int]    Linewidth relative to intensity
-        plo.conic_ref_cif_lw_min = 2.0      # [float]  Minimum linewidth when using irel
+        plo.conic_ref_cif_lw_min = 0.1      # [float]  Minimum linewidth when using irel
+        plo.conic_ref_cif_lw_mult = 3.0     # [float]  Linewidth multiplier when using irel
         plo.conic_hkl_show_int = False      # [bool]   Show intensity in hkl tooltip
         plo.conic_hkl_label_size = 14       # [int]    Font size of hkl tooltip
         # - module section - 
@@ -785,7 +830,7 @@ class MainWindow(QtWidgets.QMainWindow):
         plo.det_module_width = 1            # [int]    Detector module border width
         # - general section - 
         plo.conic_steps = 100               # [int]    Conic resolution
-        plo.plot_size = 768                 # [int]    Plot size, px
+        plo.plot_size = 0                   # [int]    Plot size, px (0 for auto)
         plo.plot_size_fixed = True          # [int]    Fix window size
         plo.unit_label_size = 16            # [int]    Label size, px
         # - slider section - 
@@ -797,10 +842,17 @@ class MainWindow(QtWidgets.QMainWindow):
         plo.enable_slider_ener = True       # [bool]   Show energy slider
         plo.enable_slider_dist = True       # [bool]   Show distance slider
         plo.enable_slider_rota = True       # [bool]   Show rotation slider
-        plo.enable_slider_yoff = True       # [bool]   Show vertical offset slider
-        plo.enable_slider_xoff = True       # [bool]   Show horizontal offset slider
+        plo.enable_slider_voff = True       # [bool]   Show vertical offset slider
+        plo.enable_slider_hoff = True       # [bool]   Show horizontal offset slider
         plo.enable_slider_tilt = True       # [bool]   Show tilt slider
         plo.enable_slider_bsdx = True       # [bool]   Show beamstop distance slider
+        plo.slider_label_ener = 'Energy\n[keV]'            # [str] Label for energy slider
+        plo.slider_label_dist = 'Distance\n[mm]'           # [str] Label for distance slider
+        plo.slider_label_rota = 'Rotation\n[\u02da]'       # [str] Label for rotation slider
+        plo.slider_label_voff = 'Vertical\noffset\n[mm]'   # [str] Label for vertical offset slider
+        plo.slider_label_hoff = 'Horizontal\noffset\n[mm]' # [str] Label for horizontal offset slider
+        plo.slider_label_tilt = 'Tilt\n[\u02da]'           # [str] Label for tilt slider
+        plo.slider_label_bsdx = 'Beamstop\ndistance\n[mm]' # [str] Label for beamstop distance slider
         # - update/reset - 
         plo.update_settings = True          # [bool]   Update settings file after load
         plo.update_det_bank = True          # [bool]   Update detector bank after load
@@ -819,33 +871,33 @@ class MainWindow(QtWidgets.QMainWindow):
         thm.color_dark = '#404040'                # [color]  Global dark color
         thm.color_light = '#EEEEEE'               # [color]  Global light color
         # light mode
-        thm.light_conic_label_fill = '#FFFFFF'    # [str]    Contour label fill color
-        thm.light_conic_ref_color = '#DCDCDC'     # [color]  Reference contour color
+        thm.light_conic_label_fill = '#FFFFFF'    # [color]  Contour label fill color
+        thm.light_conic_ref_color = '#404040'     # [color]  Reference contour color
         thm.light_beamstop_color = '#DCDCDC'      # [color]  Beamstop color
         thm.light_beamstop_edge_color = '#EEEEEE' # [color]  Beamstop edge color
         thm.light_det_module_color = '#404040'    # [color]  Detector module border color
         thm.light_det_module_fill = '#404040'     # [color]  Detector module background color
-        thm.light_plot_bg_color = '#FFFFFF'       # [str]    Plot background color
-        thm.light_unit_label_color = '#808080'    # [str]    Label color
-        thm.light_unit_label_fill = '#FFFFFF'     # [str]    Label fill color
-        thm.light_slider_border_color = '#808080' # [str]    Slider frame border color
-        thm.light_slider_bg_color = '#AAC0C0C0'   # [str]    Slider frame background color
-        thm.light_slider_bg_hover = '#C0C0C0'     # [str]    Slider frame hover color
-        thm.light_slider_label_color = '#000000'  # [str]    Slider frame label color
+        thm.light_plot_bg_color = '#FFFFFF'       # [color]  Plot background color
+        thm.light_unit_label_color = '#808080'    # [color]  Label color
+        thm.light_unit_label_fill = '#FFFFFF'     # [color]  Label fill color
+        thm.light_slider_border_color = '#808080' # [color]  Slider frame border color
+        thm.light_slider_bg_color = '#AAC0C0C0'   # [color]  Slider frame background color
+        thm.light_slider_bg_hover = '#C0C0C0'     # [color]  Slider frame hover color
+        thm.light_slider_label_color = '#000000'  # [color]  Slider frame label color
         # dark mode
-        thm.dark_conic_label_fill = '#000000'     # [str]    Contour label fill color
+        thm.dark_conic_label_fill = '#000000'     # [color]  Contour label fill color
         thm.dark_conic_ref_color = '#202020'      # [color]  Reference contour color
         thm.dark_beamstop_color = '#202020'       # [color]  Beamstop color
         thm.dark_beamstop_edge_color = '#404040'  # [color]  Beamstop edge color
         thm.dark_det_module_color = '#EEEEEE'     # [color]  Detector module border color
         thm.dark_det_module_fill = '#EEEEEE'      # [color]  Detector module background color
-        thm.dark_plot_bg_color = '#000000'        # [str]    Plot background color
-        thm.dark_unit_label_color = '#C0C0C0'     # [str]    Label color
-        thm.dark_unit_label_fill = '#000000'      # [str]    Label fill color
-        thm.dark_slider_border_color = '#202020'  # [str]    Slider frame border color
-        thm.dark_slider_bg_color = '#AA303030'    # [str]    Slider frame background color
-        thm.dark_slider_bg_hover = '#303030'      # [str]    Slider frame hover color
-        thm.dark_slider_label_color = '#C0C0C0'   # [str]    Slider frame label color
+        thm.dark_plot_bg_color = '#000000'        # [color]  Plot background color
+        thm.dark_unit_label_color = '#C0C0C0'     # [color]  Label color
+        thm.dark_unit_label_fill = '#000000'      # [color]  Label fill color
+        thm.dark_slider_border_color = '#202020'  # [color]  Slider frame border color
+        thm.dark_slider_bg_color = '#AA303030'    # [color]  Slider frame background color
+        thm.dark_slider_bg_hover = '#303030'      # [color]  Slider frame hover color
+        thm.dark_slider_label_color = '#C0C0C0'   # [color]  Slider frame label color
 
         return thm
     
@@ -854,33 +906,33 @@ class MainWindow(QtWidgets.QMainWindow):
         # Limits #
         ##########
         lmt = container()
-        lmt.ener_min =  5.0    # [float] Energy minimum [keV]
-        lmt.ener_max =  100.0  # [float] Energy maximum [keV]
-        lmt.ener_stp =  1.0    # [float] Energy step size [keV]
+        lmt.ener_min =  5    # [int] Energy minimum [keV]
+        lmt.ener_max =  100  # [int] Energy maximum [keV]
+        lmt.ener_stp =  1    # [int] Energy step size [keV]
 
-        lmt.dist_min =  40.0   # [float] Distance minimum [mm]
-        lmt.dist_max =  1000.0 # [float] Distance maximum [mm]
-        lmt.dist_stp =  1.0    # [float] Distance step size [mm]
+        lmt.dist_min =  40   # [int] Distance minimum [mm]
+        lmt.dist_max =  1000 # [int] Distance maximum [mm]
+        lmt.dist_stp =  1    # [int] Distance step size [mm]
 
-        lmt.xoff_min = -150.0  # [float] Horizontal offset minimum [mm]
-        lmt.xoff_max =  150.0  # [float] Horizontal offset maximum [mm]
-        lmt.xoff_stp =  1.0    # [float] Horizontal offset step size [mm]
+        lmt.hoff_min = -150  # [int] Horizontal offset minimum [mm]
+        lmt.hoff_max =  150  # [int] Horizontal offset maximum [mm]
+        lmt.hoff_stp =  1    # [int] Horizontal offset step size [mm]
 
-        lmt.yoff_min = -250.0  # [float] Vertical offset minimum [mm]
-        lmt.yoff_max =  250.0  # [float] Vertical offset maximum [mm]
-        lmt.yoff_stp =  1.0    # [float] Vertical offset step size [mm]
+        lmt.voff_min = -250  # [int] Vertical offset minimum [mm]
+        lmt.voff_max =  250  # [int] Vertical offset maximum [mm]
+        lmt.voff_stp =  1    # [int] Vertical offset step size [mm]
 
-        lmt.rota_min = -60.0   # [float] Rotation minimum [deg]
-        lmt.rota_max =  60.0   # [float] Rotation maximum [deg]
-        lmt.rota_stp =  1.0    # [float] Rotation step size [deg]
+        lmt.rota_min = -45   # [int] Rotation minimum [deg]
+        lmt.rota_max =  45   # [int] Rotation maximum [deg]
+        lmt.rota_stp =  1    # [int] Rotation step size [deg]
 
-        lmt.tilt_min = -25.0   # [float] Tilt minimum [deg]
-        lmt.tilt_max =  25.0   # [float] Tilt maximum [deg]
-        lmt.tilt_stp =  1.0    # [float] Tilt step size [deg]
+        lmt.tilt_min = -40   # [int] Tilt minimum [deg]
+        lmt.tilt_max =  40   # [int] Tilt maximum [deg]
+        lmt.tilt_stp =  1    # [int] Tilt step size [deg]
 
-        lmt.bsdx_min =   5.0   # [float] Beamstop distance minimum [mm]
-        lmt.bsdx_max = 1000.0  # [float] Beamstop distance maximum [mm]
-        lmt.bsdx_stp =   1.0   # [float] Beamstop distance step size [mm]
+        lmt.bsdx_min =   5   # [int] Beamstop distance minimum [mm]
+        lmt.bsdx_max = 1000  # [int] Beamstop distance maximum [mm]
+        lmt.bsdx_stp =   1   # [int] Beamstop distance step size [mm]
         
         return lmt
 
@@ -938,9 +990,9 @@ class MainWindow(QtWidgets.QMainWindow):
             'vgp' : 17,      # [pix] Gap between modules (vertical)
             'cbh' : 0,       # [mm]  Central beam hole
             'size' : {'300K':(1,3),
-                      '1M':(2,5),
-                      '2M':(3,8),
-                      '6M':(5,12)},
+                        '1M':(2,5),
+                        '2M':(3,8),
+                        '6M':(5,12)},
             }
         ###############################
         # Specifications for Pilatus4 #
@@ -971,9 +1023,9 @@ class MainWindow(QtWidgets.QMainWindow):
             'hgp' : 38,      # [pix] Gap between modules (horizontal)
             'vgp' : 12,      # [pix] Gap between modules (vertical)
             'cbh' : 0,       # [mm]  Central beam hole
-            'size' : {'1M':(1,2),
-                      '4M':(2,4),
-                      '9M':(3,6),
+            'size' : { '1M':(1,2),
+                       '4M':(2,4),
+                       '9M':(3,6),
                       '16M':(4,8)},
             }
         
@@ -1014,7 +1066,7 @@ class MainWindow(QtWidgets.QMainWindow):
             'hgp' : 0,      # [pix] Gap between modules (horizontal)
             'vgp' : 0,      # [pix] Gap between modules (vertical)
             'cbh' : 0,      # [mm]  Central beam hole
-            'size' : {'7':(1,1),
+            'size' : { '7':(1,1),
                       '14':(1,2),
                       '28':(2,2)},
             }
@@ -1029,7 +1081,7 @@ class MainWindow(QtWidgets.QMainWindow):
             'hgp' : 0,      # [pix] Gap between modules (horizontal)
             'vgp' : 0,      # [pix] Gap between modules (vertical)
             'cbh' : 0,      # [mm]  Central beam hole
-            'size' : {'7':(1,1),
+            'size' : { '7':(1,1),
                       '14':(1,2)},
             }
         
@@ -1113,18 +1165,22 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.ax.addItem(rect_item)
 
     def draw_conics(self):
-        # calculate the offset of the contours resulting from yoff and rotation
+        # calculate the offset of the contours resulting from voff and rotation
         # shift the grid to draw the cones, to make sure the contours are drawn
         # within the visible area
-        _comp_shift = -(self.geo.yoff + np.tan(np.deg2rad(self.geo.rota))*self.geo.dist)
 
         # convert theta in degrees to radians
         # for some reason I defined it negative some time ago
         # now there's no turning back!
         omega = -np.deg2rad(self.geo.tilt + self.geo.rota)
+
+        # beamcenter shift
+        _comp_shift = -(self.geo.voff - self.geo.dist * np.tan(omega) - np.deg2rad(self.geo.tilt) * self.geo.dist)
         
         # update beam center
-        self.patches['beamcenter'].setData([self.geo.xoff],[_comp_shift])
+        self.patches['beamcenter'].setData([self.geo.hoff],[_comp_shift])
+        # update beam center
+        self.patches['poni'].setData([self.geo.hoff],[-(self.geo.voff - np.deg2rad(self.geo.tilt)*self.geo.dist)])
 
         if self.geo.bssz and self.geo.bssz != 'None':
             # update beam stop
@@ -1151,7 +1207,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 # prepare the values in the different units / labels
                 #_units = {0:np.rad2deg(theta), 1:_dsp, 2:_stl*4*np.pi, 3:_stl}
                 _units = {0:np.rad2deg(bs_theta), 1:dsp, 2:stl*4*np.pi, 3:stl}
-                self.patches['bs_label'].setPos(self.geo.xoff, label_pos)
+                self.patches['bs_label'].setPos(self.geo.hoff, label_pos)
                 self.patches['bs_label'].setText(f'{_units[self.geo.unit]:.2f}')
                 self.patches['bs_label'].setVisible(True)
         else:
@@ -1187,7 +1243,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # prepare the values in the different units / labels
             #_units = {0:np.rad2deg(theta), 1:_dsp, 2:_stl*4*np.pi, 3:_stl}
             _units = {0:_ttd, 1:dsp, 2:stl*4*np.pi, 3:stl}
-            self.patches['labels'][_n].setPos(self.geo.xoff, label_pos)
+            self.patches['labels'][_n].setPos(self.geo.hoff, label_pos)
             self.patches['labels'][_n].setText(f'{_units[self.geo.unit]:.2f}', color=self.cont_cmap.map(_f, mode='qcolor'))
             self.patches['labels'][_n].setVisible(True)
 
@@ -1230,6 +1286,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 irel = 1.0
                 if self.cont_ref_hkl:
                     h, k, l, itot, irel = self.cont_ref_hkl[_n]
+                    irel *= self.plo.conic_ref_cif_lw_mult
                     if self.plo.conic_hkl_show_int:
                         # alignment of the tooltip text is far from trivial
                         # detour via QTextEdit -> setAlignment and toHtml
@@ -1266,8 +1323,6 @@ class MainWindow(QtWidgets.QMainWindow):
         comp_tilt = np.deg2rad(self.geo.tilt) * self.geo.dist
         # eccentricity of the resulting conic section
         ecc = np.round(np.cos(np.pi/2 - omega) / np.cos(theta), 10)
-        # we need e**2-1 to calculate the width of the hyperbola
-        e21 = ecc**2-1
         # y ('height') components/distances from central axis of the cone
         # intersecting the detector plane and the distance to
         # the y intersection of the conic section.
@@ -1276,8 +1331,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # add x/y offsets
         # revert tilt rotation
-        y0 = dy_cone - self.geo.yoff + comp_tilt 
-        x0 = self.geo.xoff
+        y0 = dy_cone - self.geo.voff + comp_tilt 
+        x0 = self.geo.hoff
 
         # add margin to slightly extend
         # conics outside of visible area
@@ -1333,7 +1388,7 @@ class MainWindow(QtWidgets.QMainWindow):
             h = np.sign(omega) * (y1+y2)/2
             if h == 0:
                 return False, False, False
-            w = h * np.sqrt(e21)
+            w = h * np.sqrt(ecc**2-1)
             l = -np.arcsinh((_xdim + x0) / w)
             r =  np.arcsinh((_xdim - x0) / w)
             t = np.linspace(l, r, steps)
@@ -1355,7 +1410,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # adjust the label position to maintain readibility
         # this works for most cases but is not the most optimal solution yet
         # OR: use the actual beam position to determine label position
-        # beam_pos_y = -(self.geo.yoff + np.tan(np.deg2rad(self.geo.rota))*self.geo.dist)
+        # beam_pos_y = -(self.geo.voff + np.tan(np.deg2rad(self.geo.rota))*self.geo.dist)
         if omega <= 0:
             label_pos = max(y) if theta < np.pi/2 else min(y)
         else:
@@ -1389,10 +1444,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.geo.rota = float(val)
             elif self.sender().objectName() == 'tilt':
                 self.geo.tilt = float(val)
-            elif self.sender().objectName() == 'yoff':
-                self.geo.yoff = float(val)
-            elif self.sender().objectName() == 'xoff':
-                self.geo.xoff = float(val)
+            elif self.sender().objectName() == 'voff':
+                self.geo.voff = float(val)
+            elif self.sender().objectName() == 'hoff':
+                self.geo.hoff = float(val)
             elif self.sender().objectName() == 'ener':
                 self.geo.ener = float(val)
             elif self.sender().objectName() == 'bsdx':
@@ -1439,16 +1494,6 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.plo.update_settings:
             self.save_par()
 
-    #def reset_to_default(self):
-    #    # plo: plot details
-    #    self.plo = self.get_defaults_plo()
-    #    # lmt: geometry limits
-    #    self.lmt = self.get_defaults_lmt()
-    #    # thm: theme
-    #    self.thm = self.get_defaults_thm()
-    #    self.save_par()
-    #    self.redraw_canvas()
-
     def save_current_settings(self):
         # self.geo is edited with the sliders
         # self._geo holds the initial values
@@ -1465,6 +1510,28 @@ class MainWindow(QtWidgets.QMainWindow):
             json.dump({'geo':self._geo.__dict__, 'plo':self.plo.__dict__, 'thm':self.thm.__dict__, 'lmt':self.lmt.__dict__}, wf, indent=4)
 
     def load_par(self, skip=[]):
+        # Some parameters need to be protected to save
+        # the user some waiting time
+        #
+        # A check is performed if the value of the key
+        # is within 'minimum' and 'maximum', if not it
+        # is set to 'default'
+        #
+        # Add 'key':('minimum', 'maximum', 'default') to the dict
+        _warn = {'conic_ref_cif_kev':( 5,   25,  12),
+                     'conic_tth_min':( 1,   10,   5),
+                     'conic_tth_max':(10,  180,  90),
+                     'conic_tth_num':( 1,  100,  20),
+                     'conic_ref_num':( 1,  500, 200),
+                       'conic_steps':(10, 1000, 100),
+                          'ener_stp':( 1,  100,   1),
+                          'dist_stp':( 1,  100,   1),
+                          'hoff_stp':( 1,  100,   1),
+                          'voff_stp':( 1,  100,   1),
+                          'rota_stp':( 1,  100,   1),
+                          'tilt_stp':( 1,  100,   1),
+                          'bsdx_stp':( 1,  100,   1),
+                }
         # Opening JSON file as dict
         try:
             with open(self.path_settings_current, 'r') as of:
@@ -1482,6 +1549,9 @@ class MainWindow(QtWidgets.QMainWindow):
                     # this is bad!
                     if type(x) == str and x.lower() == 'none':
                         x = 'None'
+                    if p in _warn and x not in range(_warn[p][0], _warn[p][1]+1):
+                            print(f'WARNING: {p} set to {x}!\nAllowed values are within {_warn[p][0], _warn[p][1]}, parameter set to {_warn[p][2]}.')
+                            x = _warn[p][2]
                     setattr(conv[key], p, x)
                 else:
                     print(f'WARNING: "{p}" is not a valid key!')
@@ -1553,7 +1623,7 @@ class SliderWidget(QtWidgets.QFrame):
         self.box_width_dynamic = 0
         if self.parent().plo.enable_slider_ener:
             self.sl_ener = self.add_slider(self.grid,
-                                           'Energy\n[keV]','ener', _idx,
+                                           self.parent().plo.slider_label_ener,'ener', _idx,
                                            self.parent().geo.ener,
                                            self.parent().lmt.ener_min,
                                            self.parent().lmt.ener_max,
@@ -1562,34 +1632,34 @@ class SliderWidget(QtWidgets.QFrame):
             _idx += 1
         if self.parent().plo.enable_slider_dist:
             self.sl_dist = self.add_slider(self.grid,
-                                           'Distance\n[mm]', 'dist', _idx,
+                                           self.parent().plo.slider_label_dist, 'dist', _idx,
                                            self.parent().geo.dist,
                                            self.parent().lmt.dist_min,
                                            self.parent().lmt.dist_max,
                                            self.parent().lmt.dist_stp)
             self.box_width_dynamic += self.parent().plo.slider_column_width
             _idx += 1
-        if self.parent().plo.enable_slider_yoff:
-            self.sl_yoff = self.add_slider(self.grid,
-                                           'Y offset\n[mm]', 'yoff', _idx,
-                                           self.parent().geo.yoff,
-                                           self.parent().lmt.yoff_min,
-                                           self.parent().lmt.yoff_max,
-                                           self.parent().lmt.yoff_stp)
+        if self.parent().plo.enable_slider_voff:
+            self.sl_voff = self.add_slider(self.grid,
+                                           self.parent().plo.slider_label_voff, 'voff', _idx,
+                                           self.parent().geo.voff,
+                                           self.parent().lmt.voff_min,
+                                           self.parent().lmt.voff_max,
+                                           self.parent().lmt.voff_stp)
             self.box_width_dynamic += self.parent().plo.slider_column_width
             _idx += 1
-        if self.parent().plo.enable_slider_xoff:
-            self.sl_xoff = self.add_slider(self.grid,
-                                           'X offset\n[mm]', 'xoff', _idx,
-                                           self.parent().geo.xoff,
-                                           self.parent().lmt.xoff_min,
-                                           self.parent().lmt.xoff_max,
-                                           self.parent().lmt.xoff_stp)
+        if self.parent().plo.enable_slider_hoff:
+            self.sl_hoff = self.add_slider(self.grid,
+                                           self.parent().plo.slider_label_hoff, 'hoff', _idx,
+                                           self.parent().geo.hoff,
+                                           self.parent().lmt.hoff_min,
+                                           self.parent().lmt.hoff_max,
+                                           self.parent().lmt.hoff_stp)
             self.box_width_dynamic += self.parent().plo.slider_column_width
             _idx += 1
         if self.parent().plo.enable_slider_tilt:
             self.sl_tilt = self.add_slider(self.grid,
-                                           'Tilt\n[˚]', 'tilt', _idx,
+                                           self.parent().plo.slider_label_tilt, 'tilt', _idx,
                                            self.parent().geo.tilt,
                                            self.parent().lmt.tilt_min,
                                            self.parent().lmt.tilt_max,
@@ -1598,7 +1668,7 @@ class SliderWidget(QtWidgets.QFrame):
             _idx += 1
         if self.parent().plo.enable_slider_rota:
             self.sl_rota = self.add_slider(self.grid,
-                                           'Rotation\n[˚]', 'rota', _idx,
+                                           self.parent().plo.slider_label_rota, 'rota', _idx,
                                            self.parent().geo.rota,
                                            self.parent().lmt.rota_min,
                                            self.parent().lmt.rota_max,
@@ -1607,7 +1677,7 @@ class SliderWidget(QtWidgets.QFrame):
             _idx += 1
         if self.parent().plo.enable_slider_bsdx:
             self.sl_bsdx = self.add_slider(self.grid,
-                                           'Beamstop\ndistance\n[mm]', 'bsdx', _idx,
+                                           self.parent().plo.slider_label_bsdx, 'bsdx', _idx,
                                            self.parent().geo.bsdx,
                                            self.parent().lmt.bsdx_min,
                                            self.parent().lmt.bsdx_max,
