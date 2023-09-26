@@ -29,6 +29,19 @@
   - Add all the missing detectors to the _detector_db.json_.
   - Check the [settings file documentation](#settings-file-documentation).
 
+## Conventions
+The rotation is defined with the center of rotation at the sample position, such that the radius of the rotation circle is equal to the sample to detector distance (SDD). That is, the rotation moves the detector along the goniometer circle, keeping the point of normal incidence (PONI) at the same position relative to the detector surface. At 0° the detector is vertical and at 90° the detector is horizontal with the detector normal pointing down.
+The tilt angle is defined relative to the detector face and such that the PONI shifts along the detector face, keeping the SDD fixed. The detector face is thus always tangential to the goniometer circle and the tilt can intuitively be considered a rolling motion along the goniometer circle. Consequentially, the vertical shift of the PONI position ($\Delta y_{PONI}$) on the detector face is equal to the arclength of a section on the goniometer circle with an angular span equal to the tilt angle.
+$$\Delta y_{PONI} = SDD \cdot tilt$$
+The vertical shift of the point of beam incidence (POBI) in the detector reference frame ($\Delta y_{POBI}$) can be described by the side length of the right-angle triangle spanned by the goniometer origin, the PONI, and the POBI, subtracted from the vertical shift of the PONI.
+$$\Delta y_{POBI} = SDD \cdot \left( tilt - tan \left( rotation + tilt \right) \right)$$
+
+[**pyFAI**](https://pyfai.readthedocs.io/en/v2023.1/geometry.html#geometry) uses three rotations, $rot1$, $rot2$, and $rot3$, and three translations, $dist$, $poni1$, and $poni2$, to define the detector position. xrdPlanner uses the same translations ($SDD$, $y_{offset}$, and $x_{offset}$), but only one of the rotations ($rot2$), as well as the additional $tilt$. Apart from a change in sign, the pyFAI $rot2$ and xrdPlanner $rotation$ are equivalent, however, the $tilt$ in pyFAI convention is described by a combination of $rot2$ and shift of $poni1$:
+$$rot2 = -\left( rotation + tilt\right)$$
+combined with
+$$\Delta poni1 = SDD \cdot tilt + y_{offset}$$
+Additionally, pyFAI places the origin at the lower left corner of the detector, whereas xrdPlanner uses the center of the detector as origin, so one must account for translational shifts corresponding to half the width and height of the detector.
+
 ## Use pre-set beamline settings files:
   - Download a settings file from here (e.g. settings/DanMAX.json).
   - Use the import settings function from the GUI to import.
