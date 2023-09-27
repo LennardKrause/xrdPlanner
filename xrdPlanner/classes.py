@@ -872,9 +872,9 @@ class MainWindow(QtWidgets.QMainWindow):
         thm.color_light = '#EEEEEE'               # [color]  Global light color
         # light mode
         thm.light_conic_label_fill = '#FFFFFF'    # [color]  Contour label fill color
-        thm.light_conic_ref_color = '#404040'     # [color]  Reference contour color
-        thm.light_beamstop_color = '#DCDCDC'      # [color]  Beamstop color
-        thm.light_beamstop_edge_color = '#EEEEEE' # [color]  Beamstop edge color
+        thm.light_conic_ref_color = '#DCDCDC'     # [color]  Reference contour color
+        thm.light_beamstop_color = '#FF0000AA'    # [color]  Beamstop color
+        thm.light_beamstop_edge_color = '#FF0000' # [color]  Beamstop edge color
         thm.light_det_module_color = '#404040'    # [color]  Detector module border color
         thm.light_det_module_fill = '#404040'     # [color]  Detector module background color
         thm.light_plot_bg_color = '#FFFFFF'       # [color]  Plot background color
@@ -886,9 +886,9 @@ class MainWindow(QtWidgets.QMainWindow):
         thm.light_slider_label_color = '#000000'  # [color]  Slider frame label color
         # dark mode
         thm.dark_conic_label_fill = '#000000'     # [color]  Contour label fill color
-        thm.dark_conic_ref_color = '#202020'      # [color]  Reference contour color
-        thm.dark_beamstop_color = '#202020'       # [color]  Beamstop color
-        thm.dark_beamstop_edge_color = '#404040'  # [color]  Beamstop edge color
+        thm.dark_conic_ref_color = '#505050'      # [color]  Reference contour color
+        thm.dark_beamstop_color = '#FF0000AA'     # [color]  Beamstop color
+        thm.dark_beamstop_edge_color = '#FF0000'  # [color]  Beamstop edge color
         thm.dark_det_module_color = '#EEEEEE'     # [color]  Detector module border color
         thm.dark_det_module_fill = '#EEEEEE'      # [color]  Detector module background color
         thm.dark_plot_bg_color = '#000000'        # [color]  Plot background color
