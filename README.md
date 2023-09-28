@@ -54,8 +54,10 @@ Additionally, pyFAI places the origin at the lower left corner of the detector, 
 
 ## After the Update:
    Sometimes I might change the name of a parameter and you will get a warning message upon startup looking something like this: _WARNING: "conic_ref_min_int" is not a valid key_! Either that key is no longer in use or its name got changed and is now reset to the default value. The settings file is updated and the warning should no longer appear after restart. Apart from this, your edited settings file will not be altered after updating.
-#### Added a new key:
-  - conic_ref_cif_kev: this key sets the energy at which Dans_Dffraction calculates the intensities from a cif, increasing the value allows for higher resolution reference conics. However, the calculation will get slower.
+#### Added a new keys:
+  - conic_ref_cif_kev: this key sets the energy at which Dans_Dffraction calculates the intensities from a cif, increasing the value allows for higher resolution reference conics. However, the calculation will get slower. 
+  - use poni_marker and poni_size to adjust the poni marker style and size, the color is picked from the colormap.
+  - slider_label_xxxx (ener, dist, rota, voff, hoff, tilt, bsdx) accept any string to customise the labels for the sliders.
 
 ## Latest updates:
   - 2023-09-26 Update: Added a PONI marker.
@@ -63,6 +65,10 @@ Additionally, pyFAI places the origin at the lower left corner of the detector, 
   - 2023-09-26 Update: Added the option to automatically find a reasonable window size (set plot_size to 0).
   - 2023-09-26 Bugfix: Fixed a bug that prevented the beamstop menu from updating upon changing the available beamstop list.
   - 2023-09-26 Bugfix: Fixed a bug in the calculation of the beamcenter for the combination of rotation and tilt.
+
+<details>
+<summary>Older updates</summary>
+  
   - 2023-08-29 Update: Added a feature to import and switch between settings files.
   - 2023-08-22 Bugfix: Fixed missing symbols and the slider bar on Linux.
   - 2023-08-22 Update: Added a beamstop, define distance to sample with a slider and pick a size from the menu.
@@ -70,10 +76,6 @@ Additionally, pyFAI places the origin at the lower left corner of the detector, 
   - 2023-08-15 Update: Changed the way themes / styles and customisation works internally.
   - 2023-07-14 Update: Added a key _plo.conic_ref_cif_kev_ to edit the energy for the cif intensity calculation.
   - 2023-07-14 Bugfix: Fixed a bug in the calculation of the conics, sections close to 90 deg. would sometimes not be drawn.
-
-<details>
-<summary>Older updates</summary>
-  
   - 2023-06-30 Update: Reference hkl intensity determines linewidth (irel).
   - 2023-06-30 Bugfix: Reference lines stay after settings reload.
   - 2023-06-23 Bugfix: Fixed several bugs with regard to the reloading of the settings file.
@@ -147,13 +149,13 @@ Additionally, pyFAI places the origin at the lower left corner of the detector, 
     conic_label_size = 14           # [int]    Contour label size
     
     # - reference contour section - 
-    conic_ref_linewidth = 2.0      # [float]  Reference contour linewidth
+    conic_ref_linewidth = 2.0       # [float]  Reference contour linewidth
     conic_ref_num = 100             # [int]    Number of reference contours
     conic_ref_cif_int = 0.01        # [float]  Minimum display intensity (cif)
     conic_ref_cif_kev = 10.0        # [float]  Energy [keV] for intensity calculation
-    conic_ref_cif_irel = True       # [int]    Linewidth relative to intensity
+    conic_ref_cif_irel = True       # [bool]   Linewidth relative to intensity
     conic_ref_cif_lw_min = 0.1      # [float]  Minimum linewidth when using irel
-    conic_ref_cif_lw_mult = 3       # [float]  Linewidth multiplier when using irel
+    conic_ref_cif_lw_mult = 3.0     # [float]  Linewidth multiplier when using irel
     conic_hkl_show_int = False      # [bool]   Show intensity in hkl tooltip
     conic_hkl_label_size = 14       # [int]    Font size of hkl tooltip
     
@@ -164,7 +166,7 @@ Additionally, pyFAI places the origin at the lower left corner of the detector, 
     # - general section - 
     conic_steps = 100               # [int]    Conic resolution
     plot_size = 0                   # [int]    Plot size, px (0 for auto)
-    plot_size_fixed = True          # [int]    Fix window size
+    plot_size_fixed = True          # [bool]   Fix window size
     unit_label_size = 16            # [int]    Label size, px
     
     # - slider section - 
@@ -204,34 +206,34 @@ Additionally, pyFAI places the origin at the lower left corner of the detector, 
     color_light = '#EEEEEE'               # [color]  Global light color
     
     # light mode
-    light_conic_label_fill = '#FFFFFF'    # [str]    Contour label fill color
+    light_conic_label_fill = '#FFFFFF'    # [color]  Contour label fill color
     light_conic_ref_color = '#DCDCDC'     # [color]  Reference contour color
     light_beamstop_color = '#FF000080'    # [color]  Beamstop color
     light_beamstop_edge_color = '#FF0000' # [color]  Beamstop edge color
     light_det_module_color = '#404040'    # [color]  Detector module border color
     light_det_module_fill = '#404040'     # [color]  Detector module background color
-    light_plot_bg_color = '#FFFFFF'       # [str]    Plot background color
-    light_unit_label_color = '#808080'    # [str]    Label color
-    light_unit_label_fill = '#FFFFFF'     # [str]    Label fill color
-    light_slider_border_color = '#808080' # [str]    Slider frame border color
-    light_slider_bg_color = '#AAC0C0C0'   # [str]    Slider frame background color
-    light_slider_bg_hover = '#C0C0C0'     # [str]    Slider frame hover color
-    light_slider_label_color = '#000000'  # [str]    Slider frame label color
+    light_plot_bg_color = '#FFFFFF'       # [color]  Plot background color
+    light_unit_label_color = '#808080'    # [color]  Label color
+    light_unit_label_fill = '#FFFFFF'     # [color]  Label fill color
+    light_slider_border_color = '#808080' # [color]  Slider frame border color
+    light_slider_bg_color = '#AAC0C0C0'   # [color]  Slider frame background color
+    light_slider_bg_hover = '#C0C0C0'     # [color]  Slider frame hover color
+    light_slider_label_color = '#000000'  # [color]  Slider frame label color
     
     # dark mode
-    dark_conic_label_fill = '#000000'     # [str]    Contour label fill color
+    dark_conic_label_fill = '#000000'     # [color]  Contour label fill color
     dark_conic_ref_color = '#505050'      # [color]  Reference contour color
     dark_beamstop_color = '#FF000080'     # [color]  Beamstop color
     dark_beamstop_edge_color = '#FF0000'  # [color]  Beamstop edge color
     dark_det_module_color = '#EEEEEE'     # [color]  Detector module border color
     dark_det_module_fill = '#EEEEEE'      # [color]  Detector module background color
-    dark_plot_bg_color = '#000000'        # [str]    Plot background color
-    dark_unit_label_color = '#C0C0C0'     # [str]    Label color
-    dark_unit_label_fill = '#000000'      # [str]    Label fill color
-    dark_slider_border_color = '#202020'  # [str]    Slider frame border color
-    dark_slider_bg_color = '#AA303030'    # [str]    Slider frame background color
-    dark_slider_bg_hover = '#303030'      # [str]    Slider frame hover color
-    dark_slider_label_color = '#C0C0C0'   # [str]    Slider frame label color
+    dark_plot_bg_color = '#000000'        # [color]  Plot background color
+    dark_unit_label_color = '#C0C0C0'     # [color]  Label color
+    dark_unit_label_fill = '#000000'      # [color]  Label fill color
+    dark_slider_border_color = '#202020'  # [color]  Slider frame border color
+    dark_slider_bg_color = '#AA303030'    # [color]  Slider frame background color
+    dark_slider_bg_hover = '#303030'      # [color]  Slider frame hover color
+    dark_slider_label_color = '#C0C0C0'   # [color]  Slider frame label color
 
 #### lmt - limits
 
