@@ -28,8 +28,8 @@
   - _plo_ customises the general layout and visuals.
   - _thm_ makes it look the way you want.
   - _lmt_ sets the limiting values of the geometry/energy sliders.
-  - Add all the missing detectors to the _detector_db.json_.
   - Check the [settings file documentation](#settings-file-documentation).
+  - Add all the missing detectors to the _detector_db.json_, see the [detector db entries](#detector-db-entries).
 
 ## Conventions
 The geometry is defined with the center of rotation at the sample position, such that the radius of the rotation circle is equal to the sample to detector distance (SDD). That is, the rotation moves the detector along the goniometer circle, keeping the point of normal incidence (PONI) at the same position relative to the detector surface. At 0° the detector is vertical and at 90° the detector is horizontal with the detector normal pointing down.
