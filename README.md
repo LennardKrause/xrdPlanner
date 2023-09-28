@@ -22,8 +22,8 @@
 
 ## Customisation:
   - Edit the _settings.json_ file and the _detector_db.json_ files.
-  - Use _Settings_ -> _Edit files_ to edit the _Current settings_ or _Detector db_ file.
-  - Reload the setings file to see the difference.
+  - Use _Settings_ -> _Edit files_ to edit the _current settings_ or _Detector db_ file.
+  - Reload the settings file to see the difference.
   - _geo_ determines the startup defaults.
   - _plo_ customises the general layout and visuals.
   - _thm_ makes it look the way you want.
