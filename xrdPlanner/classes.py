@@ -49,8 +49,20 @@ class MainWindow(QtWidgets.QMainWindow):
         if os.path.exists(_old_settings_file):
             shutil.move(_old_settings_file, self.path_settings_default)
 
+        # delete active settings file token
+        #  - token with currently active settings
+        #    file will be placed on successful exit
+        #  - if no token file is found -> crashed last time
+        #  - load default settings
+        self.delete_active_settings_file()
+
         # save/load parameters to/from file
         self.init_par()
+
+        # get the translations to link
+        # the settings parameter keys
+        # to their description
+        self.get_tooltips()
 
         # menubar is displayed within the main window on Windows
         # so we need to make space for it
@@ -83,7 +95,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.layout.addWidget(self.ax)
 
         # Add current beamstop size to list
-        if self.geo.bssz and self.geo.bssz != 'None' and self.geo.bssz not in self.geo.bs_list:
+        if self.geo.bssz and not type(self.geo.bssz) == str and self.geo.bssz not in self.geo.bs_list:
             self.geo.bs_list.append(self.geo.bssz)
             self.geo.bs_list.sort()
 
@@ -94,6 +106,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ref_custom = {}
         self.ref_custom_hkl = {}
         
+        # get the translations to link
+        # the settings parameter keys
+        # to their description
+        self.get_tooltips()
+
         # initialise all that depends on the settings
         # call this function to apply changes were made
         # to the settings file -> reload_settings()
@@ -110,23 +127,6 @@ class MainWindow(QtWidgets.QMainWindow):
         # make sure that everything
         # that is needed is initialised
         self.sliderWidget = SliderWidget(self)
-
-    def get_active_settings_file(self):
-        if os.path.exists(self.path_settings_token):
-            with open(self.path_settings_token, 'r') as rf:
-                name = rf.read()
-            if os.path.exists(os.path.join(self.path_settings, name)):
-                return name
-        # otherwise return default
-        _default = os.path.basename(self.path_settings_default)
-        self.set_active_settings_file(_default)
-        return _default
-    
-    def set_active_settings_file(self, active):
-        if not os.path.exists(self.path_settings):
-            os.makedirs(self.path_settings)
-        with open(self.path_settings_token, 'w') as wf:
-            wf.write(active)
 
     def init_modifiables(self):
         # get colormap
@@ -152,7 +152,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.geo.unit >= len(self.unit_names):
             print(f'Error: Valid geo.unit range is from 0 to {len(self.unit_names)-1}, geo.unit={self.geo.unit}')
             raise SystemExit
-        
+
         # get the detector specs
         # - update: overwrite existing file after load
         # - reset: overwrite existing file with defaults
@@ -160,6 +160,27 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # pick current detector
         self.det = self.get_specs_det()
+        
+        # remove unavailable detectors
+        if self.geo.det_bank:
+            # add chosen detector/size combination to the bank
+            if self.geo.det_type not in self.geo.det_bank.keys():
+                self.geo.det_bank[self.geo.det_type] = [self.geo.det_size]
+            else:
+                # if entry is str -> list
+                if type(self.geo.det_bank[self.geo.det_type]) == str:
+                    self.geo.det_bank[self.geo.det_type] = [self.geo.det_bank[self.geo.det_type]]
+                # if current not in list -> append
+                if self.geo.det_size not in self.geo.det_bank[self.geo.det_type]:
+                    self.geo.det_bank[self.geo.det_type].append(self.geo.det_size)
+            # iterate over detector db
+            for det in list(self.detector_db.keys()):
+                if det not in self.geo.det_bank.keys():
+                    self.detector_db.pop(det)
+                else:
+                    for size in list(self.detector_db[det]['size'].keys()):
+                        if size not in self.geo.det_bank[det]:
+                            self.detector_db[det]['size'].pop(size)
 
         # init the hkl tooltip
         font = QtGui.QFont()
@@ -172,6 +193,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.geo.darkmode = use_dark
         _color_dark = QtGui.QColor(self.thm.color_dark)
         _color_light = QtGui.QColor(self.thm.color_light)
+        # set highlight text color depending on the lightness of the colormap
+        _highlight_color = self.cont_cmap.map(0.0, mode='qcolor')
+        if _highlight_color.lightnessF() < 0.5:
+            _highlight_text = _color_light.lighter(150)
+        else:
+            _highlight_text = _color_dark.darker(150)
         # define color palette
         if use_dark:
             # reference contour
@@ -193,13 +220,18 @@ class MainWindow(QtWidgets.QMainWindow):
             # palette
             palette = QtGui.QPalette()
             palette.setColor(QtGui.QPalette.ColorRole.Window,          _color_dark)
+            palette.setColor(QtGui.QPalette.ColorRole.WindowText,      _color_light)
+            palette.setColor(QtGui.QPalette.ColorRole.Button,          _color_dark)
             palette.setColor(QtGui.QPalette.ColorRole.ButtonText,      _color_light)
             palette.setColor(QtGui.QPalette.ColorRole.Base,            _color_dark)
+            palette.setColor(QtGui.QPalette.ColorRole.AlternateBase,   _color_dark.lighter(110))
+            palette.setColor(QtGui.QPalette.ColorRole.Highlight,       _highlight_color)
+            palette.setColor(QtGui.QPalette.ColorRole.HighlightedText, _highlight_text)
             palette.setColor(QtGui.QPalette.ColorRole.Text,            _color_light)
-            palette.setColor(QtGui.QPalette.ColorRole.HighlightedText, _color_dark)
-            palette.setColor(QtGui.QPalette.ColorRole.WindowText,      _color_light)
-            #palette.setColor(QtGui.QPalette.ColorRole.Button,          self.cont_cmap.map(1.0, mode='qcolor'))
-            palette.setColor(QtGui.QPalette.ColorRole.Highlight,       self.cont_cmap.map(0.0, mode='qcolor'))
+            palette.setColor(QtGui.QPalette.ColorRole.PlaceholderText, _color_light)
+            palette.setColor(QtGui.QPalette.ColorRole.BrightText,      _color_light)
+            palette.setColor(QtGui.QPalette.ColorRole.ToolTipBase,     _color_dark)
+            palette.setColor(QtGui.QPalette.ColorRole.ToolTipText,     _color_light)
         else:
             # reference contour
             self.conic_label_fill = self.thm.light_conic_label_fill
@@ -221,13 +253,18 @@ class MainWindow(QtWidgets.QMainWindow):
             # palette
             palette = QtGui.QPalette()
             palette.setColor(QtGui.QPalette.ColorRole.Window,          _color_light)
+            palette.setColor(QtGui.QPalette.ColorRole.WindowText,      _color_dark)
+            palette.setColor(QtGui.QPalette.ColorRole.Button,          _color_light)
             palette.setColor(QtGui.QPalette.ColorRole.ButtonText,      _color_dark)
             palette.setColor(QtGui.QPalette.ColorRole.Base,            _color_light)
+            palette.setColor(QtGui.QPalette.ColorRole.AlternateBase,   _color_light.darker(110))
+            palette.setColor(QtGui.QPalette.ColorRole.Highlight,       _highlight_color)
+            palette.setColor(QtGui.QPalette.ColorRole.HighlightedText, _highlight_text)
             palette.setColor(QtGui.QPalette.ColorRole.Text,            _color_dark)
-            palette.setColor(QtGui.QPalette.ColorRole.HighlightedText, _color_light)
-            palette.setColor(QtGui.QPalette.ColorRole.WindowText,      _color_dark)
-            #palette.setColor(QtGui.QPalette.ColorRole.Button,          self.cont_cmap.map(1.0, mode='qcolor'))
-            palette.setColor(QtGui.QPalette.ColorRole.Highlight,       self.cont_cmap.map(0.0, mode='qcolor'))
+            palette.setColor(QtGui.QPalette.ColorRole.PlaceholderText, _color_dark)
+            palette.setColor(QtGui.QPalette.ColorRole.BrightText,      _color_dark)
+            palette.setColor(QtGui.QPalette.ColorRole.ToolTipBase,     _color_light)
+            palette.setColor(QtGui.QPalette.ColorRole.ToolTipText,     _color_dark)
 
         # apply palette to app
         app = QtWidgets.QApplication.instance()
@@ -237,7 +274,26 @@ class MainWindow(QtWidgets.QMainWindow):
         # redraw the canvas
         if redraw:
             self.redraw_canvas()
-        
+
+    def init_par(self):
+        # fetch the geometry, detector, plot specifications and limits
+        self.get_defaults_all()
+        # file name to store current settings
+        # if file_dump doesn't exists, make a dump
+        if not os.path.exists(self.path_settings_current):
+            self.save_par()
+        # if it exists load parameters
+        else:
+            self.load_par()
+        # reset to default if requested
+        if self.plo.reset_settings:
+            self.get_defaults_all()
+            self.save_par()
+        # update with default if requested
+        #  - e.g. to add missing entries
+        if self.plo.update_settings:
+            self.save_par()
+
     def init_screen(self):
         # init the plot for contours and beam center
         self.ax.setAspectLocked()
@@ -303,6 +359,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self.patches['labels'].append(temp_label)
             self.ax.addItem(temp_label)
 
+        # label for beamstop contour
+        bs_label = pg.TextItem(anchor=(0.5,0.5),
+                               color=self.unit_label_color,
+                               fill=self.conic_label_fill)
+        bs_label.setFont(font)
+        self.patches['bs_label'] = bs_label
+        self.ax.addItem(bs_label)
+
         # add poni scatter plot
         self.patches['poni'] = pg.ScatterPlotItem(symbol = self.plo.poni_marker,
                                                   size = self.plo.poni_size,
@@ -316,14 +380,6 @@ class MainWindow(QtWidgets.QMainWindow):
                                                         brush = pg.mkBrush(self.cont_cmap.map(0, mode='qcolor')),
                                                         pen = pg.mkPen(None))
         self.ax.addItem(self.patches['beamcenter'])
-
-        # label for beamstop contour
-        bs_label = pg.TextItem(anchor=(0.5,0.5),
-                               color=self.unit_label_color,
-                               fill=self.conic_label_fill)
-        bs_label.setFont(font)
-        self.patches['bs_label'] = bs_label
-        self.ax.addItem(bs_label)
 
         # build detector modules
         self.build_detector()
@@ -360,8 +416,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # the menus and update the checkmarks upon
         # settings reload via self.reload_settings()
         self.menu_det = self.menu_bar.addMenu('Detector')
-        group_det = QtGui.QActionGroup(self)
-        group_det.setExclusive(True)
+        self.group_det = QtGui.QActionGroup(self)
+        self.group_det.setExclusive(True)
 
         # menu Detectors
         for d in sorted(self.detector_db):
@@ -371,7 +427,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 det_action = QtGui.QAction(s, self, checkable=True)
                 self.set_menu_action(det_action, self.change_detector, d, s)
                 d_menu.addAction(det_action)
-                group_det.addAction(det_action)
+                self.group_det.addAction(det_action)
                 if d == self.geo.det_type and s == self.geo.det_size:
                     det_action.setChecked(True)
         
@@ -384,7 +440,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.set_menu_action(ref_action, self.change_reference, 'None')
         self.menu_ref.addAction(ref_action)
         self.group_ref.addAction(ref_action)
-        if self.geo.reference == 'None':
+        if self.geo.reference.lower() == 'none':
             ref_action.setChecked(True)
         # menu Reference: add pyFAI library
         self.sub_menu_pyFAI = QtWidgets.QMenu('pyFAI', self)
@@ -410,7 +466,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.set_menu_action(bs_action, self.change_beamstop, 'None')
         self.menu_bs.addAction(bs_action)
         self.group_bs.addAction(bs_action)
-        if self.geo.bssz == 'None':
+        if isinstance(self.geo.bssz, str) and self.geo.bssz.lower() == 'none':
             bs_action.setChecked(True)
         # menu Beamstop: add sizes list
         self.sub_menu_bs = QtWidgets.QMenu('Sizes [mm]', self)
@@ -465,12 +521,8 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # menu Settings
         menu_Settings = self.menu_bar.addMenu('Settings')
-        # import action
-        import_action = QtGui.QAction('Import settings file', self)
-        self.set_menu_action(import_action, self.import_settings_file)
-        menu_Settings.addAction(import_action)
-        # submenu Settings files
-        self.menu_custom_settings = menu_Settings.addMenu('Load settings file')
+        # submenu load settings files
+        self.menu_custom_settings = menu_Settings.addMenu('Load')
         self.group_cset = QtGui.QActionGroup(self)
         self.group_cset.setExclusive(True)
         for cset_name in self.get_settings_files():
@@ -481,31 +533,39 @@ class MainWindow(QtWidgets.QMainWindow):
             if cset_name == self.active_settings:
                 cset_action.setChecked(True)
         # save action
-        save_action = QtGui.QAction('Save current settings', self)
+        save_action = QtGui.QAction('Save', self)
         self.set_menu_action(save_action, self.save_current_settings)
         menu_Settings.addAction(save_action)
-        # submenu Edit files
-        menu_Settings.addSeparator()
+        # import action
+        import_action = QtGui.QAction('Import', self)
+        self.set_menu_action(import_action, self.import_settings_file)
+        menu_Settings.addAction(import_action)
+        # export action
+        export_action = QtGui.QAction('Export', self)
+        self.set_menu_action(export_action, self.show_export_window)
+        menu_Settings.addAction(export_action)
         # submenu Edit
-        menu_Edit = menu_Settings.addMenu('Edit files')
+        menu_Settings.addSeparator()
+        menu_Edit = menu_Settings.addMenu('Edit')
         # prepare platform dependent file reader
         if sys.platform == 'win32':
-            tokens = [('Edit detector db file', os.system, f'notepad {self.path_detdb}'),
-                      ('Edit current settings file', self.edit_settings_file, f'notepad')]
+            tokens = [('Detector db', os.system, f'notepad {self.path_detdb}'),
+                      ('Settings', self.edit_settings_file, f'notepad')]
         elif sys.platform == 'linux':
-            tokens = [('Edit detector db file', os.system, f'xdg-open {self.path_detdb}'),
-                      ('Edit current settings file', self.edit_settings_file, f'xdg-open')]
+            tokens = [('Detector db', os.system, f'xdg-open {self.path_detdb}'),
+                      ('Settings', self.edit_settings_file, f'xdg-open')]
         else:
-            tokens = [('Edit detector db file', os.system, f'open -t {self.path_detdb}'),
-                      ('Edit current settings file', self.edit_settings_file, f'open -t')]
+            tokens = [('Detector db', os.system, f'open -t {self.path_detdb}'),
+                      ('Settings', self.edit_settings_file, f'open -t')]
         for (name, funct, command) in tokens:
             edit_action = QtGui.QAction(name, self)
             self.set_menu_action(edit_action, funct, command)
             menu_Edit.addAction(edit_action)
-        # reset action
-        #reset_action = QtGui.QAction('Reset to default settings', self)
-        #self.set_menu_action(reset_action, self.reset_to_default)
-        #menu_default.addAction(reset_action)
+        # delete action
+        menu_Settings.addSeparator()
+        export_action = QtGui.QAction('Delete', self)
+        self.set_menu_action(export_action, self.delete_settings_files)
+        menu_Settings.addAction(export_action)
 
         # menu About
         self.menu_help = self.menu_bar.addMenu('Help')
@@ -516,14 +576,13 @@ class MainWindow(QtWidgets.QMainWindow):
     def about_window(self):
         msgBox = QtWidgets.QMessageBox()
         msgBox.setTextFormat(QtCore.Qt.TextFormat.RichText)
-        msgBox.setStandardButtons(QtWidgets.QMessageBox.StandardButton.NoButton)
         msgBox.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.LinksAccessibleByMouse)
         windowIcon = QtGui.QIcon()
         windowIcon.addPixmap(QtGui.QPixmap(':/icons/xrdPlanner.png'))
         msgBox.setWindowIcon(windowIcon)
         msgBox.setIconPixmap(QtGui.QPixmap(':/icons/xrdPlanner.png'))
         msgBox.setWindowTitle('About')
-        msgBox.setText('xrdPlanner 1.3.0')
+        msgBox.setText('xrdPlanner 1.4.0')
         msgBox.setDetailedText("<a href='https://github.com/LennardKrause/xrdPlanner'>https://github.com/LennardKrause/xrdPlanner</a>")
         msgBox.setInformativeText('Author:\nLennard Krause, 2023\nlkrause@chem.au.dk')
         msgBox.exec()
@@ -537,7 +596,6 @@ class MainWindow(QtWidgets.QMainWindow):
     def change_settings_file(self, name):
         self.active_settings = name
         self.path_settings_current = os.path.join(self.path_settings, name)
-        self.set_active_settings_file(name)
         self.reload_settings()
     
     def import_settings_file(self):
@@ -607,7 +665,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 action.setChecked(True)
         
         # menu Beamstop: add sizes list
-        if self.geo.bssz not in self.geo.bs_list:
+        if self.geo.bssz not in self.geo.bs_list and not type(self.geo.bssz) == str:
             self.geo.bs_list.append(self.geo.bssz)
             self.geo.bs_list.sort()
         
@@ -620,6 +678,19 @@ class MainWindow(QtWidgets.QMainWindow):
             self.group_bs.addAction(bs_sub_action)
             if bs_size == self.geo.bssz:
                 bs_sub_action.setChecked(True)
+        
+        # update menu Detectors
+        self.menu_det.clear()
+        for d in sorted(self.detector_db):
+            d_menu = QtWidgets.QMenu(d, self)
+            self.menu_det.addMenu(d_menu)
+            for s in self.detector_db[d]['size']:
+                det_action = QtGui.QAction(s, self, checkable=True)
+                self.set_menu_action(det_action, self.change_detector, d, s)
+                d_menu.addAction(det_action)
+                self.group_det.addAction(det_action)
+                if d == self.geo.det_type and s == self.geo.det_size:
+                    det_action.setChecked(True)
 
     def add_unit_label(self):
         font = QtGui.QFont()
@@ -662,7 +733,7 @@ class MainWindow(QtWidgets.QMainWindow):
         action.triggered.connect(lambda: target(*args))
 
     def set_window_title(self):
-        if self.geo.reference == 'None':
+        if self.geo.reference.lower() == 'none':
             self.setWindowTitle(f'{self.det.name} - {self.active_settings}')
         else:
             self.setWindowTitle(f'{self.det.name} - {self.geo.reference} - {self.active_settings}')
@@ -680,6 +751,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sliderWidget.init_sliders()
         self.sliderWidget.center_frame()
 
+    def reload_settings(self):
+        # load settings
+        ###############################
+        # clearing the det_bank makes #
+        # sure that 'old' par files   #
+        # without the det_bank entry  #
+        # get access to all detectors #
+        # -> backwards compatibility. #
+        ###############################
+        self.geo.det_bank = {}
+        ###############################
+        self.load_par()
+        self.redraw_canvas()
+        self.update_menu_entries()
+
     def change_beamstop(self, size):
         self.geo.bssz = size
         self.redraw_canvas()
@@ -687,12 +773,6 @@ class MainWindow(QtWidgets.QMainWindow):
     def change_cmap(self, cmap):
         self.geo.colormap = cmap
         self.redraw_canvas()
-
-    def reload_settings(self):
-        # load settings
-        self.load_par()
-        self.redraw_canvas()
-        self.update_menu_entries()
 
     def change_detector(self, det_name, det_size):
         self.geo.det_type = det_name
@@ -776,13 +856,13 @@ class MainWindow(QtWidgets.QMainWindow):
         geo = container()
         geo.det_type = 'EIGER2'  # [str]  Pilatus3 / Eiger2
         geo.det_size = '4M'      # [str]  300K 1M 2M 6M / 1M 4M 9M 16M
-        geo.ener = 21            # [keV]  Beam energy
-        geo.dist = 75            # [mm]   Detector distance
+        geo.ener = 25            # [keV]  Beam energy
+        geo.dist = 100           # [mm]   Detector distance
         geo.voff = 0             # [mm]   Detector offset (vertical)
         geo.hoff = 0             # [mm]   Detector offset (horizontal)
-        geo.rota = 25            # [deg]  Detector rotation
+        geo.rota = 0             # [deg]  Detector rotation
         geo.tilt = 0             # [deg]  Detector tilt
-        geo.bssz = 'None'        # [mm]   Current beamstop size (or 'None')
+        geo.bssz = 3.0           # [mm]   Current beamstop size (or None)
         geo.bsdx = 40            # [mm]   Beamstop distance
         geo.unit = 1             # [0-3]  Contour legend
                                  #          0: 2-Theta
@@ -791,13 +871,19 @@ class MainWindow(QtWidgets.QMainWindow):
                                  #          3: sin(theta)/lambda
         geo.reference = 'None'   # [str]  Plot reference contours
                                  #          pick from pyFAI
-        geo.darkmode = False     # [bool] Darkmode
+        geo.darkmode = True      # [bool] Darkmode
         geo.colormap = 'viridis' # [cmap] Contour colormap
         geo.bs_list = [1.5,      # [list] Available beamstop sizes
                        2.0,
                        2.5,
                        3.0,
                        5.0]
+        geo.det_bank = {}        # available detectors
+                                 # 'key':['value'] or ['value1', 'value2']
+                                 # 'key': Detector name
+                                 # 'value': Detector model/size/type
+                                 # e.g. {'PLATUS3:['1M', '2M'], 'EIGER2':['4M']}
+                                 # empty dict enables all detectors
         return geo
 
     def get_defaults_plo(self):
@@ -820,7 +906,7 @@ class MainWindow(QtWidgets.QMainWindow):
         plo.conic_ref_num = 250             # [int]    Number of reference contours
         plo.conic_ref_cif_int = 0.01        # [float]  Minimum display intensity (cif)
         plo.conic_ref_cif_kev = 10.0        # [float]  Energy [keV] for intensity calculation
-        plo.conic_ref_cif_irel = True       # [int]    Linewidth relative to intensity
+        plo.conic_ref_cif_irel = True       # [bool]   Linewidth relative to intensity
         plo.conic_ref_cif_lw_min = 0.1      # [float]  Minimum linewidth when using irel
         plo.conic_ref_cif_lw_mult = 3.0     # [float]  Linewidth multiplier when using irel
         plo.conic_hkl_show_int = False      # [bool]   Show intensity in hkl tooltip
@@ -831,7 +917,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # - general section - 
         plo.conic_steps = 100               # [int]    Conic resolution
         plo.plot_size = 0                   # [int]    Plot size, px (0 for auto)
-        plo.plot_size_fixed = True          # [int]    Fix window size
+        plo.plot_size_fixed = True          # [bool]   Fix window size
         plo.unit_label_size = 16            # [int]    Label size, px
         # - slider section - 
         plo.slider_margin = 12              # [int]    Slider frame top margin
@@ -873,7 +959,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # light mode
         thm.light_conic_label_fill = '#FFFFFF'    # [color]  Contour label fill color
         thm.light_conic_ref_color = '#DCDCDC'     # [color]  Reference contour color
-        thm.light_beamstop_color = '#FF0000AA'    # [color]  Beamstop color
+        thm.light_beamstop_color = '#FF000080'    # [color]  Beamstop color
         thm.light_beamstop_edge_color = '#FF0000' # [color]  Beamstop edge color
         thm.light_det_module_color = '#404040'    # [color]  Detector module border color
         thm.light_det_module_fill = '#404040'     # [color]  Detector module background color
@@ -1173,7 +1259,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # for some reason I defined it negative some time ago
         # now there's no turning back!
         omega = -np.deg2rad(self.geo.tilt + self.geo.rota)
-
+        
         # beamcenter shift
         _comp_shift = -(self.geo.voff - self.geo.dist * np.tan(omega) - np.deg2rad(self.geo.tilt) * self.geo.dist)
         
@@ -1182,7 +1268,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # update beam center
         self.patches['poni'].setData([self.geo.hoff],[-(self.geo.voff - np.deg2rad(self.geo.tilt)*self.geo.dist)])
 
-        if self.geo.bssz and self.geo.bssz != 'None':
+        if self.geo.bssz and not (isinstance(self.geo.bssz, str) and self.geo.bssz.lower() == 'none'):
+            # make sure it is a float (might be a string from the export window!)
+            self.geo.bssz = float(self.geo.bssz)
             # update beam stop
             bs_theta = np.tan((self.geo.bssz/2) / self.geo.bsdx)
 
@@ -1475,24 +1563,323 @@ class MainWindow(QtWidgets.QMainWindow):
         if os.path.splitext(fpath)[1] == '.cif':
             self.calc_ref_from_cif(fpath)
 
-    def init_par(self):
-        # fetch the geometry, detector, plot specifications and limits
-        self.get_defaults_all()
-        # file name to store current settings
-        # if file_dump doesn't exists, make a dump
-        if not os.path.exists(self.path_settings_current):
-            self.save_par()
-        # if it exists load parameters
+    def keyPressEvent(self, event):
+        k = event.key()
+        txt = event.text()
+        alt_modifier = (event.modifiers() == QtCore.Qt.KeyboardModifier.AltModifier)
+        if k==QtCore.Qt.Key.Key_C:
+            idx = pg.colormap.listMaps().index(self.geo.colormap) + 1
+            if idx >= len(pg.colormap.listMaps()):
+                idx = 0
+            self.change_cmap(pg.colormap.listMaps()[idx])
+            #print(self.cont_cmap, self.cont_cmap.map(0.0, mode='qcolor').lightness(), QtGui.QColor([255, 255, 255, 0] - np.array(self.cont_cmap.map(0.0, mode='qcolor').getRgb())))
+        # print(k, txt, alt_modifier, k==QtCore.Qt.Key.Key_H)
+
+    def tree_ghost_select(self, item):
+        parent = item.parent()
+        # toplevel -> multiselect
+        if parent == None:
+            if item.isSelected():
+                [item.child(i).setSelected(True) for i in range(item.childCount())]
+            else:
+                [item.child(i).setSelected(False) for i in range(item.childCount())]
+        # sublevel -> single + top select
         else:
-            self.load_par()
-        # reset to default if requested
-        if self.plo.reset_settings:
-            self.get_defaults_all()
-            self.save_par()
-        # update with default if requested
-        #  - e.g. to add missing entries
-        if self.plo.update_settings:
-            self.save_par()
+            if any([parent.child(i).isSelected() for i in range(parent.childCount())]):
+                parent.setSelected(True)
+            else:
+                parent.setSelected(False)
+
+    def show_export_window(self):
+        # set flags=QtCore.Qt.WindowType.Tool for the window
+        # to not loose focus when the FileDialog is closed
+        self.export_window = QtWidgets.QMainWindow(parent=self, flags=QtCore.Qt.WindowType.Tool)
+        self.export_window.setWindowTitle('Export current settings to file')
+        layout_vbox = QtWidgets.QVBoxLayout()
+        layout_hbox = QtWidgets.QHBoxLayout()
+        layout_hbox.setContentsMargins(0,0,0,0)
+        frame = QtWidgets.QFrame()
+        frame.setLayout(layout_hbox)
+
+        central_widget = QtWidgets.QWidget()
+        central_widget.setLayout(layout_vbox)
+        self.export_window.setCentralWidget(central_widget)
+
+        # Fonts
+        font_header = QtGui.QFont()
+        font_header.setPixelSize(self.plo.slider_label_size)
+        font_header.setBold(True)
+        font_normal = QtGui.QFont()
+        font_normal.setPixelSize(self.plo.slider_label_size)
+        font_normal.setBold(False)
+
+        # Detector tree box
+        qbox_det = QtWidgets.QGroupBox()
+        qbox_det.setTitle('Detector bank')
+        qbox_det.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
+        qbox_det.setFont(font_header)
+        layout_qbox_det = QtWidgets.QVBoxLayout()
+        qbox_det.setLayout(layout_qbox_det)
+
+        # Detector tree
+        self.tree_det = QtWidgets.QTreeWidget()
+        self.tree_det.setToolTip('Add detectors and models to the detector bank.\nSelect none to make all detectors and models available.')
+        self.tree_det.setColumnCount(1)
+        self.tree_det.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.MultiSelection)
+        self.tree_det.setHeaderLabels(['Detector type / size'])
+        self.tree_det.header().setFont(font_header)
+        self.tree_det.setAlternatingRowColors(True)
+        _cur_det_type = None
+        _cur_det_size = None
+        for det, specs in self.get_det_library(update=False, reset=False).items():
+            item = QtWidgets.QTreeWidgetItem([str(det)])
+            item.setFont(0, font_header)
+            if self.geo.det_type == str(det):
+                _cur_det_type = item
+            for val in specs['size'].keys():
+                child = QtWidgets.QTreeWidgetItem([str(val)])
+                child.setFont(0, font_normal)
+                if self.geo.det_size == str(val) and self.geo.det_type == str(det):
+                    _cur_det_size = child
+                item.addChild(child)
+            self.tree_det.addTopLevelItem(item)
+        self.tree_det.expandAll()
+        self.tree_det.itemClicked.connect(self.tree_ghost_select)
+
+        # highlight current detector type/size
+        if _cur_det_type is not None:
+            _cur_det_type.setSelected(True)
+        if _cur_det_size is not None:
+            _cur_det_size.setSelected(True)
+
+        # Beamstop list tree box
+        qbox_bsb = QtWidgets.QGroupBox()
+        qbox_bsb.setTitle('Beamstop bank')
+        qbox_bsb.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
+        qbox_bsb.setFont(font_header)
+        layout_qbox_bsb = QtWidgets.QVBoxLayout()
+        layout_qbox_bsb.setSpacing(0)
+        qbox_bsb.setLayout(layout_qbox_bsb)
+
+        # doubleSpinBox editor for the beamstop bank list widget
+        class MyListDelegate(QtWidgets.QStyledItemDelegate):
+            def displayText(self, value, locale):
+                return f'{value:.1f}'
+            
+            def createEditor(self, parent, option, index):
+                box = QtWidgets.QDoubleSpinBox(parent)
+                box.setDecimals(1)
+                box.setSingleStep(0.1)
+                box.setMinimum(0)
+                box.setMaximum(100)
+                return box
+
+        # Beamstop bank list widget
+        self.tree_bsb = QtWidgets.QListWidget()
+        self.tree_bsb.setAlternatingRowColors(True)
+        self.tree_bsb.setItemDelegate(MyListDelegate())
+        self.tree_bsb.setToolTip('Specify the available beamstop sizes.')
+        self.tree_bsb.itemChanged.connect(self.tree_bsb.sortItems)
+        for bs_size in self.geo.bs_list:
+            item = QtWidgets.QListWidgetItem()
+            item.setData(2, bs_size)
+            item.setFont(font_normal)
+            item.setFlags(item.flags()|QtCore.Qt.ItemFlag.ItemIsEditable)
+            self.tree_bsb.addItem(item)
+
+        # Add row to beamstop bank list widget
+        def row_add(aQListWidget, font):
+            vmax = 0
+            for i in range(aQListWidget.count()):
+                if aQListWidget.item(i).data(0) > vmax:
+                    vmax = aQListWidget.item(i).data(0)
+            item = QtWidgets.QListWidgetItem()
+            item.setData(2, vmax + 1)
+            item.setFont(font)
+            item.setFlags(item.flags()|QtCore.Qt.ItemFlag.ItemIsEditable)
+            aQListWidget.addItem(item)
+
+        # Remove row to beamstop bank list widget
+        def row_rem(aQListWidget):
+            _ = aQListWidget.takeItem(aQListWidget.currentRow())
+
+        # add/remove buttons for the beamstop bank list widget
+        button_add = QtWidgets.QToolButton()
+        button_add.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        button_add.setText('+')
+        button_add.setFont(font_header)
+        button_add.setToolTip('Add a new entry to the list.')
+        button_add.clicked.connect(lambda: row_add(self.tree_bsb, font_normal))
+        # remove button
+        button_rem = QtWidgets.QToolButton()
+        button_rem.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        button_rem.setText('-')
+        button_rem.setFont(font_header)
+        button_rem.setToolTip('Remove the highlighted entry from the list.')
+        button_rem.clicked.connect(lambda: row_rem(self.tree_bsb))
+        # button in layout
+        layout_hbox_but = QtWidgets.QHBoxLayout()
+        layout_hbox_but.addWidget(button_add)
+        layout_hbox_but.addWidget(button_rem)
+        qbox_buttons = QtWidgets.QGroupBox()
+        qbox_buttons.setLayout(layout_hbox_but)
+
+        # Parameter tree box
+        qbox_par = QtWidgets.QGroupBox()
+        qbox_par.setTitle('Review parameters')
+        qbox_par.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
+        qbox_par.setFont(font_header)
+        layout_qbox_par = QtWidgets.QVBoxLayout()
+        qbox_par.setLayout(layout_qbox_par)
+
+        # Make only one column editable
+        # Specify the editors for different data types
+        class MyTreeDelegate(QtWidgets.QItemDelegate):
+            def createEditor(self, parent, option, index):
+                if index.column() == 1:
+                    # bool needs to be evaluated before int as True and False
+                    # will be interpreted as integers
+                    if isinstance(index.data(0), bool):
+                        return super(MyTreeDelegate, self).createEditor(parent, option, index)
+                    elif isinstance(index.data(0), int):
+                        box = QtWidgets.QSpinBox(parent)
+                        box.setSingleStep(1)
+                        box.setMinimum(int(-1e9))
+                        box.setMaximum(int(1e9))
+                        return box
+                    elif isinstance(index.data(0), float):
+                        box = QtWidgets.QDoubleSpinBox(parent)
+                        box.setDecimals(2)
+                        box.setSingleStep(0.01)
+                        box.setMinimum(-1e9)
+                        box.setMaximum(1e9)
+                        return box
+                    else:
+                        return super(MyTreeDelegate, self).createEditor(parent, option, index)
+                return None
+            
+        # Parameter tree widget
+        self.tree_par = QtWidgets.QTreeWidget()
+        self.tree_par.setColumnCount(2)
+        self.tree_par.setHeaderLabels(['Parameter', 'Value'])
+        self.tree_par.header().setFont(font_header)
+        self.tree_par.setAlternatingRowColors(True)
+        self.tree_par.setItemDelegate(MyTreeDelegate())
+        # det_bank and bs_list need some special treatment
+        # to facilitate their editing
+        dont_show = ['det_bank', 'bs_list']
+        for section, values in {'geo':self.geo.__dict__, 'plo':self.plo.__dict__, 'thm':self.thm.__dict__, 'lmt':self.lmt.__dict__}.items():
+            item = QtWidgets.QTreeWidgetItem([str(section)])
+            item.setFont(0, font_header)
+            #item.setFlags(QtCore.Qt.ItemFlag.ItemIsSelectable|QtCore.Qt.ItemFlag.ItemIsEnabled)
+            for par, val in values.items():
+                if par in dont_show:
+                    continue
+                child = QtWidgets.QTreeWidgetItem()
+                child.setData(0, 0, str(par))
+                if section in self.tooltips and par in self.tooltips[section]:
+                    child.setToolTip(0, self.tooltips[section][par])
+                    child.setToolTip(1, self.tooltips[section][par])
+                child.setData(1, 2, val)
+                child.setFont(0, font_normal)
+                child.setFont(1, font_normal)
+                child.setFlags(item.flags()|QtCore.Qt.ItemFlag.ItemIsEditable)
+                item.addChild(child)
+            self.tree_par.addTopLevelItem(item)
+        self.tree_par.expandAll()
+        self.tree_par.resizeColumnToContents(0)
+        self.tree_par.resizeColumnToContents(1)
+
+        button_export = QtWidgets.QToolButton()
+        button_export.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        button_export.setText('Export settings to file')
+        button_export.setFont(font_header)
+        button_export.clicked.connect(self.export_to)
+
+        qbox_btn = QtWidgets.QGroupBox()
+        layout_qbox_btn = QtWidgets.QVBoxLayout()
+        qbox_btn.setLayout(layout_qbox_btn)
+        
+        layout_vbox.addWidget(frame)
+        layout_hbox.addWidget(qbox_det, stretch=2)
+        layout_hbox.addWidget(qbox_bsb, stretch=1)
+        layout_hbox.addWidget(qbox_par, stretch=3)
+        layout_vbox.addWidget(qbox_btn)
+        layout_qbox_det.addWidget(self.tree_det)
+        layout_qbox_bsb.addWidget(self.tree_bsb)
+        layout_qbox_bsb.addWidget(qbox_buttons)
+        layout_qbox_par.addWidget(self.tree_par)
+        layout_qbox_btn.addWidget(button_export)
+
+        self.export_window.show()
+        
+    def export_to(self):
+        # make detector bank/dict from selection
+        det_bank = {}
+        for item in self.tree_det.selectedItems():
+            if item.parent() == None:
+                det_name = item.text(0)
+                det_types = [item.child(i).text(0) for i in range(item.childCount()) if item.child(i).isSelected()]
+                det_bank.update({det_name:det_types})
+
+        # get beamstop list from listwidget
+        bs_list = [round(self.tree_bsb.item(i).data(0), 5) for i in range(self.tree_bsb.count())]
+
+        # make settings dict from treewidget
+        settings = dict()
+        for i in range(self.tree_par.topLevelItemCount()):
+            top = self.tree_par.topLevelItem(i)
+            key = top.data(0, 0)
+            settings[key] = dict()
+            for j in range(top.childCount()):
+                k = top.child(j).data(0, 0)
+                v = top.child(j).data(1, 0)
+                if isinstance(v, float):
+                    v = round(v, 5)
+                settings[key][k] = v
+
+        # save parameters to settings file
+        target, filter = QtWidgets.QFileDialog.getSaveFileName(self, 'Export settings file', self.path_settings_current, "Settings files (*.json)")
+        if not target:
+            return
+        
+        # add det_bank and bs_list to settings
+        settings['geo']['det_bank'] = det_bank
+        settings['geo']['bs_list'] = bs_list
+        with open(target, 'w') as wf:
+            json.dump(settings, wf, indent=4)
+        
+        # close the window
+        if self.export_window:
+            self.export_window.close()
+
+        # activate exported settings file
+        basename = os.path.basename(target)
+        self.change_settings_file(basename)
+
+        # add new settings file to menu and check it
+        # add if not in list
+        if basename not in [action.text() for action in self.menu_custom_settings.actions()]:
+            cset_action = QtGui.QAction(basename, self, checkable=True)
+            self.set_menu_action(cset_action, self.change_settings_file, basename)
+            self.menu_custom_settings.addAction(cset_action)
+            self.group_cset.addAction(cset_action)
+            cset_action.setChecked(True)
+        # check if in list
+        else:
+            for action in self.menu_custom_settings.actions():
+                if action.text() == basename:
+                    action.setChecked(True)
+
+    def delete_settings_files(self):
+        # todo change button from 'open' to 'delete'
+        fnames, filter = QtWidgets.QFileDialog.getOpenFileNames(self, 'Delete settings files', self.path_settings_current, "Settings files (*.json)")
+        if fnames:
+            for fname in fnames:
+                os.remove(fname)
+                for action in self.menu_custom_settings.actions():
+                    if action.text() == os.path.basename(fname):
+                        self.menu_custom_settings.removeAction(action)
 
     def save_current_settings(self):
         # self.geo is edited with the sliders
@@ -1504,9 +1891,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._geo.__dict__.update(self.geo.__dict__)
         self.save_par()
 
-    def save_par(self):
+    def save_par(self, target=None):
+        if target == None:
+            target = os.path.join(self.path_settings, self.active_settings)
         # Writing geo as dict to file
-        with open(self.path_settings_current, 'w') as wf:
+        with open(target, 'w') as wf:
             json.dump({'geo':self._geo.__dict__, 'plo':self.plo.__dict__, 'thm':self.thm.__dict__, 'lmt':self.lmt.__dict__}, wf, indent=4)
 
     def load_par(self, skip=[]):
@@ -1547,7 +1936,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 if p in conv[key].__dict__.keys():
                     # make sure the strings are in order.
                     # this is bad!
-                    if type(x) == str and x.lower() == 'none':
+                    if isinstance(x, str) and x.lower() == 'none':
                         x = 'None'
                     if p in _warn and x not in range(_warn[p][0], _warn[p][1]+1):
                             print(f'WARNING: {p} set to {x}!\nAllowed values are within {_warn[p][0], _warn[p][1]}, parameter set to {_warn[p][2]}.')
@@ -1558,6 +1947,162 @@ class MainWindow(QtWidgets.QMainWindow):
         if 'geo' not in skip:
             # store the initial values of geo
             self._geo.__dict__.update(self.geo.__dict__)
+
+    def get_active_settings_file(self):
+        # settings token file exists
+        # get settings file
+        if os.path.exists(self.path_settings_token):
+            with open(self.path_settings_token, 'r') as rf:
+                name = rf.read()
+            if os.path.exists(os.path.join(self.path_settings, name)):
+                return name
+        # otherwise reset and return default
+        # -> last exit ended with crash
+        # get defaults
+        self.get_defaults_all()
+        # set active settings to default
+        self.active_settings = os.path.basename(self.path_settings_default)
+        # reset/save default file
+        self.save_par()
+        return self.active_settings
+    
+    def delete_active_settings_file(self):
+        if os.path.exists(self.path_settings_token):
+            os.remove(self.path_settings_token)
+
+    def set_active_settings_file(self):
+        if not os.path.exists(self.path_settings):
+            os.makedirs(self.path_settings)
+        with open(self.path_settings_token, 'w') as wf:
+            wf.write(self.active_settings)
+
+    def closeEvent(self, event):
+        self.set_active_settings_file()
+        event.accept()
+
+    def get_tooltips(self):
+        self.tooltips = dict()
+        self.tooltips['geo'] = {
+            'det_type':'[str] e.g.\n{}'.format('\n'.join(self.get_det_library(update=False).keys())),
+            'det_size':'[str] e.g.\n{}'.format('\n'.join([f"{k}: {', '.join(v['size'])}" for k,v in self.get_det_library(update=False).items()])),
+            'ener':'[keV] Beam energy',
+            'dist':'[mm] Detector distance',
+            'voff':'[mm] Detector offset (vertical)',
+            'hoff':'[mm] Detector offset (horizontal)',
+            'rota':'[deg] Detector rotation',
+            'tilt':'[deg] Detector tilt',
+            'bssz':'[mm] Current beamstop size (or None)',
+            'bsdx':'[mm] Beamstop distance',
+            'unit':'[0-3] Contour legend\n0: 2-Theta\n1: d-spacing\n2: q-space\n3: sin(theta)/lambda',
+            'reference':'[str] Plot reference contours\npick from pyFAI or None:\n{}'.format(', '.join(calibrant.names())),
+            'darkmode':'[bool] Darkmode',
+            'colormap':'[cmap] Contour colormap:\n{}'.format(', '.join(sorted(pg.colormap.listMaps()))),
+            'bs_list':'[list] Available beamstop sizes',
+            'det_bank':'Available detector bank\nkey:[value] or [value1, value2]\nkey: Detector name\nvalue: Detector model/size/type\ne.g. {PLATUS3:[1M, 2M], EIGER2:[4M]}\nempty dict enables all detectors',
+        }
+        self.tooltips['plo'] = {
+            'conic_tth_min':'[int] Minimum 2-theta contour line',
+            'conic_tth_max':'[int] Maximum 2-theta contour line',
+            'conic_tth_num':'[int] Number of contour lines',
+            'beamcenter_marker':'[marker] Beamcenter marker',
+            'beamcenter_size':'[int] Beamcenter size',
+            'poni_marker':'[marker] Poni marker',
+            'poni_size':'[int] Poni size',
+            'conic_linewidth':'[float] Contour linewidth (lw)',
+            'conic_label_size':'[int] Contour labelsize',
+            'conic_ref_linewidth':'[float] Reference contour linewidth',
+            'conic_ref_num':'[int] Number of reference contours',
+            'conic_ref_cif_int':'[float] Minimum display intensity (cif)',
+            'conic_ref_cif_kev':'[float] Energy [keV] for intensity calculation',
+            'conic_ref_cif_irel':'[bool] Linewidth relative to intensity',
+            'conic_ref_cif_lw_min':'[float] Minimum linewidth when using irel',
+            'conic_ref_cif_lw_mult':'[float] Linewidth multiplier when using irel',
+            'conic_hkl_show_int':'[bool] Show intensity in hkl tooltip',
+            'conic_hkl_label_size':'[int] Font size of hkl tooltip',
+            'det_module_alpha':'[float] Detector module alpha',
+            'det_module_width':'[int] Detector module border width',
+            'conic_steps':'[int] Conic resolution',
+            'plot_size':'[int] Plot size, px (0 for auto)',
+            'plot_size_fixed':'[bool] Fix window size',
+            'unit_label_size':'[int] Label size, px',
+            'slider_margin':'[int] Slider frame top margin',
+            'slider_border_width':'[int] Slider frame border width',
+            'slider_border_radius':'[int] Slider frame border radius (px)',
+            'slider_label_size':'[int] Slider frame label size',
+            'slider_column_width':'[int] Slider label column width',
+            'enable_slider_ener':'[bool] Show energy slider',
+            'enable_slider_dist':'[bool] Show distance slider',
+            'enable_slider_rota':'[bool] Show rotation slider',
+            'enable_slider_voff':'[bool] Show vertical offset slider',
+            'enable_slider_hoff':'[bool] Show horizontal offset slider',
+            'enable_slider_tilt':'[bool] Show tilt slider',
+            'enable_slider_bsdx':'[bool] Show beamstop distance slider',
+            'slider_label_ener':'[str] Label for energy slider',
+            'slider_label_dist':'[str] Label for distance slider',
+            'slider_label_rota':'[str] Label for rotation slider',
+            'slider_label_voff':'[str] Label for vertical offset slider',
+            'slider_label_hoff':'[str] Label for horizontal offset slider',
+            'slider_label_tilt':'[str] Label for tilt slider',
+            'slider_label_bsdx':'[str] Label for beamstop distance slider',
+            'update_settings':'[bool] Update settings file after load',
+            'update_det_bank':'[bool] Update detector bank after load',
+            'reset_settings':'[bool] Reset settings file',
+            'reset_det_bank':'[bool] Reset detector bank',
+            'set_debug':'[bool] Debug mode'
+        }
+        self.tooltips['thm'] = {
+            'color_dark':'[color] Global dark color',
+            'color_light':'[color] Global light color',
+            'light_conic_label_fill':'[color] Contour label fill color',
+            'light_conic_ref_color':'[color] Reference contour color',
+            'light_beamstop_color':'[color] Beamstop color',
+            'light_beamstop_edge_color':'[color] Beamstop edge color',
+            'light_det_module_color':'[color] Detector module border color',
+            'light_det_module_fill':'[color] Detector module background color',
+            'light_plot_bg_color':'[color] Plot background color',
+            'light_unit_label_color':'[color] Label color',
+            'light_unit_label_fill':'[color] Label fill color',
+            'light_slider_border_color':'[color] Slider frame border color',
+            'light_slider_bg_color':'[color] Slider frame background color',
+            'light_slider_bg_hover':'[color] Slider frame hover color',
+            'light_slider_label_color':'[color] Slider frame label color',
+            'dark_conic_label_fill':'[color] Contour label fill color',
+            'dark_conic_ref_color':'[color] Reference contour color',
+            'dark_beamstop_color':'[color] Beamstop color',
+            'dark_beamstop_edge_color':'[color] Beamstop edge color',
+            'dark_det_module_color':'[color] Detector module border color',
+            'dark_det_module_fill':'[color] Detector module background color',
+            'dark_plot_bg_color':'[color] Plot background color',
+            'dark_unit_label_color':'[color] Label color',
+            'dark_unit_label_fill':'[color] Label fill color',
+            'dark_slider_border_color':'[color] Slider frame border color',
+            'dark_slider_bg_color':'[color] Slider frame background color',
+            'dark_slider_bg_hover':'[color] Slider frame hover color',
+            'dark_slider_label_color':'[color] Slider frame label color',
+        }
+        self.tooltips['lmt'] = {
+            'ener_min:':'[int] Energy minimum [keV]',
+            'ener_max:':'[int] Energy maximum [keV]',
+            'ener_stp:':'[int] Energy step size [keV]',
+            'dist_min:':'[int] Distance minimum [mm]',
+            'dist_max:':'[int] Distance maximum [mm]',
+            'dist_stp:':'[int] Distance step size [mm]',
+            'hoff_min:':'[int] Horizontal offset minimum [mm]',
+            'hoff_max:':'[int] Horizontal offset maximum [mm]',
+            'hoff_stp:':'[int] Horizontal offset step size [mm]',
+            'voff_min:':'[int] Vertical offset minimum [mm]',
+            'voff_max:':'[int] Vertical offset maximum [mm]',
+            'voff_stp:':'[int] Vertical offset step size [mm]',
+            'rota_min:':'[int] Rotation minimum [deg]',
+            'rota_max:':'[int] Rotation maximum [deg]',
+            'rota_stp:':'[int] Rotation step size [deg]',
+            'tilt_min:':'[int] Tilt minimum [deg]',
+            'tilt_max:':'[int] Tilt maximum [deg]',
+            'tilt_stp:':'[int] Tilt step size [deg]',
+            'bsdx_min:':'[int] Beamstop distance minimum [mm]',
+            'bsdx_max:':'[int] Beamstop distance maximum [mm]',
+            'bsdx_stp:':'[int] Beamstop distance step size [mm]',
+        }
 
 class container(object):
     pass
