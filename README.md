@@ -112,6 +112,9 @@ Additionally, pyFAI places the origin at the lower left corner of the detector, 
 #### A rotated EIGER2 9M detector and a Rubrene sample (darkmode).
 ![Preview](https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_1_example_dark.png)
 
+#### The export window with options to select and build up the available detecor / beamstop bank and review/change parameters.
+![Preview](https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_3_export_window.png)
+
 ## Settings file documentation
 
 #### geo - startup defaults
