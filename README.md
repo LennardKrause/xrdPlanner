@@ -63,7 +63,7 @@ Additionally, pyFAI places the origin at the lower left corner of the detector, 
   - **slider_label_xxxx** (ener, dist, rota, voff, hoff, tilt, bsdx) accept any string to customise the labels for the sliders.
 
 ## Latest updates:
-  - 2023-11-12 Update: Added a new window to save settings to a new file.
+  - 2023-11-12 Update: Added a new window to export settings to a file.
   - 2023-11-12 Update: Added the option to limit the available detectors for a settings file.
   - 2023-11-12 Update: Upon crash the program will start using the default settings.
   - 2023-09-26 Update: Added a PONI marker.
