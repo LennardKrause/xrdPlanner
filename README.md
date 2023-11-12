@@ -53,6 +53,7 @@ Additionally, pyFAI places the origin at the lower left corner of the detector, 
   - On Windows: Switching Dark/Light mode requires restart to change the window frame color.
   - As of now, there is no consistency check performed on the imported .json file.
   - The projections fail at a combined angle (rotation + tilt) of 90 degrees and beyond.
+  - If the program crashes (libc++abi) when opening the export window (on a Mac) please update PyQt6 to the latest version.
 
 ## After the update:
    Sometimes I might change the name of a parameter and you will get a warning message upon startup looking something like this: _WARNING: "conic_ref_min_int" is not a valid key_! Either that key is no longer in use or its name got changed and is now reset to the default value. The settings file is updated and the warning should no longer appear after restart. Apart from this, your edited settings file will not be altered after updating.
@@ -62,6 +63,9 @@ Additionally, pyFAI places the origin at the lower left corner of the detector, 
   - **slider_label_xxxx** (ener, dist, rota, voff, hoff, tilt, bsdx) accept any string to customise the labels for the sliders.
 
 ## Latest updates:
+  - 2023-11-12 Update: Added a new window to save settings to a new file.
+  - 2023-11-12 Update: Added the option to limit the available detectors for a settings file.
+  - 2023-11-12 Update: Upon crash the program will start using the default settings.
   - 2023-09-26 Update: Added a PONI marker.
   - 2023-09-26 Update: Added the option to add custom labels to the sliders.
   - 2023-09-26 Update: Added the option to automatically find a reasonable window size (set plot_size to 0).
