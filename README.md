@@ -44,10 +44,28 @@ combined with
 $$\Delta poni1 = SDD \cdot tilt + y_{offset}$$
 Additionally, pyFAI places the origin at the lower left corner of the detector, whereas xrdPlanner uses the center of the detector as origin, so one must account for translational shifts corresponding to half the width and height of the detector.
 
+## Polarisation
+The polarisation value indicated in xrdPlanner is the apparent scattering intensity, i.e. for P=0.2 only 20 % of the nominal intensity is observed, such that $I_{ij}^{obs}=P_{ij}\cdot I_0$. (Omitting solid angle).
+The polarisation value *P* for the $ij^{th}$ pixel is defined as [[1]](https://doi.org/10.1002/9781119998365.ch1):
+
+```math
+P_{ij} = 1 - [p (\vec{v}_{ij} \cdot  \vec{e}_x)^2+(1-p) (\vec{v}_{ij} \cdot  \vec{e}_y)^2] \qquad
+```
+
+ - $1.0$ *horizontal polarisation*
+
+ - $0.5$ *random polarisation*
+
+ - $0.0$ *vertical polarisation*
+
+where *p* is the polarisation factor, $\vec{v}_{ij}$ is the normalised vector coordinate of the $ij^{th}$ pixel, and $\vec{e}_x$ and $\vec{e}_y$ are the horizontal and vertical basis vectors.
+**NB:** The polarisation factor differs from the pyFAI convention, which goes from -1 to 1 rather than from 0 to 1.
+
 ## Use pre-set beamline settings files:
   - Download a settings file from here (e.g. settings/DanMAX.json).
   - Use the import settings function from the GUI to import.
   - You can switch between all imported settings.
+  - Use the export window to customise and export your settings.
 
 ## Known bugs and limitations:
   - On Windows: Switching Dark/Light mode requires restart to change the window frame color.
@@ -63,6 +81,8 @@ Additionally, pyFAI places the origin at the lower left corner of the detector, 
   - **slider_label_xxxx** (ener, dist, rota, voff, hoff, tilt, bsdx) accept any string to customise the labels for the sliders.
 
 ## Latest updates:
+  - 2023-11-28 Update: Added hotkeys to toggle between units/colormaps/overlays.
+  - 2023-11-28 Update: Added polarisation and solid angle correction factor overlays.
   - 2023-11-12 Update: Added a new window to export settings to a file.
   - 2023-11-12 Update: Added the option to limit the available detectors for a settings file.
   - 2023-11-12 Update: Upon crash the program will start using the default settings.
@@ -114,6 +134,23 @@ Additionally, pyFAI places the origin at the lower left corner of the detector, 
 
 #### The export window with options to select and build up the available detecor / beamstop bank and review/change parameters.
 ![Preview](https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_3_export_window.png)
+
+## Hotkeys
+
+| Key        | Action                    |
+| ---------- | ------------------------- |
+| #          | *Display units*           |
+| t          | 2-Theta                   |
+| d          | d-spacing                 |
+| q          | q-space                   |
+| s          | $sin(\theta)/\lambda$     |
+| #          | *Toggle Overlay*          |
+| p          | Show polarisation         |
+| a          | Show solid angle          |
+| h          | Highlight / Transparency  |
+| #          | *Cycle colormaps*         |
+| c          | Next                      |
+| Shift + c  | Previous                  |
 
 ## Settings file documentation
 
@@ -177,6 +214,11 @@ Additionally, pyFAI places the origin at the lower left corner of the detector, 
     plot_size = 0                   # [int]    Plot size, px (0 for auto)
     plot_size_fixed = True          # [bool]   Fix window size
     unit_label_size = 16            # [int]    Label size, px
+    polarisation_fac = 0.99         # [float]  Horizontal polarisation factor
+    show_polarisation = False       # [bool]   Show polarisation overlay
+    show_solidangle = False         # [bool]   Show solid angle overlay
+    overlay_resolution = 300        # [int]    Overlay resolution
+    overlay_toggle_warn = True      # [bool]   Overlay warn color threshold
     
     # - slider section - 
     slider_margin = 12              # [int]    Slider frame top margin
