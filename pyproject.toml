@@ -1,0 +1,33 @@
+[project]
+name = "xrdPlanner"
+dynamic = ["version"]
+authors = [
+  { name="Lennard Krause", email="lkrause@chem.au.dk" },
+]
+description = "A tool to project X-ray diffraction cones on a detector screen at different geometries (tilt, rotation, offset) and X-ray energies"
+readme = "README.md"
+requires-python = ">=3.7"
+dependencies = ["numpy >= 1.24",
+                "pyqtgraph >= 0.13",
+                "Dans_Diffraction >= 2.2.3",
+                "PyQt6 >= 6.5",
+                "pyFAI >= 2023.5",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License (GPL)",
+    "Operating System :: OS Independent",
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "Topic :: Education",
+    "Topic :: Scientific/Engineering",
+]
+
+[tool.setuptools.dynamic]
+version = {attr = "xrdPlanner.__version__"}
+
+[project.urls]
+"Homepage" = "https://github.com/LennardKrause/xrdPlanner"
+
+[project.scripts]
+xrdPlanner = "xrdPlanner.run_xrdPlanner:main"

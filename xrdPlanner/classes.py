@@ -19,9 +19,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # add an icon
         self.setWindowIcon(QtGui.QIcon(':/icons/xrdPlanner.png'))
+        #self.setMouseTracking(True)
 
         # enable antialiasing
-        pg.setConfigOptions(antialias=True)
+        pg.setConfigOptions(antialias=True, imageAxisOrder='row-major')
 
         # Drag-and-Drop cif-file
         #  dropEvent()
@@ -59,6 +60,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # save/load parameters to/from file
         self.init_par()
 
+        # Store available colormaps
+        # PyQtGraph.colormap.listMaps(): Experimental, subject to change.
+        self.colormaps = sorted(pg.colormap.listMaps())
+
         # get the translations to link
         # the settings parameter keys
         # to their description
@@ -87,6 +92,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # add the plot to the layout
         self.ax = pg.plot()
+        
         # added to avoid the error:
         # qt.pointer.dispatch: skipping QEventPoint(id=0 ts=0 pos=0,0 scn=482.023,246.011
         # gbl=482.023,246.011 Released ellipse=(1x1 ∡ 0) vel=0,0 press=-482.023,-246.011
@@ -95,7 +101,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.layout.addWidget(self.ax)
 
         # Add current beamstop size to list
-        if self.geo.bssz and not type(self.geo.bssz) == str and self.geo.bssz not in self.geo.bs_list:
+        if self.geo.bssz and not isinstance(self.geo.bssz, str) and self.geo.bssz not in self.geo.bs_list:
             self.geo.bs_list.append(self.geo.bssz)
             self.geo.bs_list.sort()
 
@@ -168,7 +174,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.geo.det_bank[self.geo.det_type] = [self.geo.det_size]
             else:
                 # if entry is str -> list
-                if type(self.geo.det_bank[self.geo.det_type]) == str:
+                if isinstance(self.geo.det_bank[self.geo.det_type], str):
                     self.geo.det_bank[self.geo.det_type] = [self.geo.det_bank[self.geo.det_type]]
                 # if current not in list -> append
                 if self.geo.det_size not in self.geo.det_bank[self.geo.det_type]:
@@ -212,6 +218,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.beamstop_edge_color = self.thm.dark_beamstop_edge_color
             self.unit_label_color = self.thm.dark_unit_label_color
             self.unit_label_fill = self.thm.dark_unit_label_fill
+            self.overlay_threshold_color = self.thm.dark_overlay_threshold_color
             # slider
             self.slider_border_color = self.thm.dark_slider_border_color
             self.slider_bg_color = self.thm.dark_slider_bg_color
@@ -244,6 +251,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.beamstop_edge_color = self.thm.light_beamstop_edge_color
             self.unit_label_color = self.thm.light_unit_label_color
             self.unit_label_fill = self.thm.light_unit_label_fill
+            self.overlay_threshold_color = self.thm.light_overlay_threshold_color
             # slider
             self.slider_border_color = self.thm.light_slider_border_color
             self.slider_bg_color = self.thm.light_slider_bg_color
@@ -294,6 +302,33 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.plo.update_settings:
             self.save_par()
 
+    def hoverEvent(self, event):
+        """Hover event linked to cormap
+        and should only be active while
+        either or both maps are displayed """
+        if event.isExit():
+            self.cor_label.hide()
+            return
+        
+        # hoverEvent is only called if
+        # either or both maps are active
+        # -> always show on isEnter event
+        if event.isEnter():
+            self.cor_label.show()
+
+        # cormap displays the product of both corrections
+        # but the individual values can be retrieves from their arrays
+        # -> _polcor and _solang
+        y, x = map(int, np.clip(event.pos(), [0,0], np.array(self.patches['overlay'].image.shape)[::-1]-1))
+        _text = []
+        # calc_overlays returns either a np.array (if active)
+        # or a float (inactive) for _polcor and _solang. 
+        if not isinstance(self._polcor, float):
+            _text.append(f'P: {self._polcor[x,y]:.2f}')
+        if not isinstance(self._solang, float):
+            _text.append(f'S: {self._solang[x,y]:.2f}')
+        self.cor_label.setText('\n'.join(_text))
+
     def init_screen(self):
         # init the plot for contours and beam center
         self.ax.setAspectLocked()
@@ -322,6 +357,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # container for contour lines
         self.patches = {'beamcenter':None,
                         'beamstop':None,
+                        'overlay':None,
                         'poni':None,
                         'bs_label':None,
                         'conic':[],
@@ -381,6 +417,19 @@ class MainWindow(QtWidgets.QMainWindow):
                                                         pen = pg.mkPen(None))
         self.ax.addItem(self.patches['beamcenter'])
 
+        self.patches['overlay'] = pg.ImageItem()
+        self.patches['overlay'].hoverEvent = self.hoverEvent
+        self.ax.addItem(self.patches['overlay'])
+        # set overlay colors
+        _high = QtGui.QColor(self.plot_bg_color)
+        _high.setAlphaF(0.0)
+        if self.plo.overlay_toggle_warn:
+            cm = pg.ColorMap(pos=[0.0, 1.0], color=[self.overlay_threshold_color, _high])
+        else:
+            cm = pg.ColorMap(pos=[0.0, 1.0], color=[self.plot_bg_color, _high])
+        cm.setMappingMode('clip')
+        self.patches['overlay'].setColorMap(cm)
+
         # build detector modules
         self.build_detector()
 
@@ -395,11 +444,17 @@ class MainWindow(QtWidgets.QMainWindow):
         # add unit label
         self.add_unit_label()
 
+        # add label for corrections
+        self.add_correction_label()
+
         # create cones and draw contour lines
         self.update_screen()
         self.set_window_title()
 
-    def init_menus(self):
+    def init_menus(self, reset=False):
+
+        if reset:
+            self.menu_bar.clear()
         # if xrdPlanner is added as a widget to a
         # GUI use and append to the parent menuBar
         if self.parent():
@@ -415,67 +470,67 @@ class MainWindow(QtWidgets.QMainWindow):
         # self.update_menu_entries() will access
         # the menus and update the checkmarks upon
         # settings reload via self.reload_settings()
-        self.menu_det = self.menu_bar.addMenu('Detector')
-        self.group_det = QtGui.QActionGroup(self)
-        self.group_det.setExclusive(True)
+        menu_det = self.menu_bar.addMenu('Detector')
+        group_det = QtGui.QActionGroup(self)
+        group_det.setExclusive(True)
 
         # menu Detectors
         for d in sorted(self.detector_db):
             d_menu = QtWidgets.QMenu(d, self)
-            self.menu_det.addMenu(d_menu)
+            menu_det.addMenu(d_menu)
             for s in self.detector_db[d]['size']:
                 det_action = QtGui.QAction(s, self, checkable=True)
                 self.set_menu_action(det_action, self.change_detector, d, s)
                 d_menu.addAction(det_action)
-                self.group_det.addAction(det_action)
+                group_det.addAction(det_action)
                 if d == self.geo.det_type and s == self.geo.det_size:
                     det_action.setChecked(True)
         
         # menu Reference
-        self.menu_ref = self.menu_bar.addMenu('Reference')
-        self.group_ref = QtGui.QActionGroup(self)
-        self.group_ref.setExclusive(True)
+        menu_ref = self.menu_bar.addMenu('Reference')
+        group_ref = QtGui.QActionGroup(self)
+        group_ref.setExclusive(True)
         # menu Reference: add None
         ref_action = QtGui.QAction('None', self, checkable=True)
         self.set_menu_action(ref_action, self.change_reference, 'None')
-        self.menu_ref.addAction(ref_action)
-        self.group_ref.addAction(ref_action)
+        menu_ref.addAction(ref_action)
+        group_ref.addAction(ref_action)
         if self.geo.reference.lower() == 'none':
             ref_action.setChecked(True)
         # menu Reference: add pyFAI library
-        self.sub_menu_pyFAI = QtWidgets.QMenu('pyFAI', self)
-        self.menu_ref.addMenu(self.sub_menu_pyFAI)
+        sub_menu_pyFAI = QtWidgets.QMenu('pyFAI', self)
+        menu_ref.addMenu(sub_menu_pyFAI)
         for ref_name in sorted(self.ref_library):
             ref_action = QtGui.QAction(ref_name, self, checkable=True)
             self.set_menu_action(ref_action, self.change_reference, ref_name)
-            self.sub_menu_pyFAI.addAction(ref_action)
-            self.group_ref.addAction(ref_action)
+            sub_menu_pyFAI.addAction(ref_action)
+            group_ref.addAction(ref_action)
             if ref_name == self.geo.reference:
                 ref_action.setChecked(True)
 
         # menu Reference: add Custom
-        self.sub_menu_custom = QtWidgets.QMenu('Custom', self)
-        self.menu_ref.addMenu(self.sub_menu_custom)
+        sub_menu_custom = QtWidgets.QMenu('Custom', self)
+        menu_ref.addMenu(sub_menu_custom)
         
         # menu Beamstop
-        self.menu_bs = self.menu_bar.addMenu('Beamstop')
-        self.group_bs = QtGui.QActionGroup(self)
-        self.group_bs.setExclusive(True)
+        menu_bs = self.menu_bar.addMenu('Beamstop')
+        group_bs = QtGui.QActionGroup(self)
+        group_bs.setExclusive(True)
         # menu Beamstop: add None
         bs_action = QtGui.QAction('None', self, checkable=True)
         self.set_menu_action(bs_action, self.change_beamstop, 'None')
-        self.menu_bs.addAction(bs_action)
-        self.group_bs.addAction(bs_action)
+        menu_bs.addAction(bs_action)
+        group_bs.addAction(bs_action)
         if isinstance(self.geo.bssz, str) and self.geo.bssz.lower() == 'none':
             bs_action.setChecked(True)
         # menu Beamstop: add sizes list
-        self.sub_menu_bs = QtWidgets.QMenu('Sizes [mm]', self)
-        self.menu_bs.addMenu(self.sub_menu_bs)
+        sub_menu_bs = QtWidgets.QMenu('Sizes [mm]', self)
+        menu_bs.addMenu(sub_menu_bs)
         for bs_size in sorted(self.geo.bs_list):
             bs_sub_action = QtGui.QAction(str(bs_size), self, checkable=True)
             self.set_menu_action(bs_sub_action, self.change_beamstop, bs_size)
-            self.sub_menu_bs.addAction(bs_sub_action)
-            self.group_bs.addAction(bs_sub_action)
+            sub_menu_bs.addAction(bs_sub_action)
+            group_bs.addAction(bs_sub_action)
             if bs_size == self.geo.bssz:
                 bs_sub_action.setChecked(True)
         
@@ -496,14 +551,14 @@ class MainWindow(QtWidgets.QMainWindow):
         menu_view = self.menu_bar.addMenu('View')
         # submenu Theme
         # non-standard menu -> self.geo.darkmode is bool
-        self.menu_theme = menu_view.addMenu('Theme')
+        menu_theme = menu_view.addMenu('Theme')
         group_theme = QtGui.QActionGroup(self)
         group_theme.setExclusive(True)
         for (theme, invert) in [('Light', False), ('Dark', True)]:
             theme_action = QtGui.QAction(theme, self, checkable=True)
             self.set_menu_action(theme_action, self.apply_theme, invert, True)
             group_theme.addAction(theme_action)
-            self.menu_theme.addAction(theme_action)
+            menu_theme.addAction(theme_action)
             if invert == self.geo.darkmode:
                 theme_action.setChecked(True)
 
@@ -511,25 +566,52 @@ class MainWindow(QtWidgets.QMainWindow):
         self.menu_cmap = menu_view.addMenu('Colormap')
         group_cmap = QtGui.QActionGroup(self)
         group_cmap.setExclusive(True)
-        for cmap_name in sorted(pg.colormap.listMaps()):
+        for cmap_name in self.colormaps: # PyQtGraph.colormap.listMaps(): Experimental, subject to change.
             cmap_action = QtGui.QAction(cmap_name, self, checkable=True)
             self.set_menu_action(cmap_action, self.change_cmap, cmap_name)
             self.menu_cmap.addAction(cmap_action)
             group_cmap.addAction(cmap_action)
             if cmap_name == self.geo.colormap:
                 cmap_action.setChecked(True)
-        
+
+        menu_overlays = menu_view.addMenu('Overlay')
+        # polarisation map toggle
+        self.action_show_pol = QtGui.QAction('Polarisation', self, checkable=True)
+        self.set_menu_action(self.action_show_pol, self.toggle_overlay_polarisation)
+        if self.plo.show_polarisation:
+            self.action_show_pol.setChecked(True)
+        else:
+            self.action_show_pol.setChecked(False)
+        menu_overlays.addAction(self.action_show_pol)
+        # Solidangle map toggle
+        self.action_show_ang = QtGui.QAction('Solid angle', self, checkable=True)
+        self.set_menu_action(self.action_show_ang, self.toggle_overlay_solidangle)
+        if self.plo.show_solidangle:
+            self.action_show_ang.setChecked(True)
+        else:
+            self.action_show_ang.setChecked(False)
+        menu_overlays.addAction(self.action_show_ang)
+        # Overlay warn color toggle
+        menu_overlays.addSeparator()
+        self.action_overlay_warn = QtGui.QAction('Highlight', self, checkable=True)
+        self.set_menu_action(self.action_overlay_warn, self.toggle_overlay_highlight)
+        if self.plo.overlay_toggle_warn:
+            self.action_overlay_warn.setChecked(True)
+        else:
+            self.action_overlay_warn.setChecked(False)
+        menu_overlays.addAction(self.action_overlay_warn)
+
         # menu Settings
         menu_Settings = self.menu_bar.addMenu('Settings')
         # submenu load settings files
-        self.menu_custom_settings = menu_Settings.addMenu('Load')
-        self.group_cset = QtGui.QActionGroup(self)
-        self.group_cset.setExclusive(True)
+        menu_custom_settings = menu_Settings.addMenu('Load')
+        group_cset = QtGui.QActionGroup(self)
+        group_cset.setExclusive(True)
         for cset_name in self.get_settings_files():
             cset_action = QtGui.QAction(cset_name, self, checkable=True)
             self.set_menu_action(cset_action, self.change_settings_file, cset_name)
-            self.menu_custom_settings.addAction(cset_action)
-            self.group_cset.addAction(cset_action)
+            menu_custom_settings.addAction(cset_action)
+            group_cset.addAction(cset_action)
             if cset_name == self.active_settings:
                 cset_action.setChecked(True)
         # save action
@@ -568,10 +650,10 @@ class MainWindow(QtWidgets.QMainWindow):
         menu_Settings.addAction(export_action)
 
         # menu About
-        self.menu_help = self.menu_bar.addMenu('Help')
-        self.action_about = QtGui.QAction('xrdPlanner', self)
-        self.set_menu_action(self.action_about, self.about_window)
-        self.menu_help.addAction(self.action_about)
+        menu_help = self.menu_bar.addMenu('Help')
+        action_about = QtGui.QAction('xrdPlanner', self)
+        self.set_menu_action(action_about, self.about_window)
+        menu_help.addAction(action_about)
 
     def about_window(self):
         msgBox = QtWidgets.QMessageBox()
@@ -582,9 +664,9 @@ class MainWindow(QtWidgets.QMainWindow):
         msgBox.setWindowIcon(windowIcon)
         msgBox.setIconPixmap(QtGui.QPixmap(':/icons/xrdPlanner.png'))
         msgBox.setWindowTitle('About')
-        msgBox.setText('xrdPlanner 1.4.0')
+        msgBox.setText(f'xrdPlanner {xrdPlanner.__version__}')
         msgBox.setDetailedText("<a href='https://github.com/LennardKrause/xrdPlanner'>https://github.com/LennardKrause/xrdPlanner</a>")
-        msgBox.setInformativeText('Author:\nLennard Krause, 2023\nlkrause@chem.au.dk')
+        msgBox.setInformativeText(f'Author:\n{xrdPlanner.__author__}, {xrdPlanner.__year__}\n{xrdPlanner.__email__}')
         msgBox.exec()
 
     def edit_settings_file(self, command):
@@ -613,85 +695,6 @@ class MainWindow(QtWidgets.QMainWindow):
             # change settings and reload
             self.change_settings_file(bname)
 
-    def update_menu_entries(self):
-        # set checkmark: references none
-        for action in self.menu_ref.actions():
-            if action.text() == self.geo.reference:
-                action.setChecked(True)
-        # set checkmark: references pyFAI
-        for action in self.sub_menu_pyFAI.actions():
-            if action.text() == self.geo.reference :
-                action.setChecked(True)
-        # set checkmark: references custom
-        for action in self.sub_menu_custom.actions():
-            if action.text() == self.geo.reference :
-                action.setChecked(True)
-        # set checkmark: beamstop none
-        for action in self.menu_bs.actions():
-            if action.text() == str(self.geo.bssz):
-                action.setChecked(True)
-        # set checkmark: beamstop custom
-        for action in self.sub_menu_bs.actions():
-            if action.text() == str(self.geo.bssz):
-                action.setChecked(True)
-        # set checkmark: colormap
-        for action in self.menu_cmap.actions():
-            if action.text() == self.geo.colormap:
-                action.setChecked(True)
-        # set checkmark: active settings
-        for action in self.menu_custom_settings.actions():
-            if action.text() == self.active_settings:
-                action.setChecked(True)
-
-        # set checkmark: detectors
-        # - move through submenus
-        for menu in self.menu_det.actions():
-            if menu.text() == self.geo.det_type:
-                for action in menu.menu().actions():
-                    if action.text() == self.geo.det_size:
-                        action.setChecked(True)
-        
-        # set checkmark: units
-        # - self.geo.unit is int
-        for num, action in enumerate(self.menu_unit.actions()):
-            if num == self.geo.unit:
-                action.setChecked(True)
-
-        # set checkmark: theme
-        # - self.geo.darkmode is bool
-        conv = {'Light': False, 'Dark': True}
-        for action in self.menu_theme.actions():
-            if conv[action.text()] == self.geo.darkmode:
-                action.setChecked(True)
-        
-        # menu Beamstop: add sizes list
-        if self.geo.bssz not in self.geo.bs_list and not type(self.geo.bssz) == str:
-            self.geo.bs_list.append(self.geo.bssz)
-            self.geo.bs_list.sort()
-        
-        # update menu Beamstop
-        self.sub_menu_bs.clear()
-        for bs_size in sorted(self.geo.bs_list):
-            bs_sub_action = QtGui.QAction(str(bs_size), self, checkable=True)
-            self.set_menu_action(bs_sub_action, self.change_beamstop, bs_size)
-            self.sub_menu_bs.addAction(bs_sub_action)
-            self.group_bs.addAction(bs_sub_action)
-            if bs_size == self.geo.bssz:
-                bs_sub_action.setChecked(True)
-        
-        # update menu Detectors
-        self.menu_det.clear()
-        for d in sorted(self.detector_db):
-            d_menu = QtWidgets.QMenu(d, self)
-            self.menu_det.addMenu(d_menu)
-            for s in self.detector_db[d]['size']:
-                det_action = QtGui.QAction(s, self, checkable=True)
-                self.set_menu_action(det_action, self.change_detector, d, s)
-                d_menu.addAction(det_action)
-                self.group_det.addAction(det_action)
-                if d == self.geo.det_type and s == self.geo.det_size:
-                    det_action.setChecked(True)
-
     def add_unit_label(self):
         font = QtGui.QFont()
         font.setPixelSize(self.plo.unit_label_size)
@@ -700,6 +703,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.unit_label.setFont(font)
         self.ax.addItem(self.unit_label)
         self.unit_label.setPos(-self.xdim, self.ydim)
+
+    def add_correction_label(self):
+        font = QtGui.QFont()
+        font.setPixelSize(self.plo.unit_label_size)
+        self.cor_label = pg.TextItem(anchor=(1.0,1.0), color=self.unit_label_color, fill=self.unit_label_fill)
+        self.cor_label.setText('')
+        self.cor_label.setFont(font)
+        self.ax.addItem(self.cor_label)
+        self.cor_label.hide()
+        self.cor_label.setToolTip('Correction factors:\nP: Polarisation\nS: Solid angle')
+        self.cor_label.setPos(self.xdim, -self.ydim)
 
     def resize_window(self):
         # figure out proper plot dimensions
@@ -716,18 +730,18 @@ class MainWindow(QtWidgets.QMainWindow):
             self.plo.plot_size = int(np.ceil(_height*0.9))
         
         # get proper dimensions
-        width = int(np.ceil(self.plo.plot_size * self.xdim / self.ydim))
-        height = self.plo.plot_size + self.plo.slider_margin//2 + self.offset_win32
+        self.width = int(np.ceil(self.plo.plot_size * self.xdim / self.ydim))
+        self.height = self.plo.plot_size + self.plo.slider_margin//2 + self.offset_win32
 
         # fix the window size
         if self.plo.plot_size_fixed:
-            self.setMaximumHeight(height)
-            self.setMinimumHeight(height)
-            self.setMaximumWidth(width)
-            self.setMinimumWidth(width)
+            self.setMaximumHeight(self.height)
+            self.setMinimumHeight(self.height)
+            self.setMaximumWidth(self.width)
+            self.setMinimumWidth(self.width)
 
         # resize the window
-        self.resize(width, height)
+        self.resize(self.width, self.height)
 
     def set_menu_action(self, action, target, *args):
         action.triggered.connect(lambda: target(*args))
@@ -738,9 +752,33 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.setWindowTitle(f'{self.det.name} - {self.geo.reference} - {self.active_settings}')
 
+    def toggle_overlay_polarisation(self):
+        self.plo.show_polarisation = not self.plo.show_polarisation
+        if self.plo.show_polarisation:
+            self.action_show_pol.setChecked(True)
+        else:
+            self.action_show_pol.setChecked(False)
+        self.redraw_canvas()
+
+    def toggle_overlay_solidangle(self):
+        self.plo.show_solidangle = not self.plo.show_solidangle
+        if self.plo.show_solidangle:
+            self.action_show_ang.setChecked(True)
+        else:
+            self.action_show_ang.setChecked(False)
+        self.redraw_canvas()
+
+    def toggle_overlay_highlight(self):
+        self.plo.overlay_toggle_warn = not self.plo.overlay_toggle_warn
+        if self.plo.overlay_toggle_warn:
+            self.action_overlay_warn.setChecked(True)
+        else:
+            self.action_overlay_warn.setChecked(False)
+        self.redraw_canvas()
+
     def redraw_canvas(self):
         # save darkmode toggle
-        self.save_par()
+        #self.save_par()
         self.init_modifiables()
         # clear the screen
         self.ax.clear()
@@ -763,8 +801,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.geo.det_bank = {}
         ###############################
         self.load_par()
+        # missing entries in the
+        # settings file will be added
+        self.save_par()
         self.redraw_canvas()
-        self.update_menu_entries()
+        self.init_menus(reset=True)
+        #self.update_menu_entries()
 
     def change_beamstop(self, size):
         self.geo.bssz = size
@@ -772,6 +814,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def change_cmap(self, cmap):
         self.geo.colormap = cmap
+        for action in self.menu_cmap.actions():
+            if action.text() == self.geo.colormap:
+                action.setChecked(True)
         self.redraw_canvas()
 
     def change_detector(self, det_name, det_size):
@@ -789,6 +834,9 @@ class MainWindow(QtWidgets.QMainWindow):
     def change_units(self, unit_index):
         self.geo.unit = unit_index
         self.unit_label.setText(self.unit_names[unit_index])
+        for num, action in enumerate(self.menu_unit.actions()):
+            if num == self.geo.unit:
+                action.setChecked(True)
         self.draw_conics()
 
     def change_reference(self, ref_name):
@@ -919,6 +967,11 @@ class MainWindow(QtWidgets.QMainWindow):
         plo.plot_size = 0                   # [int]    Plot size, px (0 for auto)
         plo.plot_size_fixed = True          # [bool]   Fix window size
         plo.unit_label_size = 16            # [int]    Label size, px
+        plo.polarisation_fac = 0.99         # [float]  Horizontal polarisation factor
+        plo.show_polarisation = False       # [bool]   Show polarisation overlay
+        plo.show_solidangle = False         # [bool]   Show solid angle overlay
+        plo.overlay_resolution = 300        # [int]    Overlay resolution
+        plo.overlay_toggle_warn = True      # [bool]   Overlay warn color threshold
         # - slider section - 
         plo.slider_margin = 12              # [int]    Slider frame top margin
         plo.slider_border_width = 1         # [int]    Slider frame border width
@@ -954,36 +1007,38 @@ class MainWindow(QtWidgets.QMainWindow):
         # Theme Details #
         #################
         thm = container()
-        thm.color_dark = '#404040'                # [color]  Global dark color
-        thm.color_light = '#EEEEEE'               # [color]  Global light color
+        thm.color_dark = '#404040'                    # [color]  Global dark color
+        thm.color_light = '#EEEEEE'                   # [color]  Global light color
         # light mode
-        thm.light_conic_label_fill = '#FFFFFF'    # [color]  Contour label fill color
-        thm.light_conic_ref_color = '#DCDCDC'     # [color]  Reference contour color
-        thm.light_beamstop_color = '#FF000080'    # [color]  Beamstop color
-        thm.light_beamstop_edge_color = '#FF0000' # [color]  Beamstop edge color
-        thm.light_det_module_color = '#404040'    # [color]  Detector module border color
-        thm.light_det_module_fill = '#404040'     # [color]  Detector module background color
-        thm.light_plot_bg_color = '#FFFFFF'       # [color]  Plot background color
-        thm.light_unit_label_color = '#808080'    # [color]  Label color
-        thm.light_unit_label_fill = '#FFFFFF'     # [color]  Label fill color
-        thm.light_slider_border_color = '#808080' # [color]  Slider frame border color
-        thm.light_slider_bg_color = '#AAC0C0C0'   # [color]  Slider frame background color
-        thm.light_slider_bg_hover = '#C0C0C0'     # [color]  Slider frame hover color
-        thm.light_slider_label_color = '#000000'  # [color]  Slider frame label color
+        thm.light_conic_label_fill = '#FFFFFF'        # [color]  Contour label fill color
+        thm.light_conic_ref_color = '#DCDCDC'         # [color]  Reference contour color
+        thm.light_beamstop_color = '#FF000080'        # [color]  Beamstop color
+        thm.light_beamstop_edge_color = '#FF0000'     # [color]  Beamstop edge color
+        thm.light_det_module_color = '#404040'        # [color]  Detector module border color
+        thm.light_det_module_fill = '#404040'         # [color]  Detector module background color
+        thm.light_plot_bg_color = '#FFFFFF'           # [color]  Plot background color
+        thm.light_unit_label_color = '#808080'        # [color]  Label color
+        thm.light_unit_label_fill = '#FFFFFF'         # [color]  Label fill color
+        thm.light_slider_border_color = '#808080'     # [color]  Slider frame border color
+        thm.light_slider_bg_color = '#AAC0C0C0'       # [color]  Slider frame background color
+        thm.light_slider_bg_hover = '#C0C0C0'         # [color]  Slider frame hover color
+        thm.light_slider_label_color = '#000000'      # [color]  Slider frame label color
+        thm.light_overlay_threshold_color = '#FF0000' # [color]  Map threshold color
         # dark mode
-        thm.dark_conic_label_fill = '#000000'     # [color]  Contour label fill color
-        thm.dark_conic_ref_color = '#505050'      # [color]  Reference contour color
-        thm.dark_beamstop_color = '#FF0000AA'     # [color]  Beamstop color
-        thm.dark_beamstop_edge_color = '#FF0000'  # [color]  Beamstop edge color
-        thm.dark_det_module_color = '#EEEEEE'     # [color]  Detector module border color
-        thm.dark_det_module_fill = '#EEEEEE'      # [color]  Detector module background color
-        thm.dark_plot_bg_color = '#000000'        # [color]  Plot background color
-        thm.dark_unit_label_color = '#C0C0C0'     # [color]  Label color
-        thm.dark_unit_label_fill = '#000000'      # [color]  Label fill color
-        thm.dark_slider_border_color = '#202020'  # [color]  Slider frame border color
-        thm.dark_slider_bg_color = '#AA303030'    # [color]  Slider frame background color
-        thm.dark_slider_bg_hover = '#303030'      # [color]  Slider frame hover color
-        thm.dark_slider_label_color = '#C0C0C0'   # [color]  Slider frame label color
+        thm.dark_conic_label_fill = '#000000'         # [color]  Contour label fill color
+        thm.dark_conic_ref_color = '#606060'          # [color]  Reference contour color
+        thm.dark_beamstop_color = '#FF0000AA'         # [color]  Beamstop color
+        thm.dark_beamstop_edge_color = '#FF0000'      # [color]  Beamstop edge color
+        thm.dark_det_module_color = '#EEEEEE'         # [color]  Detector module border color
+        thm.dark_det_module_fill = '#EEEEEE'          # [color]  Detector module background color
+        thm.dark_plot_bg_color = '#000000'            # [color]  Plot background color
+        thm.dark_unit_label_color = '#C0C0C0'         # [color]  Label color
+        thm.dark_unit_label_fill = '#000000'          # [color]  Label fill color
+        thm.dark_slider_border_color = '#202020'      # [color]  Slider frame border color
+        thm.dark_slider_bg_color = '#AA303030'        # [color]  Slider frame background color
+        thm.dark_slider_bg_hover = '#303030'          # [color]  Slider frame hover color
+        thm.dark_slider_label_color = '#C0C0C0'       # [color]  Slider frame label color
+        thm.dark_overlay_threshold_color = '#FF0000'  # [color]  Map threshold color
 
         return thm
     
@@ -1221,6 +1276,138 @@ class MainWindow(QtWidgets.QMainWindow):
         
         return detectors
 
+    def get_tooltips(self):
+        self.tooltips = dict()
+        self.tooltips['geo'] = {
+            'det_type':'[str] e.g.\n{}'.format('\n'.join(self.get_det_library(update=False).keys())),
+            'det_size':'[str] e.g.\n{}'.format('\n'.join([f"{k}: {', '.join(v['size'])}" for k,v in self.get_det_library(update=False).items()])),
+            'ener':'[keV] Beam energy',
+            'dist':'[mm] Detector distance',
+            'voff':'[mm] Detector offset (vertical)',
+            'hoff':'[mm] Detector offset (horizontal)',
+            'rota':'[deg] Detector rotation',
+            'tilt':'[deg] Detector tilt',
+            'bssz':'[mm] Current beamstop size (or None)',
+            'bsdx':'[mm] Beamstop distance',
+            'unit':'[0-3] Contour legend\n0: 2-Theta\n1: d-spacing\n2: q-space\n3: sin(theta)/lambda',
+            'reference':'[str] Plot reference contours\npick from pyFAI or None:\n{}'.format(', '.join(calibrant.names())),
+            'darkmode':'[bool] Darkmode',
+            'colormap':'[cmap] Contour colormap:\n{}'.format(', '.join(self.colormaps)),
+            'bs_list':'[list] Available beamstop sizes',
+            'det_bank':'Available detector bank\nkey:[value] or [value1, value2]\nkey: Detector name\nvalue: Detector model/size/type\ne.g. {PLATUS3:[1M, 2M], EIGER2:[4M]}\nempty dict enables all detectors',
+        }
+        self.tooltips['plo'] = {
+            'conic_tth_min':'[int] Minimum 2-theta contour line',
+            'conic_tth_max':'[int] Maximum 2-theta contour line',
+            'conic_tth_num':'[int] Number of contour lines',
+            'beamcenter_marker':'[marker] Beamcenter marker',
+            'beamcenter_size':'[int] Beamcenter size',
+            'poni_marker':'[marker] Poni marker',
+            'poni_size':'[int] Poni size',
+            'conic_linewidth':'[float] Contour linewidth (lw)',
+            'conic_label_size':'[int] Contour labelsize',
+            'conic_ref_linewidth':'[float] Reference contour linewidth',
+            'conic_ref_num':'[int] Number of reference contours',
+            'conic_ref_cif_int':'[float] Minimum display intensity (cif)',
+            'conic_ref_cif_kev':'[float] Energy [keV] for intensity calculation',
+            'conic_ref_cif_irel':'[bool] Linewidth relative to intensity',
+            'conic_ref_cif_lw_min':'[float] Minimum linewidth when using irel',
+            'conic_ref_cif_lw_mult':'[float] Linewidth multiplier when using irel',
+            'conic_hkl_show_int':'[bool] Show intensity in hkl tooltip',
+            'conic_hkl_label_size':'[int] Font size of hkl tooltip',
+            'det_module_alpha':'[float] Detector module alpha',
+            'det_module_width':'[int] Detector module border width',
+            'conic_steps':'[int] Conic resolution',
+            'plot_size':'[int] Plot size, px (0 for auto)',
+            'plot_size_fixed':'[bool] Fix window size',
+            'unit_label_size':'[int] Label size, px',
+            'polarisation_fac':'[float] Horizontal polarisation factor',
+            'show_polarisation':'[bool] Show polarisation overlay',
+            'show_solidangle':'[bool] Show solid angle overlay',
+            'overlay_resolution':'[int] Overlay resolution',
+            'overlay_threshold':'[float] Overlay warn color threshold',
+            'overlay_toggle_warn':'[bool] Toggle overlay highlight',
+            'slider_margin':'[int] Slider frame top margin',
+            'slider_border_width':'[int] Slider frame border width',
+            'slider_border_radius':'[int] Slider frame border radius (px)',
+            'slider_label_size':'[int] Slider frame label size',
+            'slider_column_width':'[int] Slider label column width',
+            'enable_slider_ener':'[bool] Show energy slider',
+            'enable_slider_dist':'[bool] Show distance slider',
+            'enable_slider_rota':'[bool] Show rotation slider',
+            'enable_slider_voff':'[bool] Show vertical offset slider',
+            'enable_slider_hoff':'[bool] Show horizontal offset slider',
+            'enable_slider_tilt':'[bool] Show tilt slider',
+            'enable_slider_bsdx':'[bool] Show beamstop distance slider',
+            'slider_label_ener':'[str] Label for energy slider',
+            'slider_label_dist':'[str] Label for distance slider',
+            'slider_label_rota':'[str] Label for rotation slider',
+            'slider_label_voff':'[str] Label for vertical offset slider',
+            'slider_label_hoff':'[str] Label for horizontal offset slider',
+            'slider_label_tilt':'[str] Label for tilt slider',
+            'slider_label_bsdx':'[str] Label for beamstop distance slider',
+            'update_settings':'[bool] Update settings file after load',
+            'update_det_bank':'[bool] Update detector bank after load',
+            'reset_settings':'[bool] Reset settings file',
+            'reset_det_bank':'[bool] Reset detector bank',
+            'set_debug':'[bool] Debug mode: Allow pan, zoom and use of toolbox menu'
+        }
+        self.tooltips['thm'] = {
+            'color_dark':'[color] Global dark color',
+            'color_light':'[color] Global light color',
+            'light_conic_label_fill':'[color] Contour label fill color',
+            'light_conic_ref_color':'[color] Reference contour color',
+            'light_beamstop_color':'[color] Beamstop color',
+            'light_beamstop_edge_color':'[color] Beamstop edge color',
+            'light_det_module_color':'[color] Detector module border color',
+            'light_det_module_fill':'[color] Detector module background color',
+            'light_plot_bg_color':'[color] Plot background color',
+            'light_unit_label_color':'[color] Label color',
+            'light_unit_label_fill':'[color] Label fill color',
+            'light_slider_border_color':'[color] Slider frame border color',
+            'light_slider_bg_color':'[color] Slider frame background color',
+            'light_slider_bg_hover':'[color] Slider frame hover color',
+            'light_slider_label_color':'[color] Slider frame label color',
+            'light_overlay_threshold_color':'[color] Overlay threshold color',
+            'dark_conic_label_fill':'[color] Contour label fill color',
+            'dark_conic_ref_color':'[color] Reference contour color',
+            'dark_beamstop_color':'[color] Beamstop color',
+            'dark_beamstop_edge_color':'[color] Beamstop edge color',
+            'dark_det_module_color':'[color] Detector module border color',
+            'dark_det_module_fill':'[color] Detector module background color',
+            'dark_plot_bg_color':'[color] Plot background color',
+            'dark_unit_label_color':'[color] Label color',
+            'dark_unit_label_fill':'[color] Label fill color',
+            'dark_slider_border_color':'[color] Slider frame border color',
+            'dark_slider_bg_color':'[color] Slider frame background color',
+            'dark_slider_bg_hover':'[color] Slider frame hover color',
+            'dark_slider_label_color':'[color] Slider frame label color',
+            'dark_overlay_threshold_color':'[color] Overlay threshold color',
+        }
+        self.tooltips['lmt'] = {
+            'ener_min:':'[int] Energy minimum [keV]',
+            'ener_max:':'[int] Energy maximum [keV]',
+            'ener_stp:':'[int] Energy step size [keV]',
+            'dist_min:':'[int] Distance minimum [mm]',
+            'dist_max:':'[int] Distance maximum [mm]',
+            'dist_stp:':'[int] Distance step size [mm]',
+            'hoff_min:':'[int] Horizontal offset minimum [mm]',
+            'hoff_max:':'[int] Horizontal offset maximum [mm]',
+            'hoff_stp:':'[int] Horizontal offset step size [mm]',
+            'voff_min:':'[int] Vertical offset minimum [mm]',
+            'voff_max:':'[int] Vertical offset maximum [mm]',
+            'voff_stp:':'[int] Vertical offset step size [mm]',
+            'rota_min:':'[int] Rotation minimum [deg]',
+            'rota_max:':'[int] Rotation maximum [deg]',
+            'rota_stp:':'[int] Rotation step size [deg]',
+            'tilt_min:':'[int] Tilt minimum [deg]',
+            'tilt_max:':'[int] Tilt maximum [deg]',
+            'tilt_stp:':'[int] Tilt step size [deg]',
+            'bsdx_min:':'[int] Beamstop distance minimum [mm]',
+            'bsdx_max:':'[int] Beamstop distance maximum [mm]',
+            'bsdx_stp:':'[int] Beamstop distance step size [mm]',
+        }
+
     def build_detector(self):
         # build detector modules
         # beam position is between the modules (even) or at the center module (odd)
@@ -1258,10 +1445,24 @@ class MainWindow(QtWidgets.QMainWindow):
         # convert theta in degrees to radians
         # for some reason I defined it negative some time ago
         # now there's no turning back!
-        omega = -np.deg2rad(self.geo.tilt + self.geo.rota)
+        _omega = -np.deg2rad(self.geo.tilt + self.geo.rota)
         
         # beamcenter shift
-        _comp_shift = -(self.geo.voff - self.geo.dist * np.tan(omega) - np.deg2rad(self.geo.tilt) * self.geo.dist)
+        _comp_shift = -(self.geo.voff - self.geo.dist * np.tan(_omega) - np.deg2rad(self.geo.tilt) * self.geo.dist)
+
+        # polarisation correction
+        if self.plo.show_polarisation or self.plo.show_solidangle:
+            self._polcor, self._solang = self.calc_overlays(_omega, res=self.plo.overlay_resolution, pol=self.plo.polarisation_fac)
+            self.patches['overlay'].setImage(self._polcor * self._solang,
+                                            autoLevels=False,
+                                            levels=[0.0,1.0],
+                                            rect=(-self.xdim,
+                                                  -self.ydim,
+                                                  self.xdim * 2,
+                                                  self.ydim * 2))
+        else:
+            self.patches['overlay'].setImage(None)
+            self.cor_label.hide()
         
         # update beam center
         self.patches['beamcenter'].setData([self.geo.hoff],[_comp_shift])
@@ -1276,7 +1477,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
             # calculate the conic section corresponding to the theta angle
             # :returns False is conic is outside of visiblee area
-            x, y, label_pos = self.calc_conic(omega, bs_theta, steps=self.plo.conic_steps)
+            x, y, label_pos = self.calc_conic(_omega, bs_theta, steps=self.plo.conic_steps)
             if x is False:
                 self.patches['beamstop'].setVisible(False)
                 self.patches['bs_label'].setVisible(False)
@@ -1313,7 +1514,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
             # calculate the conic section corresponding to the theta angle
             # :returns False is conic is outside of visiblee area
-            x, y, label_pos = self.calc_conic(omega, theta, steps=self.plo.conic_steps)
+            x, y, label_pos = self.calc_conic(_omega, theta, steps=self.plo.conic_steps)
             if x is False or len(x) == 0:
                 continue
 
@@ -1360,11 +1561,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 # convert theta in degrees to radians
                 # for some reason I defined it negative some time ago
                 # now there's no turning back!
-                omega = -np.deg2rad(self.geo.tilt + self.geo.rota)
+                _omega = -np.deg2rad(self.geo.tilt + self.geo.rota)
                 
                 # calculate the conic section corresponding to the theta angle
                 # :returns False is conic is outside of visiblee area
-                x, y, _ = self.calc_conic(omega, theta, steps=self.plo.conic_steps)
+                x, y, _ = self.calc_conic(_omega, theta, steps=self.plo.conic_steps)
                 if x is False:
                     continue
 
@@ -1507,6 +1708,56 @@ class MainWindow(QtWidgets.QMainWindow):
         # return x, y and the label position
         return x, y, label_pos
 
+    def calc_overlays(self, omega, res=150, pol=0.99):
+        """
+        Omega in radians
+        """
+        def rot_100(a, cc=1):
+            ca = np.cos(a)
+            sa = np.sin(a)
+            if cc: sa = -sa
+            return np.array([[1,   0,  0],
+                             [0,  ca, sa],
+                             [0, -sa, ca]])
+
+        # scale overlay to detector dimensions
+        res_scale = self.ydim/self.xdim
+        res_v = int(round(res_scale * res, 0))
+        # make screen grid
+        size_h = np.linspace(-self.xdim, self.xdim, res, endpoint=False)
+        size_v = np.linspace(-self.ydim, self.ydim, res_v, endpoint=False)
+        _gx, _gy = np.meshgrid(size_h, size_v, sparse=True)
+        # build vector -> 3 x n x m
+        _vec = np.full((3, res_v, res), self.geo.dist)
+        _vec[0,:,:] = _gx - self.geo.hoff
+        # Compensate for vertical offset and PONI offset caused by the tilt (sdd*tilt)
+        _vec[1,:,:] = _gy + self.geo.voff - np.deg2rad(self.geo.tilt) * self.geo.dist
+        # polarisation
+        pc = 1.0
+        if self.plo.show_polarisation:
+            # omega is the combination of rotation and tilt, in radians
+            _rot = rot_100(omega)
+            # reshape to allow matrix multiplication
+            # _rot: 3 x 3 @ _norm: 3 x n*m -> _res: 3 x n x m
+            _res = np.reshape(_rot @ np.reshape(_vec, (3,-1)), _vec.shape)
+            _mag = np.sqrt(np.sum(_res**2, axis=0))
+            _norm = _res / _mag
+            # add pol fractions (-> 1.0)
+            # this notation is equivalent to cos(psi)**2,
+            # psi angle of polarization direction to the observer
+            # _res is direct cos(psi)
+            pc_hor = _norm[0,:,:]**2 * pol
+            pc_ver = _norm[1,:,:]**2 * (1-pol)
+            pc = 1.0 - (pc_hor + pc_ver)
+        # solid angle
+        sa = 1.0
+        if self.plo.show_solidangle:
+            _mag = np.sqrt(np.sum(_vec**2, axis=0))
+            sa = 1 / _mag**3
+            sa = sa / np.max(sa)
+        
+        return pc, sa
+
     def show_tooltip(self, widget, event):
         if not widget.name or not self.cont_ref_hkl:
             event.ignore()
@@ -1547,33 +1798,6 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.geo.reference != 'None':
             self.get_reference()
             self.draw_reference()
-
-    def dragEnterEvent(self, event):
-        # Drag-and-Drop cif-file
-        if event.mimeData().hasUrls():
-            event.accept()
-        else:
-            event.ignore()
-
-    def dropEvent(self, event):
-        # Drag-and-Drop cif-file
-        #  dropEvent()
-        #  - check dropped file is a cif
-        fpath = event.mimeData().urls()[0].toLocalFile()
-        if os.path.splitext(fpath)[1] == '.cif':
-            self.calc_ref_from_cif(fpath)
-
-    def keyPressEvent(self, event):
-        k = event.key()
-        txt = event.text()
-        alt_modifier = (event.modifiers() == QtCore.Qt.KeyboardModifier.AltModifier)
-        if k==QtCore.Qt.Key.Key_C:
-            idx = pg.colormap.listMaps().index(self.geo.colormap) + 1
-            if idx >= len(pg.colormap.listMaps()):
-                idx = 0
-            self.change_cmap(pg.colormap.listMaps()[idx])
-            #print(self.cont_cmap, self.cont_cmap.map(0.0, mode='qcolor').lightness(), QtGui.QColor([255, 255, 255, 0] - np.array(self.cont_cmap.map(0.0, mode='qcolor').getRgb())))
-        # print(k, txt, alt_modifier, k==QtCore.Qt.Key.Key_H)
 
     def tree_ghost_select(self, item):
         parent = item.parent()
@@ -1894,6 +2118,10 @@ class MainWindow(QtWidgets.QMainWindow):
     def save_par(self, target=None):
         if target == None:
             target = os.path.join(self.path_settings, self.active_settings)
+        target_base = os.path.dirname(target)
+        # create folder if not existing
+        if not os.path.exists(target_base):
+            os.makedirs(target_base)
         # Writing geo as dict to file
         with open(target, 'w') as wf:
             json.dump({'geo':self._geo.__dict__, 'plo':self.plo.__dict__, 'thm':self.thm.__dict__, 'lmt':self.lmt.__dict__}, wf, indent=4)
@@ -1908,10 +2136,10 @@ class MainWindow(QtWidgets.QMainWindow):
         #
         # Add 'key':('minimum', 'maximum', 'default') to the dict
         _warn = {'conic_ref_cif_kev':( 5,   25,  12),
-                     'conic_tth_min':( 1,   10,   5),
-                     'conic_tth_max':(10,  180,  90),
-                     'conic_tth_num':( 1,  100,  20),
-                     'conic_ref_num':( 1,  500, 200),
+                     #'conic_tth_min':( 1,   10,   5),
+                     #'conic_tth_max':(10,  180,  90),
+                     #'conic_tth_num':( 1,  100,  20),
+                     #'conic_ref_num':( 1,  500, 200),
                        'conic_steps':(10, 1000, 100),
                           'ener_stp':( 1,  100,   1),
                           'dist_stp':( 1,  100,   1),
@@ -1976,133 +2204,151 @@ class MainWindow(QtWidgets.QMainWindow):
         with open(self.path_settings_token, 'w') as wf:
             wf.write(self.active_settings)
 
+    def dragEnterEvent(self, event):
+        # Drag-and-Drop cif-file
+        if event.mimeData().hasUrls():
+            event.accept()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        # Drag-and-Drop cif-file
+        #  dropEvent()
+        #  - check dropped file is a cif
+        fpath = event.mimeData().urls()[0].toLocalFile()
+        if os.path.splitext(fpath)[1] == '.cif':
+            self.calc_ref_from_cif(fpath)
+
+    def keyPressEvent(self, event):
+        k = event.key()
+        # bind 'c' to cycle colormaps
+        if k == QtCore.Qt.Key.Key_C:
+            if event.modifiers() == QtCore.Qt.KeyboardModifier.ShiftModifier:
+                inc = -1
+            else:
+                inc = +1
+            idx = self.colormaps.index(self.geo.colormap) + inc
+            if idx >= len(self.colormaps):
+                idx = 0
+            elif idx < 0:
+                idx = len(self.colormaps) - 1
+            self.change_cmap(self.colormaps[idx])
+        elif k == QtCore.Qt.Key.Key_P:
+            self.toggle_overlay_polarisation()
+        elif k == QtCore.Qt.Key.Key_A:
+            self.toggle_overlay_solidangle()
+        elif k == QtCore.Qt.Key.Key_H:
+            self.toggle_overlay_highlight()
+        elif k == QtCore.Qt.Key.Key_T:
+            self.change_units(0)
+        elif k == QtCore.Qt.Key.Key_D:
+            self.change_units(1)
+        elif k == QtCore.Qt.Key.Key_Q:
+            self.change_units(2)
+        elif k == QtCore.Qt.Key.Key_S:
+            self.change_units(3)
+
     def closeEvent(self, event):
+        # Save current settings file for
+        # auto load on next startup.
+        # If the program crashes no
+        # sctive_settings token exists
+        # and the defaul is loaded.
         self.set_active_settings_file()
         event.accept()
 
-    def get_tooltips(self):
-        self.tooltips = dict()
-        self.tooltips['geo'] = {
-            'det_type':'[str] e.g.\n{}'.format('\n'.join(self.get_det_library(update=False).keys())),
-            'det_size':'[str] e.g.\n{}'.format('\n'.join([f"{k}: {', '.join(v['size'])}" for k,v in self.get_det_library(update=False).items()])),
-            'ener':'[keV] Beam energy',
-            'dist':'[mm] Detector distance',
-            'voff':'[mm] Detector offset (vertical)',
-            'hoff':'[mm] Detector offset (horizontal)',
-            'rota':'[deg] Detector rotation',
-            'tilt':'[deg] Detector tilt',
-            'bssz':'[mm] Current beamstop size (or None)',
-            'bsdx':'[mm] Beamstop distance',
-            'unit':'[0-3] Contour legend\n0: 2-Theta\n1: d-spacing\n2: q-space\n3: sin(theta)/lambda',
-            'reference':'[str] Plot reference contours\npick from pyFAI or None:\n{}'.format(', '.join(calibrant.names())),
-            'darkmode':'[bool] Darkmode',
-            'colormap':'[cmap] Contour colormap:\n{}'.format(', '.join(sorted(pg.colormap.listMaps()))),
-            'bs_list':'[list] Available beamstop sizes',
-            'det_bank':'Available detector bank\nkey:[value] or [value1, value2]\nkey: Detector name\nvalue: Detector model/size/type\ne.g. {PLATUS3:[1M, 2M], EIGER2:[4M]}\nempty dict enables all detectors',
-        }
-        self.tooltips['plo'] = {
-            'conic_tth_min':'[int] Minimum 2-theta contour line',
-            'conic_tth_max':'[int] Maximum 2-theta contour line',
-            'conic_tth_num':'[int] Number of contour lines',
-            'beamcenter_marker':'[marker] Beamcenter marker',
-            'beamcenter_size':'[int] Beamcenter size',
-            'poni_marker':'[marker] Poni marker',
-            'poni_size':'[int] Poni size',
-            'conic_linewidth':'[float] Contour linewidth (lw)',
-            'conic_label_size':'[int] Contour labelsize',
-            'conic_ref_linewidth':'[float] Reference contour linewidth',
-            'conic_ref_num':'[int] Number of reference contours',
-            'conic_ref_cif_int':'[float] Minimum display intensity (cif)',
-            'conic_ref_cif_kev':'[float] Energy [keV] for intensity calculation',
-            'conic_ref_cif_irel':'[bool] Linewidth relative to intensity',
-            'conic_ref_cif_lw_min':'[float] Minimum linewidth when using irel',
-            'conic_ref_cif_lw_mult':'[float] Linewidth multiplier when using irel',
-            'conic_hkl_show_int':'[bool] Show intensity in hkl tooltip',
-            'conic_hkl_label_size':'[int] Font size of hkl tooltip',
-            'det_module_alpha':'[float] Detector module alpha',
-            'det_module_width':'[int] Detector module border width',
-            'conic_steps':'[int] Conic resolution',
-            'plot_size':'[int] Plot size, px (0 for auto)',
-            'plot_size_fixed':'[bool] Fix window size',
-            'unit_label_size':'[int] Label size, px',
-            'slider_margin':'[int] Slider frame top margin',
-            'slider_border_width':'[int] Slider frame border width',
-            'slider_border_radius':'[int] Slider frame border radius (px)',
-            'slider_label_size':'[int] Slider frame label size',
-            'slider_column_width':'[int] Slider label column width',
-            'enable_slider_ener':'[bool] Show energy slider',
-            'enable_slider_dist':'[bool] Show distance slider',
-            'enable_slider_rota':'[bool] Show rotation slider',
-            'enable_slider_voff':'[bool] Show vertical offset slider',
-            'enable_slider_hoff':'[bool] Show horizontal offset slider',
-            'enable_slider_tilt':'[bool] Show tilt slider',
-            'enable_slider_bsdx':'[bool] Show beamstop distance slider',
-            'slider_label_ener':'[str] Label for energy slider',
-            'slider_label_dist':'[str] Label for distance slider',
-            'slider_label_rota':'[str] Label for rotation slider',
-            'slider_label_voff':'[str] Label for vertical offset slider',
-            'slider_label_hoff':'[str] Label for horizontal offset slider',
-            'slider_label_tilt':'[str] Label for tilt slider',
-            'slider_label_bsdx':'[str] Label for beamstop distance slider',
-            'update_settings':'[bool] Update settings file after load',
-            'update_det_bank':'[bool] Update detector bank after load',
-            'reset_settings':'[bool] Reset settings file',
-            'reset_det_bank':'[bool] Reset detector bank',
-            'set_debug':'[bool] Debug mode'
-        }
-        self.tooltips['thm'] = {
-            'color_dark':'[color] Global dark color',
-            'color_light':'[color] Global light color',
-            'light_conic_label_fill':'[color] Contour label fill color',
-            'light_conic_ref_color':'[color] Reference contour color',
-            'light_beamstop_color':'[color] Beamstop color',
-            'light_beamstop_edge_color':'[color] Beamstop edge color',
-            'light_det_module_color':'[color] Detector module border color',
-            'light_det_module_fill':'[color] Detector module background color',
-            'light_plot_bg_color':'[color] Plot background color',
-            'light_unit_label_color':'[color] Label color',
-            'light_unit_label_fill':'[color] Label fill color',
-            'light_slider_border_color':'[color] Slider frame border color',
-            'light_slider_bg_color':'[color] Slider frame background color',
-            'light_slider_bg_hover':'[color] Slider frame hover color',
-            'light_slider_label_color':'[color] Slider frame label color',
-            'dark_conic_label_fill':'[color] Contour label fill color',
-            'dark_conic_ref_color':'[color] Reference contour color',
-            'dark_beamstop_color':'[color] Beamstop color',
-            'dark_beamstop_edge_color':'[color] Beamstop edge color',
-            'dark_det_module_color':'[color] Detector module border color',
-            'dark_det_module_fill':'[color] Detector module background color',
-            'dark_plot_bg_color':'[color] Plot background color',
-            'dark_unit_label_color':'[color] Label color',
-            'dark_unit_label_fill':'[color] Label fill color',
-            'dark_slider_border_color':'[color] Slider frame border color',
-            'dark_slider_bg_color':'[color] Slider frame background color',
-            'dark_slider_bg_hover':'[color] Slider frame hover color',
-            'dark_slider_label_color':'[color] Slider frame label color',
-        }
-        self.tooltips['lmt'] = {
-            'ener_min:':'[int] Energy minimum [keV]',
-            'ener_max:':'[int] Energy maximum [keV]',
-            'ener_stp:':'[int] Energy step size [keV]',
-            'dist_min:':'[int] Distance minimum [mm]',
-            'dist_max:':'[int] Distance maximum [mm]',
-            'dist_stp:':'[int] Distance step size [mm]',
-            'hoff_min:':'[int] Horizontal offset minimum [mm]',
-            'hoff_max:':'[int] Horizontal offset maximum [mm]',
-            'hoff_stp:':'[int] Horizontal offset step size [mm]',
-            'voff_min:':'[int] Vertical offset minimum [mm]',
-            'voff_max:':'[int] Vertical offset maximum [mm]',
-            'voff_stp:':'[int] Vertical offset step size [mm]',
-            'rota_min:':'[int] Rotation minimum [deg]',
-            'rota_max:':'[int] Rotation maximum [deg]',
-            'rota_stp:':'[int] Rotation step size [deg]',
-            'tilt_min:':'[int] Tilt minimum [deg]',
-            'tilt_max:':'[int] Tilt maximum [deg]',
-            'tilt_stp:':'[int] Tilt step size [deg]',
-            'bsdx_min:':'[int] Beamstop distance minimum [mm]',
-            'bsdx_max:':'[int] Beamstop distance maximum [mm]',
-            'bsdx_stp:':'[int] Beamstop distance step size [mm]',
-        }
+    """
+    def update_menu_entries(self):
+        # set checkmark: references none
+        for action in self.menu_ref.actions():
+            if action.text() == self.geo.reference:
+                action.setChecked(True)
+        # set checkmark: references pyFAI
+        for action in self.sub_menu_pyFAI.actions():
+            if action.text() == self.geo.reference :
+                action.setChecked(True)
+        # set checkmark: references custom
+        for action in self.sub_menu_custom.actions():
+            if action.text() == self.geo.reference :
+                action.setChecked(True)
+        # set checkmark: beamstop none
+        for action in self.menu_bs.actions():
+            if action.text() == str(self.geo.bssz):
+                action.setChecked(True)
+        # set checkmark: beamstop custom
+        for action in self.sub_menu_bs.actions():
+            if action.text() == str(self.geo.bssz):
+                action.setChecked(True)
+        # set checkmark: colormap
+        for action in self.menu_cmap.actions():
+            if action.text() == self.geo.colormap:
+                action.setChecked(True)
+        # set checkmark: active settings
+        for action in self.menu_custom_settings.actions():
+            if action.text() == self.active_settings:
+                action.setChecked(True)
+
+        # set checkmark: detectors
+        # - move through submenus
+        for menu in self.menu_det.actions():
+            if menu.text() == self.geo.det_type:
+                for action in menu.menu().actions():
+                    if action.text() == self.geo.det_size:
+                        action.setChecked(True)
+        
+        # set checkmark: units
+        # - self.geo.unit is int
+        for num, action in enumerate(self.menu_unit.actions()):
+            if num == self.geo.unit:
+                action.setChecked(True)
+
+        # set checkmark: theme
+        # - self.geo.darkmode is bool
+        conv = {'Light': False, 'Dark': True}
+        for action in self.menu_theme.actions():
+            if conv[action.text()] == self.geo.darkmode:
+                action.setChecked(True)
+        
+        # check show_polarisation
+        if self.plo.show_polarisation:
+            self.polmap_action.setChecked(True)
+        else:
+            self.polmap_action.setChecked(False)
+        
+        # check show_solidangle
+        if self.plo.show_solidangle:
+            self.solang_action.setChecked(True)
+        else:
+            self.solang_action.setChecked(False)
+
+        # menu Beamstop: add sizes list
+        if self.geo.bssz not in self.geo.bs_list and not isinstance(self.geo.bssz, str):
+            self.geo.bs_list.append(self.geo.bssz)
+            self.geo.bs_list.sort()
+        
+        # update menu Beamstop
+        self.sub_menu_bs.clear()
+        for bs_size in sorted(self.geo.bs_list):
+            bs_sub_action = QtGui.QAction(str(bs_size), self, checkable=True)
+            self.set_menu_action(bs_sub_action, self.change_beamstop, bs_size)
+            self.sub_menu_bs.addAction(bs_sub_action)
+            self.group_bs.addAction(bs_sub_action)
+            if bs_size == self.geo.bssz:
+                bs_sub_action.setChecked(True)
+        
+        # update menu Detectors
+        self.menu_det.clear()
+        for d in sorted(self.detector_db):
+            d_menu = QtWidgets.QMenu(d, self)
+            self.menu_det.addMenu(d_menu)
+            for s in self.detector_db[d]['size']:
+                det_action = QtGui.QAction(s, self, checkable=True)
+                self.set_menu_action(det_action, self.change_detector, d, s)
+                d_menu.addAction(det_action)
+                self.group_det.addAction(det_action)
+                if d == self.geo.det_type and s == self.geo.det_size:
+                    det_action.setChecked(True)
+    """
 
 class container(object):
     pass
@@ -2285,11 +2531,11 @@ class SliderWidget(QtWidgets.QFrame):
         return slider#(slider, label_name, label_value)
 
     def toggle_panel(self, event):
-        if type(event) == QtGui.QEnterEvent:
+        if isinstance(event, QtGui.QEnterEvent):
             #self.box.setHidden(not self.box.isHidden())
             self.box.setHidden(False)
             self.resize(self.box_width_dynamic, self.box_height_show)
-        elif type(event) == QtCore.QEvent and not self.box_toggle:
+        elif isinstance(event, QtCore.QEvent) and not self.box_toggle:
             self.box.setHidden(True)
             self.resize(self.box_width_dynamic, self.box_height_hide)
         else:
