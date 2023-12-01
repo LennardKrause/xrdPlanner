@@ -58,7 +58,7 @@ P_{ij} = 1 - [p (\vec{v}_{ij} \cdot  \vec{e}_x)^2+(1-p) (\vec{v}_{ij} \cdot  \ve
 
  - $0.0$ *vertical polarisation*
 
-where *p* is the polarisation factor, $\vec{v}_{ij}$ is the normalised vector coordinate of the $ij^{th}$ pixel, and $\vec{e}_x$ and $\vec{e}_y$ are the horizontal and vertical basis vectors.
+where *P* is the polarisation factor, $\vec{v}_{ij}$ is the normalised vector coordinate of the $ij^{th}$ pixel, and $\vec{e}_x$ and $\vec{e}_y$ are the horizontal and vertical basis vectors.
 **NB:** The polarisation factor differs from the pyFAI convention, which goes from -1 to 1 rather than from 0 to 1.
 
 ## Use pre-set beamline settings files:
@@ -86,15 +86,15 @@ where *p* is the polarisation factor, $\vec{v}_{ij}$ is the normalised vector co
   - 2023-11-12 Update: Added a new window to export settings to a file.
   - 2023-11-12 Update: Added the option to limit the available detectors for a settings file.
   - 2023-11-12 Update: Upon crash the program will start using the default settings.
+
+<details>
+<summary>Older updates</summary>
+  
   - 2023-09-26 Update: Added a PONI marker.
   - 2023-09-26 Update: Added the option to add custom labels to the sliders.
   - 2023-09-26 Update: Added the option to automatically find a reasonable window size (set plot_size to 0).
   - 2023-09-26 Bugfix: Fixed a bug that prevented the beamstop menu from updating upon changing the available beamstop list.
   - 2023-09-26 Bugfix: Fixed a bug in the calculation of the beamcenter for the combination of rotation and tilt.
-
-<details>
-<summary>Older updates</summary>
-  
   - 2023-08-29 Update: Added a feature to import and switch between settings files.
   - 2023-08-22 Bugfix: Fixed missing symbols and the slider bar on Linux.
   - 2023-08-22 Update: Added a beamstop, define distance to sample with a slider and pick a size from the menu.
