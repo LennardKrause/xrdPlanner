@@ -81,7 +81,7 @@ where *P* is the polarisation factor, $\vec{v}_{ij}$ is the normalised vector co
   - **slider_label_xxxx** (ener, dist, rota, voff, hoff, tilt, bsdx) accept any string to customise the labels for the sliders.
 
 ## Latest updates:
-  - 2024-02-08 BUGFIX: Fixed crash on cif drag/drop.
+  - 2024-02-08 Bugfix: Fixed crash on cif drag/drop.
   - 2023-11-28 Update: Added hotkeys to toggle between units/colormaps/overlays.
   - 2023-11-28 Update: Added polarisation and solid angle correction factor overlays.
   - 2023-11-12 Update: Added a new window to export settings to a file.
