@@ -488,13 +488,13 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # menu Reference
         menu_ref = self.menu_bar.addMenu('Reference')
-        group_ref = QtGui.QActionGroup(self)
-        group_ref.setExclusive(True)
+        self.group_ref = QtGui.QActionGroup(self)
+        self.group_ref.setExclusive(True)
         # menu Reference: add None
         ref_action = QtGui.QAction('None', self, checkable=True)
         self.set_menu_action(ref_action, self.change_reference, 'None')
         menu_ref.addAction(ref_action)
-        group_ref.addAction(ref_action)
+        self.group_ref.addAction(ref_action)
         if self.geo.reference.lower() == 'none':
             ref_action.setChecked(True)
         # menu Reference: add pyFAI library
@@ -504,13 +504,13 @@ class MainWindow(QtWidgets.QMainWindow):
             ref_action = QtGui.QAction(ref_name, self, checkable=True)
             self.set_menu_action(ref_action, self.change_reference, ref_name)
             sub_menu_pyFAI.addAction(ref_action)
-            group_ref.addAction(ref_action)
+            self.group_ref.addAction(ref_action)
             if ref_name == self.geo.reference:
                 ref_action.setChecked(True)
 
         # menu Reference: add Custom
-        sub_menu_custom = QtWidgets.QMenu('Custom', self)
-        menu_ref.addMenu(sub_menu_custom)
+        self.sub_menu_custom = QtWidgets.QMenu('Custom', self)
+        menu_ref.addMenu(self.sub_menu_custom)
         
         # menu Beamstop
         menu_bs = self.menu_bar.addMenu('Beamstop')
