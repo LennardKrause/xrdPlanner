@@ -656,17 +656,47 @@ class MainWindow(QtWidgets.QMainWindow):
         menu_help.addAction(action_about)
 
     def about_window(self):
-        msgBox = QtWidgets.QMessageBox()
-        msgBox.setTextFormat(QtCore.Qt.TextFormat.RichText)
-        msgBox.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.LinksAccessibleByMouse)
+        msgBox = QtWidgets.QDialog()
+        #msgBox.setWindowTitle('About')
+        
         windowIcon = QtGui.QIcon()
         windowIcon.addPixmap(QtGui.QPixmap(':/icons/xrdPlanner.png'))
+        
+        font_title = QtGui.QFont()
+        font_title.setPointSize(48)
+        icon = QtWidgets.QLabel()
+        icon.setPixmap(QtGui.QPixmap(':/icons/xrdPlanner.png'))
+        title = QtWidgets.QLabel(f'<b>xrdPlanner</b>')
+        title.setFont(font_title)
+        suptitle = QtWidgets.QLabel(f'<b>Version {xrdPlanner.__version__}</b> (released {xrdPlanner.__date__})')
+        github = QtWidgets.QLabel(f'<br>A tool to project X-ray diffraction cones on a detector screen at different \
+                                    geometries (tilt, rotation, offset) and X-ray energies. For more information visit \
+                                    us on <a href="https://github.com/LennardKrause/xrdPlanner">Github</a>.')
+        github.setWordWrap(True)
+        github.setOpenExternalLinks(True)
+        published = QtWidgets.QLabel(f'<br>The article is published in<br><a href="https://doi.org/10.1107/S1600577523011086">\
+                                       <i>J. Synchrotron Rad.</i> (2024). <b>31</b></a>')
+        published.setOpenExternalLinks(True)
+        authors = QtWidgets.QLabel(f'<br><b>Authors:</b><br>{"<br>".join(xrdPlanner.__authors__)}')
+        email = QtWidgets.QLabel(f'<br>Feedback? <a href="mailto:{xrdPlanner.__email__}?subject=xrdPlanner feedback">{xrdPlanner.__email__}</a>')
+        email.setOpenExternalLinks(True)
+
+        box_layout = QtWidgets.QVBoxLayout()
+        box_layout.setSpacing(0)
+        for widget in [title, suptitle, github, published, authors, email]:
+            box_layout.addWidget(widget)
+        
+        box = QtWidgets.QGroupBox()
+        box.setFlat(True)
+        box.setLayout(box_layout)
+
+        layout = QtWidgets.QHBoxLayout()
+        layout.addWidget(icon)
+        layout.addWidget(box)
+
         msgBox.setWindowIcon(windowIcon)
-        msgBox.setIconPixmap(QtGui.QPixmap(':/icons/xrdPlanner.png'))
-        msgBox.setWindowTitle('About')
-        msgBox.setText(f'xrdPlanner {xrdPlanner.__version__}')
-        msgBox.setDetailedText("<a href='https://github.com/LennardKrause/xrdPlanner'>https://github.com/LennardKrause/xrdPlanner</a>")
-        msgBox.setInformativeText(f'Author:\n{xrdPlanner.__author__}, {xrdPlanner.__year__}\n{xrdPlanner.__email__}')
+        msgBox.setLayout(layout)
+        msgBox.setFixedSize(msgBox.sizeHint())
         msgBox.exec()
 
     def edit_settings_file(self, command):
