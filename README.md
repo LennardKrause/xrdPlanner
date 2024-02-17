@@ -88,10 +88,10 @@ S_{ij} = \left(\frac{|\vec{v}_{ij}|}{SDD}\right)^{-3}
   - **slider_label_xxxx** (ener, dist, rota, voff, hoff, tilt, bsdx) accept any string to customise the labels for the sliders.
 
 ## Latest updates:
-  - 2024-02-17 Bugfix: Fixed crash on importing settings files.
+  - 2024-02-17 Bugfix: Fixed crash on importing settings files (Thanks to Andy).
   - 2024-02-16 Update: Added a unit value at mouse position (hover) to the overlay.
   - 2024-02-09 Update: Updated the About window with links to github and the publication.
-  - 2024-02-08 Bugfix: Fixed crash on cif drag/drop.
+  - 2024-02-08 Bugfix: Fixed crash on cif drag/drop (Thanks to Mads).
 
 <details>
 <summary>Older updates</summary>
