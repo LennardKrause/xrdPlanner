@@ -547,13 +547,13 @@ class MainWindow(QtWidgets.QMainWindow):
         menu_Settings = self.menu_bar.addMenu('Settings')
         # submenu load settings files
         self.menu_custom_settings = menu_Settings.addMenu('Load')
-        group_cset = QtGui.QActionGroup(self)
-        group_cset.setExclusive(True)
+        self.group_cset = QtGui.QActionGroup(self)
+        self.group_cset.setExclusive(True)
         for cset_name in self.get_settings_files():
             cset_action = QtGui.QAction(cset_name, self, checkable=True)
             self.set_menu_action(cset_action, self.change_settings_file, cset_name)
             self.menu_custom_settings.addAction(cset_action)
-            group_cset.addAction(cset_action)
+            self.group_cset.addAction(cset_action)
             if cset_name == self.active_settings:
                 cset_action.setChecked(True)
         
