@@ -111,11 +111,6 @@ class MainWindow(QtWidgets.QMainWindow):
         # dict to store custom reference data
         self.ref_custom = {}
         self.ref_custom_hkl = {}
-        
-        # get the translations to link
-        # the settings parameter keys
-        # to their description
-        self.get_tooltips()
 
         # initialise all that depends on the settings
         # call this function to apply changes were made
@@ -127,6 +122,9 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # initialize the screen
         self.init_screen()
+
+        # disable/reset delta_d/d toggles
+        #self.action_funct_deltadd_show.setEnabled(False)
 
         # add the slider frame
         # this calls draw_conics(), 
@@ -193,6 +191,442 @@ class MainWindow(QtWidgets.QMainWindow):
         font.setPixelSize(self.plo.conic_hkl_label_size)
         font.setBold(True)
         QtWidgets.QToolTip.setFont(font)
+
+    def init_par(self):
+        # fetch the geometry, detector, plot specifications and limits
+        self.get_defaults_all()
+        # file name to store current settings
+        # if file_dump doesn't exists, make a dump
+        if not os.path.exists(self.path_settings_current):
+            self.save_settings()
+        # if it exists load parameters
+        else:
+            self.load_settings()
+        # reset to default if requested
+        if self.plo.reset_settings:
+            self.get_defaults_all()
+            self.save_settings()
+        # update with default if requested
+        #  - e.g. to add missing entries
+        if self.plo.update_settings:
+            self.save_settings()
+
+    def init_screen(self):
+        # init the plot for contours and beam center
+        self.ax.setAspectLocked()
+        #remove axes
+        self.ax.getPlotItem().hideAxis('bottom')
+        self.ax.getPlotItem().hideAxis('left')
+        # disable pan/zoom
+        self.ax.setMouseEnabled(x=False, y=False)
+        # disable right click  context menu
+        self.ax.setMenuEnabled(False)
+        # hide the autoscale button
+        self.ax.hideButtons()
+
+        # enable debug mode functions
+        if self.plo.set_debug:
+            # disable pan/zoom
+            self.ax.setMouseEnabled(x=True, y=True)
+            # disable right click  context menu
+            self.ax.setMenuEnabled(True)
+
+        # define font to label conics
+        font = QtGui.QFont()
+        font.setPixelSize(self.plo.conic_label_size)
+        font.setBold(True)
+
+        # container for contour lines
+        self.patches = {'beamcenter':None,
+                        'beamstop':None,
+                        'overlay':None,
+                        #'deltadd':None,
+                        'poni':None,
+                        'bs_label':None,
+                        'conic':[],
+                        'reference':[],
+                        'labels':[]}
+
+        # add beam stop scatter plot
+        # pxMode=False
+        # Size is in scene coordinates and the spots scale with the
+        # view. Otherwise, spots are always the same size regardless
+        # of scaling, and size is given in px.
+        self.patches['beamstop'] = pg.PlotDataItem(useCache=True,
+                                                   pen=pg.mkPen(self.beamstop_edge_color,
+                                                                width=self.plo.conic_linewidth),
+                                                   brush=pg.mkBrush(self.beamstop_color),
+                                                   fillOutline=True)
+        self.ax.addItem(self.patches['beamstop'])
+
+        # add empty plot per reference contour line
+        for i in range(self.plo.conic_ref_num):
+            ref = pg.PlotCurveItem(useCache=True)
+            self.ax.addItem(ref)
+            self.patches['reference'].append(ref)
+            self.patches['reference'][i].setClickable(True, width=self.plo.conic_ref_linewidth)
+            self.patches['reference'][i].sigClicked.connect(self.show_tooltip)
+            self.patches['reference'][i].name = None
+
+        # add isocurve for delta d/d
+        #self.patches['deltadd'] = QtWidgets.QGraphicsEllipseItem()
+        #_pen = pg.mkPen((255,255,255,255), width=self.plo.conic_linewidth, style=QtCore.Qt.PenStyle.DashLine)
+        #_pen.setCapStyle(QtCore.Qt.PenCapStyle.FlatCap)
+        #_pen.setDashPattern([4,8])
+        #self.patches['deltadd'].setPen(_pen)
+        #self.ax.addItem(self.patches['deltadd'])
+
+        # add empty plot per contour line
+        for i in range(self.plo.conic_tth_num):
+            curve = pg.PlotCurveItem(useCache=True)
+            self.ax.addItem(curve)
+            self.patches['conic'].append(curve)
+            temp_label = pg.TextItem(anchor=(0.5,0.5), fill=pg.mkBrush(self.conic_label_fill))
+            temp_label.setFont(font)
+            self.patches['labels'].append(temp_label)
+            self.ax.addItem(temp_label)
+
+        # label for beamstop contour
+        bs_label = pg.TextItem(anchor=(0.5,0.5),
+                               color=self.unit_label_color,
+                               fill=self.conic_label_fill)
+        bs_label.setFont(font)
+        self.patches['bs_label'] = bs_label
+        self.ax.addItem(bs_label)
+
+        # add poni scatter plot
+        self.patches['poni'] = pg.ScatterPlotItem(symbol = self.plo.poni_marker,
+                                                  size = self.plo.poni_size,
+                                                  brush = pg.mkBrush(self.cont_cmap.map(0, mode='qcolor')),
+                                                  pen = pg.mkPen(None))
+        self.ax.addItem(self.patches['poni'])
+
+        # add beam center scatter plot
+        self.patches['beamcenter'] = pg.ScatterPlotItem(symbol = self.plo.beamcenter_marker,
+                                                        size = self.plo.beamcenter_size,
+                                                        brush = pg.mkBrush(self.cont_cmap.map(0, mode='qcolor')),
+                                                        pen = pg.mkPen(None))
+        self.ax.addItem(self.patches['beamcenter'])
+
+        self.patches['overlay'] = pg.ImageItem()
+        self.patches['overlay'].hoverEvent = self.hoverEvent
+        self.ax.addItem(self.patches['overlay'])
+        # set overlay colors
+        _high = QtGui.QColor(self.plot_bg_color)
+        _high.setAlphaF(0.0)
+        if self.plo.overlay_toggle_warn:
+            cm = pg.ColorMap(pos=[0.0, 1.0], color=[self.overlay_threshold_color, _high])
+        else:
+            cm = pg.ColorMap(pos=[0.0, 1.0], color=[self.plot_bg_color, _high])
+        cm.setMappingMode('clip')
+        self.patches['overlay'].setColorMap(cm)
+
+        # build detector modules
+        self.build_detector()
+
+        # figure out proper plot dimensions
+        # limit the axis x and y
+        # get proper dimensions
+        # fix the window size
+        # resize the window
+        # resize the plot
+        self.resize_window()
+
+        # add unit label
+        self.init_unit_label()
+
+        # add label for corrections
+        self.init_correction_label()
+
+        # create cones and draw contour lines
+        self.update_screen()
+        self.set_window_title()
+
+    def init_menus(self, reset=False):
+
+        if reset:
+            self.menu_bar.clear()
+        # if xrdPlanner is added as a widget to a
+        # GUI use and append to the parent menuBar
+        if self.parent():
+            self.menu_bar = self.parent().menuBar()
+        else:
+            self.menu_bar = self.menuBar()
+
+        # append 'menu' and 'value' (string!) as tuple to this list
+        # update_menu_entries() will then reset the
+        # checkmark to the active entry after reload of
+        # settings.
+
+        # self.update_menu_entries() will access
+        # the menus and update the checkmarks upon
+        # settings reload via self.reload_settings()
+        menu_det = self.menu_bar.addMenu('Detector')
+        group_det = QtGui.QActionGroup(self)
+        group_det.setExclusive(True)
+
+        #############
+        # DETECTORS #
+        #############
+        # menu Detectors
+        for d in sorted(self.detector_db):
+            d_menu = QtWidgets.QMenu(d, self)
+            menu_det.addMenu(d_menu)
+            for s in self.detector_db[d]['size']:
+                det_action = QtGui.QAction(s, self, checkable=True)
+                self.set_menu_action(det_action, self.change_detector, d, s)
+                d_menu.addAction(det_action)
+                group_det.addAction(det_action)
+                if d == self.geo.det_type and s == self.geo.det_size:
+                    det_action.setChecked(True)
+        
+        #############
+        # REFERENCE #
+        #############
+        # menu Reference
+        menu_ref = self.menu_bar.addMenu('Reference')
+        self.group_ref = QtGui.QActionGroup(self)
+        self.group_ref.setExclusive(True)
+        # menu Reference: add None
+        ref_action = QtGui.QAction('None', self, checkable=True)
+        self.set_menu_action(ref_action, self.change_reference, 'None')
+        menu_ref.addAction(ref_action)
+        self.group_ref.addAction(ref_action)
+        if self.geo.reference.lower() == 'none':
+            ref_action.setChecked(True)
+        # menu Reference: add pyFAI library
+        sub_menu_pyFAI = QtWidgets.QMenu('pyFAI', self)
+        menu_ref.addMenu(sub_menu_pyFAI)
+        for ref_name in sorted(self.ref_library):
+            ref_action = QtGui.QAction(ref_name, self, checkable=True)
+            self.set_menu_action(ref_action, self.change_reference, ref_name)
+            sub_menu_pyFAI.addAction(ref_action)
+            self.group_ref.addAction(ref_action)
+            if ref_name == self.geo.reference:
+                ref_action.setChecked(True)
+
+        # menu Reference: add Custom
+        self.sub_menu_custom = QtWidgets.QMenu('Custom', self)
+        menu_ref.addMenu(self.sub_menu_custom)
+        
+        ############
+        # BEAMSTOP #
+        ############
+        # menu Beamstop
+        menu_bs = self.menu_bar.addMenu('Beamstop')
+        group_bs = QtGui.QActionGroup(self)
+        group_bs.setExclusive(True)
+        # menu Beamstop: add None
+        bs_action = QtGui.QAction('None', self, checkable=True)
+        self.set_menu_action(bs_action, self.change_beamstop, 'None')
+        menu_bs.addAction(bs_action)
+        group_bs.addAction(bs_action)
+        if isinstance(self.geo.bssz, str) and self.geo.bssz.lower() == 'none':
+            bs_action.setChecked(True)
+        # menu Beamstop: add sizes list
+        sub_menu_bs = QtWidgets.QMenu('Sizes [mm]', self)
+        menu_bs.addMenu(sub_menu_bs)
+        for bs_size in sorted(self.geo.bs_list):
+            bs_sub_action = QtGui.QAction(str(bs_size), self, checkable=True)
+            self.set_menu_action(bs_sub_action, self.change_beamstop, bs_size)
+            sub_menu_bs.addAction(bs_sub_action)
+            group_bs.addAction(bs_sub_action)
+            if bs_size == self.geo.bssz:
+                bs_sub_action.setChecked(True)
+        
+        ###########
+        #  UNITS  #
+        ###########
+        # menu Units
+        # non-standard menu -> self.geo.unit is int
+        self.menu_unit = self.menu_bar.addMenu('Unit')
+        group_unit = QtGui.QActionGroup(self)
+        group_unit.setExclusive(True)
+        for unit_index, unit_name in enumerate(self.unit_names):
+            unit_action = QtGui.QAction(unit_name, self, checkable=True)
+            self.set_menu_action(unit_action, self.change_units, unit_index)
+            self.menu_unit.addAction(unit_action)
+            group_unit.addAction(unit_action)
+            if unit_index == self.geo.unit:
+                unit_action.setChecked(True)
+
+        ############
+        #   VIEW   #
+        ############
+        # menu View
+        menu_view = self.menu_bar.addMenu('View')
+        ################
+        # VIEW - THEME #
+        ################
+        # non-standard menu -> self.geo.darkmode is bool
+        menu_theme = menu_view.addMenu('Theme')
+        group_theme = QtGui.QActionGroup(self)
+        group_theme.setExclusive(True)
+        for (theme, invert) in [('Light', False), ('Dark', True)]:
+            theme_action = QtGui.QAction(theme, self, checkable=True)
+            self.set_menu_action(theme_action, self.apply_theme, invert, True)
+            group_theme.addAction(theme_action)
+            menu_theme.addAction(theme_action)
+            if invert == self.geo.darkmode:
+                theme_action.setChecked(True)
+
+        ###################
+        # VIEW - COLORMAP #
+        ###################
+        self.menu_cmap = menu_view.addMenu('Colormap')
+        group_cmap = QtGui.QActionGroup(self)
+        group_cmap.setExclusive(True)
+        for cmap_name in self.colormaps: # PyQtGraph.colormap.listMaps(): Experimental, subject to change.
+            cmap_action = QtGui.QAction(cmap_name, self, checkable=True)
+            self.set_menu_action(cmap_action, self.change_cmap, cmap_name)
+            self.menu_cmap.addAction(cmap_action)
+            group_cmap.addAction(cmap_action)
+            if cmap_name == self.geo.colormap:
+                cmap_action.setChecked(True)
+
+        ##################
+        # VIEW - OVERLAY #
+        ##################
+        menu_overlays = menu_view.addMenu('Overlay')
+        # unit value hover toggle
+        self.action_unit_hover = QtGui.QAction('Unit hover', self, checkable=True)
+        self.set_menu_action(self.action_unit_hover, self.toggle_unit_hover)
+        if self.plo.show_unit_hover:
+            self.action_unit_hover.setChecked(True)
+        else:
+            self.action_unit_hover.setChecked(False)
+        menu_overlays.addAction(self.action_unit_hover)
+        menu_overlays.addSeparator()
+        # polarisation map toggle
+        self.action_show_pol = QtGui.QAction('Polarisation', self, checkable=True)
+        self.set_menu_action(self.action_show_pol, self.toggle_overlay_polarisation)
+        if self.plo.show_polarisation:
+            self.action_show_pol.setChecked(True)
+        else:
+            self.action_show_pol.setChecked(False)
+        menu_overlays.addAction(self.action_show_pol)
+        # Solidangle map toggle
+        self.action_show_ang = QtGui.QAction('Solid angle', self, checkable=True)
+        self.set_menu_action(self.action_show_ang, self.toggle_overlay_solidangle)
+        if self.plo.show_solidangle:
+            self.action_show_ang.setChecked(True)
+        else:
+            self.action_show_ang.setChecked(False)
+        menu_overlays.addAction(self.action_show_ang)
+        # Overlay warn color toggle
+        menu_overlays.addSeparator()
+        self.action_overlay_warn = QtGui.QAction('Highlight', self, checkable=True)
+        self.set_menu_action(self.action_overlay_warn, self.toggle_overlay_highlight)
+        if self.plo.overlay_toggle_warn:
+            self.action_overlay_warn.setChecked(True)
+        else:
+            self.action_overlay_warn.setChecked(False)
+        menu_overlays.addAction(self.action_overlay_warn)
+
+        ####################
+        # VIEW - FUNCTIONS #
+        ####################
+        #menu_functions = menu_view.addMenu('Functions')
+        # set deltadd parameters toggle
+        #self.action_funct_deltadd_set = QtGui.QAction('Setup \u03B4d/d', self)
+        #self.set_menu_action(self.action_funct_deltadd_set, self.window_function_deltadd)
+        #menu_functions.addAction(self.action_funct_deltadd_set)
+        # show deltadd toggle
+        #self.action_funct_deltadd_show = QtGui.QAction('Show \u03B4d/d', self, checkable=True)
+        #self.set_menu_action(self.action_funct_deltadd_show, self.toggle_function_deltadd)
+        #if self.plo.show_deltadd:
+        #    self.action_funct_deltadd_show.setChecked(True)
+        #else:
+        #    self.action_funct_deltadd_show.setChecked(False)
+        #menu_functions.addAction(self.action_funct_deltadd_show)
+
+        ############
+        # SETTINGS #
+        ############
+        # menu Settings
+        menu_Settings = self.menu_bar.addMenu('Settings')
+        # submenu load settings files
+        self.menu_custom_settings = menu_Settings.addMenu('Load')
+        group_cset = QtGui.QActionGroup(self)
+        group_cset.setExclusive(True)
+        for cset_name in self.get_settings_files():
+            cset_action = QtGui.QAction(cset_name, self, checkable=True)
+            self.set_menu_action(cset_action, self.change_settings_file, cset_name)
+            self.menu_custom_settings.addAction(cset_action)
+            group_cset.addAction(cset_action)
+            if cset_name == self.active_settings:
+                cset_action.setChecked(True)
+        
+        ###################
+        # SETTINGS - SAVE #
+        ###################
+        save_action = QtGui.QAction('Save', self)
+        self.set_menu_action(save_action, self.save_current_settings)
+        menu_Settings.addAction(save_action)
+        #####################
+        # SETTINGS - IMPORT #
+        #####################
+        import_action = QtGui.QAction('Import', self)
+        self.set_menu_action(import_action, self.import_settings_file)
+        menu_Settings.addAction(import_action)
+        #####################
+        # SETTINGS - EXPORT #
+        #####################
+        export_action = QtGui.QAction('Export', self)
+        self.set_menu_action(export_action, self.show_export_window)
+        menu_Settings.addAction(export_action)
+        ###################
+        # SETTINGS - EDIT #
+        ###################
+        menu_Settings.addSeparator()
+        menu_Edit = menu_Settings.addMenu('Edit')
+        # prepare platform dependent file reader
+        if sys.platform == 'win32':
+            tokens = [('Detector db', os.system, f'notepad {self.path_detdb}'),
+                      ('Settings', self.edit_settings_file, f'notepad')]
+        elif sys.platform == 'linux':
+            tokens = [('Detector db', os.system, f'xdg-open {self.path_detdb}'),
+                      ('Settings', self.edit_settings_file, f'xdg-open')]
+        else:
+            tokens = [('Detector db', os.system, f'open -t {self.path_detdb}'),
+                      ('Settings', self.edit_settings_file, f'open -t')]
+        for (name, funct, command) in tokens:
+            edit_action = QtGui.QAction(name, self)
+            self.set_menu_action(edit_action, funct, command)
+            menu_Edit.addAction(edit_action)
+        #####################
+        # SETTINGS - DELETE #
+        #####################
+        menu_Settings.addSeparator()
+        export_action = QtGui.QAction('Delete', self)
+        self.set_menu_action(export_action, self.delete_settings_files)
+        menu_Settings.addAction(export_action)
+
+        # menu About
+        menu_help = self.menu_bar.addMenu('Help')
+        action_about = QtGui.QAction('xrdPlanner', self)
+        self.set_menu_action(action_about, self.show_about_window)
+        menu_help.addAction(action_about)
+
+    def init_unit_label(self):
+        font = QtGui.QFont()
+        font.setPixelSize(self.plo.unit_label_size)
+        self.unit_label = pg.TextItem(anchor=(0.0,0.0), color=self.unit_label_color, fill=self.unit_label_fill)
+        self.unit_label.setText(self.unit_names[self.geo.unit])
+        self.unit_label.setFont(font)
+        self.ax.addItem(self.unit_label)
+        self.unit_label.setPos(-self.xdim, self.ydim)
+
+    def init_correction_label(self):
+        font = QtGui.QFont()
+        font.setPixelSize(self.plo.unit_label_size)
+        self.cor_label = pg.TextItem(anchor=(1.0,1.0), color=self.unit_label_color, fill=self.unit_label_fill)
+        self.cor_label.setText('')
+        self.cor_label.setFont(font)
+        self.ax.addItem(self.cor_label)
+        self.cor_label.hide()
+        self.cor_label.setToolTip('Correction factors:\nP: Polarisation\nS: Solid angle')
+        self.cor_label.setPos(self.xdim, -self.ydim)
 
     def apply_theme(self, use_dark, redraw=False):
         # set darkmode
@@ -283,504 +717,16 @@ class MainWindow(QtWidgets.QMainWindow):
         if redraw:
             self.redraw_canvas()
 
-    def init_par(self):
-        # fetch the geometry, detector, plot specifications and limits
-        self.get_defaults_all()
-        # file name to store current settings
-        # if file_dump doesn't exists, make a dump
-        if not os.path.exists(self.path_settings_current):
-            self.save_par()
-        # if it exists load parameters
+    #############
+    #  TOGGLE   #
+    #############
+    def toggle_unit_hover(self):
+        self.plo.show_unit_hover = not self.plo.show_unit_hover
+        if self.plo.show_unit_hover:
+            self.action_unit_hover.setChecked(True)
         else:
-            self.load_par()
-        # reset to default if requested
-        if self.plo.reset_settings:
-            self.get_defaults_all()
-            self.save_par()
-        # update with default if requested
-        #  - e.g. to add missing entries
-        if self.plo.update_settings:
-            self.save_par()
-
-    def hoverEvent(self, event):
-        """Hover event linked to cormap
-        and should only be active while
-        either or both maps are displayed """
-        if event.isExit():
-            self.cor_label.hide()
-            return
-        
-        # hoverEvent is only called if
-        # either or both maps are active
-        # -> always show on isEnter event
-        if event.isEnter():
-            self.cor_label.show()
-
-        # cormap displays the product of both corrections
-        # but the individual values can be retrieves from their arrays
-        # -> _polcor and _solang
-        y, x = map(int, np.clip(event.pos(), [0,0], np.array(self.patches['overlay'].image.shape)[::-1]-1))
-        _text = []
-        # calc_overlays returns either a np.array (if active)
-        # or a float (inactive) for _polcor and _solang. 
-        if not isinstance(self._polcor, float):
-            _text.append(f'P: {self._polcor[x,y]:.2f}')
-        if not isinstance(self._solang, float):
-            _text.append(f'S: {self._solang[x,y]:.2f}')
-        self.cor_label.setText('\n'.join(_text))
-
-    def init_screen(self):
-        # init the plot for contours and beam center
-        self.ax.setAspectLocked()
-        #remove axes
-        self.ax.getPlotItem().hideAxis('bottom')
-        self.ax.getPlotItem().hideAxis('left')
-        # disable pan/zoom
-        self.ax.setMouseEnabled(x=False, y=False)
-        # disable right click  context menu
-        self.ax.setMenuEnabled(False)
-        # hide the autoscale button
-        self.ax.hideButtons()
-
-        # enable debug mode functions
-        if self.plo.set_debug:
-            # disable pan/zoom
-            self.ax.setMouseEnabled(x=True, y=True)
-            # disable right click  context menu
-            self.ax.setMenuEnabled(True)
-
-        # define font to label conics
-        font = QtGui.QFont()
-        font.setPixelSize(self.plo.conic_label_size)
-        font.setBold(True)
-
-        # container for contour lines
-        self.patches = {'beamcenter':None,
-                        'beamstop':None,
-                        'overlay':None,
-                        'poni':None,
-                        'bs_label':None,
-                        'conic':[],
-                        'reference':[],
-                        'labels':[]}
-
-        # add beam stop scatter plot
-        # pxMode=False
-        # Size is in scene coordinates and the spots scale with the
-        # view. Otherwise, spots are always the same size regardless
-        # of scaling, and size is given in px.
-        self.patches['beamstop'] = pg.PlotDataItem(useCache=True,
-                                                   pen=pg.mkPen(self.beamstop_edge_color,
-                                                                width=self.plo.conic_linewidth),
-                                                   brush=pg.mkBrush(self.beamstop_color),
-                                                   fillOutline=True)
-        self.ax.addItem(self.patches['beamstop'])
-
-        # add empty plot per reference contour line
-        for i in range(self.plo.conic_ref_num):
-            ref = pg.PlotCurveItem(useCache=True)
-            self.ax.addItem(ref)
-            self.patches['reference'].append(ref)
-            self.patches['reference'][i].setClickable(True, width=self.plo.conic_ref_linewidth)
-            self.patches['reference'][i].sigClicked.connect(self.show_tooltip)
-            self.patches['reference'][i].name = None
-
-        # add empty plot per contour line
-        for i in range(self.plo.conic_tth_num):
-            curve = pg.PlotCurveItem(useCache=True)
-            self.ax.addItem(curve)
-            self.patches['conic'].append(curve)
-            temp_label = pg.TextItem(anchor=(0.5,0.5), fill=pg.mkBrush(self.conic_label_fill))
-            temp_label.setFont(font)
-            self.patches['labels'].append(temp_label)
-            self.ax.addItem(temp_label)
-
-        # label for beamstop contour
-        bs_label = pg.TextItem(anchor=(0.5,0.5),
-                               color=self.unit_label_color,
-                               fill=self.conic_label_fill)
-        bs_label.setFont(font)
-        self.patches['bs_label'] = bs_label
-        self.ax.addItem(bs_label)
-
-        # add poni scatter plot
-        self.patches['poni'] = pg.ScatterPlotItem(symbol = self.plo.poni_marker,
-                                                  size = self.plo.poni_size,
-                                                  brush = pg.mkBrush(self.cont_cmap.map(0, mode='qcolor')),
-                                                  pen = pg.mkPen(None))
-        self.ax.addItem(self.patches['poni'])
-
-        # add beam center scatter plot
-        self.patches['beamcenter'] = pg.ScatterPlotItem(symbol = self.plo.beamcenter_marker,
-                                                        size = self.plo.beamcenter_size,
-                                                        brush = pg.mkBrush(self.cont_cmap.map(0, mode='qcolor')),
-                                                        pen = pg.mkPen(None))
-        self.ax.addItem(self.patches['beamcenter'])
-
-        self.patches['overlay'] = pg.ImageItem()
-        self.patches['overlay'].hoverEvent = self.hoverEvent
-        self.ax.addItem(self.patches['overlay'])
-        # set overlay colors
-        _high = QtGui.QColor(self.plot_bg_color)
-        _high.setAlphaF(0.0)
-        if self.plo.overlay_toggle_warn:
-            cm = pg.ColorMap(pos=[0.0, 1.0], color=[self.overlay_threshold_color, _high])
-        else:
-            cm = pg.ColorMap(pos=[0.0, 1.0], color=[self.plot_bg_color, _high])
-        cm.setMappingMode('clip')
-        self.patches['overlay'].setColorMap(cm)
-
-        # build detector modules
-        self.build_detector()
-
-        # figure out proper plot dimensions
-        # limit the axis x and y
-        # get proper dimensions
-        # fix the window size
-        # resize the window
-        # resize the plot
-        self.resize_window()
-
-        # add unit label
-        self.add_unit_label()
-
-        # add label for corrections
-        self.add_correction_label()
-
-        # create cones and draw contour lines
-        self.update_screen()
-        self.set_window_title()
-
-    def init_menus(self, reset=False):
-
-        if reset:
-            self.menu_bar.clear()
-        # if xrdPlanner is added as a widget to a
-        # GUI use and append to the parent menuBar
-        if self.parent():
-            self.menu_bar = self.parent().menuBar()
-        else:
-            self.menu_bar = self.menuBar()
-
-        # append 'menu' and 'value' (string!) as tuple to this list
-        # update_menu_entries() will then reset the
-        # checkmark to the active entry after reload of
-        # settings.
-
-        # self.update_menu_entries() will access
-        # the menus and update the checkmarks upon
-        # settings reload via self.reload_settings()
-        menu_det = self.menu_bar.addMenu('Detector')
-        group_det = QtGui.QActionGroup(self)
-        group_det.setExclusive(True)
-
-        # menu Detectors
-        for d in sorted(self.detector_db):
-            d_menu = QtWidgets.QMenu(d, self)
-            menu_det.addMenu(d_menu)
-            for s in self.detector_db[d]['size']:
-                det_action = QtGui.QAction(s, self, checkable=True)
-                self.set_menu_action(det_action, self.change_detector, d, s)
-                d_menu.addAction(det_action)
-                group_det.addAction(det_action)
-                if d == self.geo.det_type and s == self.geo.det_size:
-                    det_action.setChecked(True)
-        
-        # menu Reference
-        menu_ref = self.menu_bar.addMenu('Reference')
-        self.group_ref = QtGui.QActionGroup(self)
-        self.group_ref.setExclusive(True)
-        # menu Reference: add None
-        ref_action = QtGui.QAction('None', self, checkable=True)
-        self.set_menu_action(ref_action, self.change_reference, 'None')
-        menu_ref.addAction(ref_action)
-        self.group_ref.addAction(ref_action)
-        if self.geo.reference.lower() == 'none':
-            ref_action.setChecked(True)
-        # menu Reference: add pyFAI library
-        sub_menu_pyFAI = QtWidgets.QMenu('pyFAI', self)
-        menu_ref.addMenu(sub_menu_pyFAI)
-        for ref_name in sorted(self.ref_library):
-            ref_action = QtGui.QAction(ref_name, self, checkable=True)
-            self.set_menu_action(ref_action, self.change_reference, ref_name)
-            sub_menu_pyFAI.addAction(ref_action)
-            self.group_ref.addAction(ref_action)
-            if ref_name == self.geo.reference:
-                ref_action.setChecked(True)
-
-        # menu Reference: add Custom
-        self.sub_menu_custom = QtWidgets.QMenu('Custom', self)
-        menu_ref.addMenu(self.sub_menu_custom)
-        
-        # menu Beamstop
-        menu_bs = self.menu_bar.addMenu('Beamstop')
-        group_bs = QtGui.QActionGroup(self)
-        group_bs.setExclusive(True)
-        # menu Beamstop: add None
-        bs_action = QtGui.QAction('None', self, checkable=True)
-        self.set_menu_action(bs_action, self.change_beamstop, 'None')
-        menu_bs.addAction(bs_action)
-        group_bs.addAction(bs_action)
-        if isinstance(self.geo.bssz, str) and self.geo.bssz.lower() == 'none':
-            bs_action.setChecked(True)
-        # menu Beamstop: add sizes list
-        sub_menu_bs = QtWidgets.QMenu('Sizes [mm]', self)
-        menu_bs.addMenu(sub_menu_bs)
-        for bs_size in sorted(self.geo.bs_list):
-            bs_sub_action = QtGui.QAction(str(bs_size), self, checkable=True)
-            self.set_menu_action(bs_sub_action, self.change_beamstop, bs_size)
-            sub_menu_bs.addAction(bs_sub_action)
-            group_bs.addAction(bs_sub_action)
-            if bs_size == self.geo.bssz:
-                bs_sub_action.setChecked(True)
-        
-        # menu Units
-        # non-standard menu -> self.geo.unit is int
-        self.menu_unit = self.menu_bar.addMenu('Unit')
-        group_unit = QtGui.QActionGroup(self)
-        group_unit.setExclusive(True)
-        for unit_index, unit_name in enumerate(self.unit_names):
-            unit_action = QtGui.QAction(unit_name, self, checkable=True)
-            self.set_menu_action(unit_action, self.change_units, unit_index)
-            self.menu_unit.addAction(unit_action)
-            group_unit.addAction(unit_action)
-            if unit_index == self.geo.unit:
-                unit_action.setChecked(True)
-
-        # menu View
-        menu_view = self.menu_bar.addMenu('View')
-        # submenu Theme
-        # non-standard menu -> self.geo.darkmode is bool
-        menu_theme = menu_view.addMenu('Theme')
-        group_theme = QtGui.QActionGroup(self)
-        group_theme.setExclusive(True)
-        for (theme, invert) in [('Light', False), ('Dark', True)]:
-            theme_action = QtGui.QAction(theme, self, checkable=True)
-            self.set_menu_action(theme_action, self.apply_theme, invert, True)
-            group_theme.addAction(theme_action)
-            menu_theme.addAction(theme_action)
-            if invert == self.geo.darkmode:
-                theme_action.setChecked(True)
-
-        # submenu Colormap
-        self.menu_cmap = menu_view.addMenu('Colormap')
-        group_cmap = QtGui.QActionGroup(self)
-        group_cmap.setExclusive(True)
-        for cmap_name in self.colormaps: # PyQtGraph.colormap.listMaps(): Experimental, subject to change.
-            cmap_action = QtGui.QAction(cmap_name, self, checkable=True)
-            self.set_menu_action(cmap_action, self.change_cmap, cmap_name)
-            self.menu_cmap.addAction(cmap_action)
-            group_cmap.addAction(cmap_action)
-            if cmap_name == self.geo.colormap:
-                cmap_action.setChecked(True)
-
-        menu_overlays = menu_view.addMenu('Overlay')
-        # polarisation map toggle
-        self.action_show_pol = QtGui.QAction('Polarisation', self, checkable=True)
-        self.set_menu_action(self.action_show_pol, self.toggle_overlay_polarisation)
-        if self.plo.show_polarisation:
-            self.action_show_pol.setChecked(True)
-        else:
-            self.action_show_pol.setChecked(False)
-        menu_overlays.addAction(self.action_show_pol)
-        # Solidangle map toggle
-        self.action_show_ang = QtGui.QAction('Solid angle', self, checkable=True)
-        self.set_menu_action(self.action_show_ang, self.toggle_overlay_solidangle)
-        if self.plo.show_solidangle:
-            self.action_show_ang.setChecked(True)
-        else:
-            self.action_show_ang.setChecked(False)
-        menu_overlays.addAction(self.action_show_ang)
-        # Overlay warn color toggle
-        menu_overlays.addSeparator()
-        self.action_overlay_warn = QtGui.QAction('Highlight', self, checkable=True)
-        self.set_menu_action(self.action_overlay_warn, self.toggle_overlay_highlight)
-        if self.plo.overlay_toggle_warn:
-            self.action_overlay_warn.setChecked(True)
-        else:
-            self.action_overlay_warn.setChecked(False)
-        menu_overlays.addAction(self.action_overlay_warn)
-
-        # menu Settings
-        menu_Settings = self.menu_bar.addMenu('Settings')
-        # submenu load settings files
-        self.menu_custom_settings = menu_Settings.addMenu('Load')
-        group_cset = QtGui.QActionGroup(self)
-        group_cset.setExclusive(True)
-        for cset_name in self.get_settings_files():
-            cset_action = QtGui.QAction(cset_name, self, checkable=True)
-            self.set_menu_action(cset_action, self.change_settings_file, cset_name)
-            self.menu_custom_settings.addAction(cset_action)
-            group_cset.addAction(cset_action)
-            if cset_name == self.active_settings:
-                cset_action.setChecked(True)
-        # save action
-        save_action = QtGui.QAction('Save', self)
-        self.set_menu_action(save_action, self.save_current_settings)
-        menu_Settings.addAction(save_action)
-        # import action
-        import_action = QtGui.QAction('Import', self)
-        self.set_menu_action(import_action, self.import_settings_file)
-        menu_Settings.addAction(import_action)
-        # export action
-        export_action = QtGui.QAction('Export', self)
-        self.set_menu_action(export_action, self.show_export_window)
-        menu_Settings.addAction(export_action)
-        # submenu Edit
-        menu_Settings.addSeparator()
-        menu_Edit = menu_Settings.addMenu('Edit')
-        # prepare platform dependent file reader
-        if sys.platform == 'win32':
-            tokens = [('Detector db', os.system, f'notepad {self.path_detdb}'),
-                      ('Settings', self.edit_settings_file, f'notepad')]
-        elif sys.platform == 'linux':
-            tokens = [('Detector db', os.system, f'xdg-open {self.path_detdb}'),
-                      ('Settings', self.edit_settings_file, f'xdg-open')]
-        else:
-            tokens = [('Detector db', os.system, f'open -t {self.path_detdb}'),
-                      ('Settings', self.edit_settings_file, f'open -t')]
-        for (name, funct, command) in tokens:
-            edit_action = QtGui.QAction(name, self)
-            self.set_menu_action(edit_action, funct, command)
-            menu_Edit.addAction(edit_action)
-        # delete action
-        menu_Settings.addSeparator()
-        export_action = QtGui.QAction('Delete', self)
-        self.set_menu_action(export_action, self.delete_settings_files)
-        menu_Settings.addAction(export_action)
-
-        # menu About
-        menu_help = self.menu_bar.addMenu('Help')
-        action_about = QtGui.QAction('xrdPlanner', self)
-        self.set_menu_action(action_about, self.about_window)
-        menu_help.addAction(action_about)
-
-    def about_window(self):
-        msgBox = QtWidgets.QDialog()
-        #msgBox.setWindowTitle('About')
-        
-        windowIcon = QtGui.QIcon()
-        windowIcon.addPixmap(QtGui.QPixmap(':/icons/xrdPlanner.png'))
-        
-        font_title = QtGui.QFont()
-        font_title.setPointSize(48)
-        icon = QtWidgets.QLabel()
-        icon.setPixmap(QtGui.QPixmap(':/icons/xrdPlanner.png'))
-        title = QtWidgets.QLabel(f'<b>xrdPlanner</b>')
-        title.setFont(font_title)
-        suptitle = QtWidgets.QLabel(f'<b>Version {xrdPlanner.__version__}</b> (released {xrdPlanner.__date__})')
-        github = QtWidgets.QLabel(f'<br>A tool to project X-ray diffraction cones on a detector screen at different \
-                                    geometries (tilt, rotation, offset) and X-ray energies. For more information visit \
-                                    us on <a href="https://github.com/LennardKrause/xrdPlanner">Github</a>.')
-        github.setWordWrap(True)
-        github.setOpenExternalLinks(True)
-        published = QtWidgets.QLabel(f'<br>The article is published in<br><a href="https://doi.org/10.1107/S1600577523011086">\
-                                       <i>J. Synchrotron Rad.</i> (2024). <b>31</b></a>')
-        published.setOpenExternalLinks(True)
-        authors = QtWidgets.QLabel(f'<br><b>Authors:</b><br>{"<br>".join(xrdPlanner.__authors__)}')
-        email = QtWidgets.QLabel(f'<br>Feedback? <a href="mailto:{xrdPlanner.__email__}?subject=xrdPlanner feedback">{xrdPlanner.__email__}</a>')
-        email.setOpenExternalLinks(True)
-
-        box_layout = QtWidgets.QVBoxLayout()
-        box_layout.setSpacing(0)
-        for widget in [title, suptitle, github, published, authors, email]:
-            box_layout.addWidget(widget)
-        
-        box = QtWidgets.QGroupBox()
-        box.setFlat(True)
-        box.setLayout(box_layout)
-
-        layout = QtWidgets.QHBoxLayout()
-        layout.addWidget(icon)
-        layout.addWidget(box)
-
-        msgBox.setWindowIcon(windowIcon)
-        msgBox.setLayout(layout)
-        msgBox.setFixedSize(msgBox.sizeHint())
-        msgBox.exec()
-
-    def edit_settings_file(self, command):
-        os.system(f'{command} {self.path_settings_current}')
-
-    def get_settings_files(self):
-        return sorted(map(os.path.basename, glob.glob(os.path.join(self.path_settings, '*.json'))))
-
-    def change_settings_file(self, name):
-        self.active_settings = name
-        self.path_settings_current = os.path.join(self.path_settings, name)
-        self.reload_settings()
-    
-    def import_settings_file(self):
-        fname, filter = QtWidgets.QFileDialog.getOpenFileName(self, 'Import settings file', '', "Settings files (*.json)")
-        if fname:
-            # copy to settings folder
-            shutil.copy(fname, self.path_settings)
-            bname = os.path.basename(fname)
-            # Add to menu
-            cset_action = QtGui.QAction(bname, self, checkable=True)
-            self.set_menu_action(cset_action, self.change_settings_file, bname)
-            self.menu_custom_settings.addAction(cset_action)
-            self.group_cset.addAction(cset_action)
-            cset_action.setChecked(True)
-            # change settings and reload
-            self.change_settings_file(bname)
-
-    def add_unit_label(self):
-        font = QtGui.QFont()
-        font.setPixelSize(self.plo.unit_label_size)
-        self.unit_label = pg.TextItem(anchor=(0.0,0.0), color=self.unit_label_color, fill=self.unit_label_fill)
-        self.unit_label.setText(self.unit_names[self.geo.unit])
-        self.unit_label.setFont(font)
-        self.ax.addItem(self.unit_label)
-        self.unit_label.setPos(-self.xdim, self.ydim)
-
-    def add_correction_label(self):
-        font = QtGui.QFont()
-        font.setPixelSize(self.plo.unit_label_size)
-        self.cor_label = pg.TextItem(anchor=(1.0,1.0), color=self.unit_label_color, fill=self.unit_label_fill)
-        self.cor_label.setText('')
-        self.cor_label.setFont(font)
-        self.ax.addItem(self.cor_label)
-        self.cor_label.hide()
-        self.cor_label.setToolTip('Correction factors:\nP: Polarisation\nS: Solid angle')
-        self.cor_label.setPos(self.xdim, -self.ydim)
-
-    def resize_window(self):
-        # figure out proper plot dimensions
-        self.xdim = (self.det.hms * self.det.hmn + self.det.pxs * self.det.hgp * self.det.hmn + self.det.cbh)/2
-        self.ydim = (self.det.vms * self.det.vmn + self.det.pxs * self.det.vgp * self.det.vmn + self.det.cbh)/2
-        
-        # limit the axis x and y
-        self.ax.setXRange(-self.xdim, self.xdim, padding=0, update=True)
-        self.ax.setYRange(-self.ydim, self.ydim, padding=0, update=True)
-
-        if self.plo.plot_size <= 0:
-            _app = QtWidgets.QApplication.instance()
-            _height = _app.primaryScreen().availableGeometry().height()
-            self.plo.plot_size = int(np.ceil(_height*0.9))
-        
-        # get proper dimensions
-        self.width = int(np.ceil(self.plo.plot_size * self.xdim / self.ydim))
-        self.height = self.plo.plot_size + self.plo.slider_margin//2 + self.offset_win32
-
-        # fix the window size
-        if self.plo.plot_size_fixed:
-            self.setMaximumHeight(self.height)
-            self.setMinimumHeight(self.height)
-            self.setMaximumWidth(self.width)
-            self.setMinimumWidth(self.width)
-
-        # resize the window
-        self.resize(self.width, self.height)
-
-    def set_menu_action(self, action, target, *args):
-        action.triggered.connect(lambda: target(*args))
-
-    def set_window_title(self):
-        if self.geo.reference.lower() == 'none':
-            self.setWindowTitle(f'{self.det.name} - {self.active_settings}')
-        else:
-            self.setWindowTitle(f'{self.det.name} - {self.geo.reference} - {self.active_settings}')
+            self.action_unit_hover.setChecked(False)
+        self.redraw_canvas()
 
     def toggle_overlay_polarisation(self):
         self.plo.show_polarisation = not self.plo.show_polarisation
@@ -806,9 +752,22 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_overlay_warn.setChecked(False)
         self.redraw_canvas()
 
+    #def toggle_function_deltadd(self):
+    #    if not self.action_funct_deltadd_show.isEnabled():
+    #        return
+    #    self.plo.show_deltadd = not self.plo.show_deltadd
+    #    if self.plo.show_deltadd:
+    #        self.action_funct_deltadd_show.setChecked(True)
+    #    else:
+    #        self.action_funct_deltadd_show.setChecked(False)
+    #    self.redraw_canvas()
+
+    #############
+    #   REDO    #
+    #############
     def redraw_canvas(self):
         # save darkmode toggle
-        #self.save_par()
+        #self.save_settings()
         self.init_modifiables()
         # clear the screen
         self.ax.clear()
@@ -830,14 +789,17 @@ class MainWindow(QtWidgets.QMainWindow):
         ###############################
         self.geo.det_bank = {}
         ###############################
-        self.load_par()
+        self.load_settings()
         # missing entries in the
         # settings file will be added
-        self.save_par()
+        self.save_settings()
         self.redraw_canvas()
         self.init_menus(reset=True)
         #self.update_menu_entries()
 
+    #############
+    #  CHANGE   #
+    #############
     def change_beamstop(self, size):
         self.geo.bssz = size
         self.redraw_canvas()
@@ -874,43 +836,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.get_reference()
         self.draw_reference()
 
-    def calc_ref_from_cif(self, fpath):
-        # called when a cif is dropped onto the window
-        xtl = dif.Crystal(fpath)
-        # :return xval: arrray : x-axis of powder scan (units)
-        # :return inten: array : intensity values at each point in x-axis
-        # :return reflections: (h, k, l, xval, intensity) array of reflection positions, grouped by min_overlap
-        xval, inten, reflections = xtl.Scatter.powder(scattering_type='xray', units='dspace', powder_average=True, min_overlap=0.02, energy_kev=self.plo.conic_ref_cif_kev)
-        # reject low intensities: based on median or mean?
-        # median is always around unity -> useless
-        # mean rejects many, add adjustable multiplicator?
-        used = reflections[reflections[:,4] > reflections[:,4].max() * self.plo.conic_ref_cif_int]
-        # sort by intensity -> ascending -> flip
-        ordered = used[used[:, 4].argsort()][::-1]
-        # pick the strongest
-        ordered = ordered[:self.plo.conic_ref_num]
-        # assign dspacing
-        self.cont_ref_dsp = ordered[:,3]
-        # hkl -> integer
-        # cast hkl array to list of tuples (for easy display)
-        irel = ordered[:,4]/ordered[:,4].max()
-        self.cont_ref_hkl = list(zip(ordered[:,0], ordered[:,1], ordered[:,2], ordered[:,4], irel))
-
-        self.geo.reference = os.path.basename(fpath)
-        self.ref_custom[self.geo.reference] = self.cont_ref_dsp
-        self.ref_custom_hkl[self.geo.reference] = self.cont_ref_hkl
-
-        ref_action = QtGui.QAction(self.geo.reference, self, checkable=True)
-        self.set_menu_action(ref_action, self.change_reference, self.geo.reference)
-        self.sub_menu_custom.addAction(ref_action)
-        self.group_ref.addAction(ref_action)
-        ref_action.setChecked(True)
-        
-        # update window title
-        self.set_window_title()
-
-        self.draw_reference()
-
+    #############
+    #    GET    #
+    #############
     def get_reference(self):
         if self.geo.reference in self.ref_library:
             # get the d spacings for the calibrtant from pyFAI
@@ -998,10 +926,18 @@ class MainWindow(QtWidgets.QMainWindow):
         plo.plot_size_fixed = True          # [bool]   Fix window size
         plo.unit_label_size = 16            # [int]    Label size, px
         plo.polarisation_fac = 0.99         # [float]  Horizontal polarisation factor
-        plo.show_polarisation = False       # [bool]   Show polarisation overlay
+        plo.show_polarisation = True        # [bool]   Show polarisation overlay
         plo.show_solidangle = False         # [bool]   Show solid angle overlay
+        plo.show_unit_hover = True          # [bool]   Show unit value on hover
         plo.overlay_resolution = 300        # [int]    Overlay resolution
         plo.overlay_toggle_warn = True      # [bool]   Overlay warn color threshold
+        # - extra functions -
+        #plo.show_deltadd = False            # [bool]   Show delta_d/d function
+        #plo.sensor_thickness = 100e-6       # [float]  Detector sensor thickness [m]
+        #plo.beam_divergence = 10e-6         # [float]  X-ray beam divergence [rad]
+        #plo.scattering_diameter = 100e-6    # [float]  Scattering volume diameter [m]
+        #plo.energy_resolution = 100e-6      # [float]  X-ray beam resolution [eV/keV]
+        #plo.funct_deltadd_thresh = -4       # [float]  Log10 threshold for delta d/d contour
         # - slider section - 
         plo.slider_margin = 12              # [int]    Slider frame top margin
         plo.slider_border_width = 1         # [int]    Slider frame border width
@@ -1056,7 +992,7 @@ class MainWindow(QtWidgets.QMainWindow):
         thm.light_overlay_threshold_color = '#FF0000' # [color]  Map threshold color
         # dark mode
         thm.dark_conic_label_fill = '#000000'         # [color]  Contour label fill color
-        thm.dark_conic_ref_color = '#606060'          # [color]  Reference contour color
+        thm.dark_conic_ref_color = '#303030'          # [color]  Reference contour color
         thm.dark_beamstop_color = '#FF0000AA'         # [color]  Beamstop color
         thm.dark_beamstop_edge_color = '#FF0000'      # [color]  Beamstop edge color
         thm.dark_det_module_color = '#EEEEEE'         # [color]  Detector module border color
@@ -1354,6 +1290,7 @@ class MainWindow(QtWidgets.QMainWindow):
             'polarisation_fac':'[float] Horizontal polarisation factor',
             'show_polarisation':'[bool] Show polarisation overlay',
             'show_solidangle':'[bool] Show solid angle overlay',
+            'show_unit_hover':'[bool] Show unit value on hover',
             'overlay_resolution':'[int] Overlay resolution',
             'overlay_threshold':'[float] Overlay warn color threshold',
             'overlay_toggle_warn':'[bool] Toggle overlay highlight',
@@ -1415,29 +1352,45 @@ class MainWindow(QtWidgets.QMainWindow):
             'dark_overlay_threshold_color':'[color] Overlay threshold color',
         }
         self.tooltips['lmt'] = {
-            'ener_min:':'[int] Energy minimum [keV]',
-            'ener_max:':'[int] Energy maximum [keV]',
-            'ener_stp:':'[int] Energy step size [keV]',
-            'dist_min:':'[int] Distance minimum [mm]',
-            'dist_max:':'[int] Distance maximum [mm]',
-            'dist_stp:':'[int] Distance step size [mm]',
-            'hoff_min:':'[int] Horizontal offset minimum [mm]',
-            'hoff_max:':'[int] Horizontal offset maximum [mm]',
-            'hoff_stp:':'[int] Horizontal offset step size [mm]',
-            'voff_min:':'[int] Vertical offset minimum [mm]',
-            'voff_max:':'[int] Vertical offset maximum [mm]',
-            'voff_stp:':'[int] Vertical offset step size [mm]',
-            'rota_min:':'[int] Rotation minimum [deg]',
-            'rota_max:':'[int] Rotation maximum [deg]',
-            'rota_stp:':'[int] Rotation step size [deg]',
-            'tilt_min:':'[int] Tilt minimum [deg]',
-            'tilt_max:':'[int] Tilt maximum [deg]',
-            'tilt_stp:':'[int] Tilt step size [deg]',
-            'bsdx_min:':'[int] Beamstop distance minimum [mm]',
-            'bsdx_max:':'[int] Beamstop distance maximum [mm]',
-            'bsdx_stp:':'[int] Beamstop distance step size [mm]',
+            'ener_min':'[int] Energy minimum [keV]',
+            'ener_max':'[int] Energy maximum [keV]',
+            'ener_stp':'[int] Energy step size [keV]',
+            'dist_min':'[int] Distance minimum [mm]',
+            'dist_max':'[int] Distance maximum [mm]',
+            'dist_stp':'[int] Distance step size [mm]',
+            'hoff_min':'[int] Horizontal offset minimum [mm]',
+            'hoff_max':'[int] Horizontal offset maximum [mm]',
+            'hoff_stp':'[int] Horizontal offset step size [mm]',
+            'voff_min':'[int] Vertical offset minimum [mm]',
+            'voff_max':'[int] Vertical offset maximum [mm]',
+            'voff_stp':'[int] Vertical offset step size [mm]',
+            'rota_min':'[int] Rotation minimum [deg]',
+            'rota_max':'[int] Rotation maximum [deg]',
+            'rota_stp':'[int] Rotation step size [deg]',
+            'tilt_min':'[int] Tilt minimum [deg]',
+            'tilt_max':'[int] Tilt maximum [deg]',
+            'tilt_stp':'[int] Tilt step size [deg]',
+            'bsdx_min':'[int] Beamstop distance minimum [mm]',
+            'bsdx_max':'[int] Beamstop distance maximum [mm]',
+            'bsdx_stp':'[int] Beamstop distance step size [mm]',
         }
 
+        # DEBUG function:
+        # check if all keys have a tooltip
+        if self.plo.set_debug:
+            print('DEBUG: Check tooltips for completeness')
+            _d = {'geo':self.geo.__dict__,
+                'plo':self.plo.__dict__,
+                'thm':self.thm.__dict__,
+                'lmt':self.lmt.__dict__}
+            for k,v in _d.items():
+                for i in v.keys():
+                    if i not in self.tooltips[k].keys():
+                        print(i, '-> missing')
+
+    #############
+    #   BUILD   #
+    #############
     def build_detector(self):
         # build detector modules
         # beam position is between the modules (even) or at the center module (odd)
@@ -1467,6 +1420,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 rect_item.setOpacity(self.plo.det_module_alpha)
                 self.ax.addItem(rect_item)
 
+    #############
+    #  CONICS   #
+    #############
     def draw_conics(self):
         # calculate the offset of the contours resulting from voff and rotation
         # shift the grid to draw the cones, to make sure the contours are drawn
@@ -1480,16 +1436,22 @@ class MainWindow(QtWidgets.QMainWindow):
         # beamcenter shift
         _comp_shift = -(self.geo.voff - self.geo.dist * np.tan(_omega) - np.deg2rad(self.geo.tilt) * self.geo.dist)
 
-        # polarisation correction
-        if self.plo.show_polarisation or self.plo.show_solidangle:
-            self._polcor, self._solang = self.calc_overlays(_omega, res=self.plo.overlay_resolution, pol=self.plo.polarisation_fac)
-            self.patches['overlay'].setImage(self._polcor * self._solang,
-                                            autoLevels=False,
-                                            levels=[0.0,1.0],
-                                            rect=(-self.xdim,
-                                                  -self.ydim,
-                                                  self.xdim * 2,
-                                                  self.ydim * 2))
+        # overlay
+        if self.plo.show_polarisation or self.plo.show_solidangle or self.plo.show_unit_hover:# or self.plo.show_deltadd:
+            _grd, self._tth, self._polcor, self._solang = self.calc_overlays(_omega, res=self.plo.overlay_resolution, pol=self.plo.polarisation_fac)
+            self.patches['overlay'].setImage(_grd * self._polcor * self._solang,
+                                             autoLevels=False,
+                                             levels=[0.0,1.0],
+                                             rect=(-self.xdim,
+                                                   -self.ydim,
+                                                    self.xdim * 2,
+                                                    self.ydim * 2))
+            #if self.plo.show_deltadd:
+            #    _poni_shift = -(self.geo.voff - np.deg2rad(self.geo.tilt) * self.geo.dist)
+            #    self.patches['isocurve'].setRect(self.geo.hoff - self._deltadd_width/2,
+            #                                     _poni_shift - self._deltadd_width/2,
+            #                                     self._deltadd_width,
+            #                                     self._deltadd_width)
         else:
             self.patches['overlay'].setImage(None)
             self.cor_label.hide()
@@ -1516,18 +1478,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.patches['beamstop'].setData(x, y, fillLevel=y.max())
                 self.patches['beamstop'].setVisible(True)
 
-                # Conversion factor keV to Angstrom: 12.398
-                # sin(t)/l: np.sin(Theta) / lambda -> (12.398/geo_energy)
-                stl = np.sin(bs_theta/2)/(12.398/self.geo.ener)
-
-                # d-spacing: l = 2 d sin(t) -> 1/2(sin(t)/l)
-                dsp = 1/(2*stl)
-
-                # prepare the values in the different units / labels
-                #_units = {0:np.rad2deg(theta), 1:_dsp, 2:_stl*4*np.pi, 3:_stl}
-                _units = {0:np.rad2deg(bs_theta), 1:dsp, 2:stl*4*np.pi, 3:stl}
+                _unit = self.calc_unit(bs_theta)
                 self.patches['bs_label'].setPos(self.geo.hoff, label_pos)
-                self.patches['bs_label'].setText(f'{_units[self.geo.unit]:.2f}')
+                self.patches['bs_label'].setText(f'{_unit:.2f}')
                 self.patches['bs_label'].setVisible(True)
         else:
             self.patches['beamstop'].setVisible(False)
@@ -1552,18 +1505,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.patches['conic'][_n].setData(x, y, pen=pg.mkPen(self.cont_cmap.map(_f, mode='qcolor'), width=self.plo.conic_linewidth))
             self.patches['conic'][_n].setVisible(True)
 
-            # Conversion factor keV to Angstrom: 12.398
-            # sin(t)/l: np.sin(Theta) / lambda -> (12.398/geo_energy)
-            stl = np.sin(theta/2)/(12.398/self.geo.ener)
-
-            # d-spacing: l = 2 d sin(t) -> 1/2(sin(t)/l)
-            dsp = 1/(2*stl)
-
-            # prepare the values in the different units / labels
-            #_units = {0:np.rad2deg(theta), 1:_dsp, 2:_stl*4*np.pi, 3:_stl}
-            _units = {0:_ttd, 1:dsp, 2:stl*4*np.pi, 3:stl}
+            _unit = self.calc_unit(theta)
             self.patches['labels'][_n].setPos(self.geo.hoff, label_pos)
-            self.patches['labels'][_n].setText(f'{_units[self.geo.unit]:.2f}', color=self.cont_cmap.map(_f, mode='qcolor'))
+            self.patches['labels'][_n].setText(f'{_unit:.2f}', color=self.cont_cmap.map(_f, mode='qcolor'))
             self.patches['labels'][_n].setVisible(True)
 
     def draw_reference(self):
@@ -1738,56 +1682,43 @@ class MainWindow(QtWidgets.QMainWindow):
         # return x, y and the label position
         return x, y, label_pos
 
-    def calc_overlays(self, omega, res=150, pol=0.99):
-        """
-        Omega in radians
-        """
-        def rot_100(a, cc=1):
-            ca = np.cos(a)
-            sa = np.sin(a)
-            if cc: sa = -sa
-            return np.array([[1,   0,  0],
-                             [0,  ca, sa],
-                             [0, -sa, ca]])
+    def calc_ref_from_cif(self, fpath):
+        # called when a cif is dropped onto the window
+        xtl = dif.Crystal(fpath)
+        # :return xval: arrray : x-axis of powder scan (units)
+        # :return inten: array : intensity values at each point in x-axis
+        # :return reflections: (h, k, l, xval, intensity) array of reflection positions, grouped by min_overlap
+        xval, inten, reflections = xtl.Scatter.powder(scattering_type='xray', units='dspace', powder_average=True, min_overlap=0.02, energy_kev=self.plo.conic_ref_cif_kev)
+        # reject low intensities: based on median or mean?
+        # median is always around unity -> useless
+        # mean rejects many, add adjustable multiplicator?
+        used = reflections[reflections[:,4] > reflections[:,4].max() * self.plo.conic_ref_cif_int]
+        # sort by intensity -> ascending -> flip
+        ordered = used[used[:, 4].argsort()][::-1]
+        # pick the strongest
+        ordered = ordered[:self.plo.conic_ref_num]
+        # assign dspacing
+        self.cont_ref_dsp = ordered[:,3]
+        # hkl -> integer
+        # cast hkl array to list of tuples (for easy display)
+        irel = ordered[:,4]/ordered[:,4].max()
+        self.cont_ref_hkl = list(zip(ordered[:,0], ordered[:,1], ordered[:,2], ordered[:,4], irel))
 
-        # scale overlay to detector dimensions
-        res_scale = self.ydim/self.xdim
-        res_v = int(round(res_scale * res, 0))
-        # make screen grid
-        size_h = np.linspace(-self.xdim, self.xdim, res, endpoint=False)
-        size_v = np.linspace(-self.ydim, self.ydim, res_v, endpoint=False)
-        _gx, _gy = np.meshgrid(size_h, size_v, sparse=True)
-        # build vector -> 3 x n x m
-        _vec = np.full((3, res_v, res), self.geo.dist)
-        _vec[0,:,:] = _gx - self.geo.hoff
-        # Compensate for vertical offset and PONI offset caused by the tilt (sdd*tilt)
-        _vec[1,:,:] = _gy + self.geo.voff - np.deg2rad(self.geo.tilt) * self.geo.dist
-        # polarisation
-        pc = 1.0
-        if self.plo.show_polarisation:
-            # omega is the combination of rotation and tilt, in radians
-            _rot = rot_100(omega)
-            # reshape to allow matrix multiplication
-            # _rot: 3 x 3 @ _norm: 3 x n*m -> _res: 3 x n x m
-            _res = np.reshape(_rot @ np.reshape(_vec, (3,-1)), _vec.shape)
-            _mag = np.sqrt(np.sum(_res**2, axis=0))
-            _norm = _res / _mag
-            # add pol fractions (-> 1.0)
-            # this notation is equivalent to cos(psi)**2,
-            # psi angle of polarization direction to the observer
-            # _res is direct cos(psi)
-            pc_hor = _norm[0,:,:]**2 * pol
-            pc_ver = _norm[1,:,:]**2 * (1-pol)
-            pc = 1.0 - (pc_hor + pc_ver)
-        # solid angle
-        sa = 1.0
-        if self.plo.show_solidangle:
-            _mag = np.sqrt(np.sum(_vec**2, axis=0))
-            sa = 1 / _mag**3
-            sa = sa / np.max(sa)
+        self.geo.reference = os.path.basename(fpath)
+        self.ref_custom[self.geo.reference] = self.cont_ref_dsp
+        self.ref_custom_hkl[self.geo.reference] = self.cont_ref_hkl
+
+        ref_action = QtGui.QAction(self.geo.reference, self, checkable=True)
+        self.set_menu_action(ref_action, self.change_reference, self.geo.reference)
+        self.sub_menu_custom.addAction(ref_action)
+        self.group_ref.addAction(ref_action)
+        ref_action.setChecked(True)
         
-        return pc, sa
+        # update window title
+        self.set_window_title()
 
+        self.draw_reference()
+    
     def show_tooltip(self, widget, event):
         if not widget.name or not self.cont_ref_hkl:
             event.ignore()
@@ -1798,6 +1729,180 @@ class MainWindow(QtWidgets.QMainWindow):
         QtWidgets.QToolTip.showText(pos, text.toHtml())
         event.ignore()
 
+    #############
+    #  OVERLAY  #
+    #############
+    def calc_overlays(self, omega, res=150, pol=0.99):
+        # scale overlay to detector dimensions
+        _res_scale = self.ydim/self.xdim
+        _res_v = int(round(_res_scale * res, 0))
+        # neutral overlay grid
+        grd = np.ones((_res_v, res))
+
+        # make screen grid
+        size_h = np.linspace(-self.xdim, self.xdim, res, endpoint=False)
+        size_v = np.linspace(-self.ydim, self.ydim, _res_v, endpoint=False)
+        _gx, _gy = np.meshgrid(size_h, size_v, sparse=True)
+        # build vector -> 3 x n x m
+        _vec = np.full((3, _res_v, res), self.geo.dist)
+        _vec[0,:,:] = _gx - self.geo.hoff
+        # Compensate for vertical offset and PONI offset caused by the tilt (sdd*tilt)
+        _vec[1,:,:] = _gy + self.geo.voff - np.deg2rad(self.geo.tilt) * self.geo.dist
+
+        # omega is the combination of rotation and tilt, in radians
+        _rot = self.rot_100(omega)
+        # reshape to allow matrix multiplication
+        # _rot: 3 x 3 @ _norm: 3 x n*m -> _res: 3 x n x m
+        _res = np.reshape(_rot @ np.reshape(_vec, (3,-1)), _vec.shape)
+
+        # unit hover
+        tth = 1.0
+        if self.plo.show_unit_hover:
+            # Distance POBI - pixel on grid
+            R_a = np.sqrt(np.sum(_res[0:2]**2, axis=0)) * 1e-3 # m
+            # POBI distance
+            D_a = _res[2] * 1e-3 # m
+            # 2theta - Angle between pixel, sample, and POBI
+            tth = np.arctan(R_a/D_a)
+            # remove very small values (tth < 0.057 deg) to avoid zero divide
+            tth[tth < 1e-3] = np.nan
+
+        # polarisation
+        pc = 1.0
+        if self.plo.show_polarisation:
+            _mag = np.sqrt(np.sum(_res**2, axis=0))
+            _norm = _res / _mag
+            # add pol fractions (-> 1.0)
+            # this notation is equivalent to cos(psi)**2,
+            # psi angle of polarization direction to the observer
+            # _res is direct cos(psi)
+            pc_hor = _norm[0,:,:]**2 * pol
+            pc_ver = _norm[1,:,:]**2 * (1-pol)
+            pc = 1.0 - (pc_hor + pc_ver)
+
+        # solid angle
+        sa = 1.0
+        if self.plo.show_solidangle:
+            _mag = np.sqrt(np.sum(_vec**2, axis=0))
+            sa = 1 / _mag**3
+            sa = sa / np.max(sa)
+        
+        """# delta d / d
+        dd_grid = 1.0
+        dd_width = 0.0
+        if self.plo.show_deltadd:
+            
+            c = self.plo.capillary_size
+            t = self.plo.scattering_diameter
+            p = self.det.pxs * 1e-3
+            phi = self.plo.beam_divergence
+            dE_E = self.plo.energy_resolution
+            
+            # use the "unrotated" vector coordinates to define
+            # R and D in the detector plane
+            # radial component of the unrotated detector
+            # i.e. radius away from the PONI
+            R_a = np.sqrt(np.sum(_vec[0:2]**2, axis=0)) * 1e-3 # m
+            # PONI distance
+            D_a = self.geo.dist * 1e-3 # m
+            # 2theta-alpha - Angle between pixel, sample, and PONI
+            _tth_a = np.arctan(R_a/D_a)
+            # remove very small values (tth < 0.057 deg) to avoid zero divide
+            _tth_a[_tth_a < 1e-3] = np.nan
+            # estimate of the SDD spread (independent of rotation)
+            dD = np.sqrt(1/4 * (c**2 + t**2))
+            # estimate of the pixel radial spread in the detector plane
+            dR = np.sqrt(1/4*(c**2/(np.cos(_tth_a)**2)          \
+                            + p**2 + t**2*np.tan(_tth_a)**2     \
+                            + phi**2*D_a**2/(np.cos(_tth_a)**4) \
+                             )                                  \
+                        )
+            
+            # delta d over d
+            _dd = np.sqrt(1/4*np.tan(_tth_a/2)**(-2)                \
+                          * np.sin(_tth_a)**2 * np.cos(_tth_a)**2   \
+                          * ((dD/D_a)**2 + (dR/R_a)**2) + (dE_E)**2 \
+                          )
+            # H2, FWHM
+            #_dd = 32*np.log(2)*( np.cos(_tth_a)**4/(16*D_a**2) \
+            #             * ((np.tan(_tth_a)**2 \
+            #             * (c**2 + 2*t**2) \
+            #             + p**2 \
+            #             + c**2/np.cos(_tth_a)**2 \
+            #             + (D_a**2*phi**2)/np.cos(_tth_a)**4) ))
+            dd_grid = np.log10(_dd * 180**2 / np.pi**2)
+            _ra = R_a[dd_grid < self.plo.funct_deltadd_thresh]
+            if any(_ra):
+                dd_width = np.nanmin(_ra) * 2 * 1e3
+        """
+
+        return grd, tth, pc, sa#, dd_grid, dd_width
+
+    def rot_100(self, a, cc=1):
+        #Omega in radians
+        ca = np.cos(a)
+        sa = np.sin(a)
+        if cc: sa = -sa
+        return np.array([[1,   0,  0],
+                         [0,  ca, sa],
+                         [0, -sa, ca]])
+
+    def window_function_deltadd(self):
+        param_window = QtWidgets.QDialog()
+
+        param_dict = {'Detector':[(0, 'Sensor thickness', self.plo.sensor_thickness, 1e-6, '\u00B5m')],
+                      'Beam':[(1, 'Divergence', self.plo.beam_divergence, 1e-6, '\u00B5rad'),
+                              (2, 'Energy resolution', self.plo.energy_resolution, 1e-6, '\u00B5eV/keV')],
+                      'Sample':[(3, 'Scattering volume \u2300', self.plo.scattering_diameter, 1e-6, '\u00B5m')],
+                      'Display':[(4, 'Threshold', self.plo.funct_deltadd_thresh, 1, 'log10(\u03B4d/d)')]}
+        param_dict_change = {}
+
+        layout = QtWidgets.QVBoxLayout()
+        for title, entry in param_dict.items():
+            box = QtWidgets.QGroupBox(title=title)
+            box_layout = QtWidgets.QVBoxLayout()
+            box_layout.setContentsMargins(0,0,0,0)
+            for idx, label, value, div, unit in entry:
+                entry_box = QtWidgets.QFrame()
+                entry_layout = QtWidgets.QHBoxLayout()
+                box_combobox = QtWidgets.QSpinBox(singleStep=1, minimum=-10, maximum=1000, value=int(value/div))
+                entry_layout.addWidget(QtWidgets.QLabel(label))
+                entry_layout.addWidget(box_combobox)
+                entry_layout.addWidget(QtWidgets.QLabel(unit))
+                entry_box.setLayout(entry_layout)
+                box_layout.addWidget(entry_box)
+                param_dict_change[idx] = [box_combobox, div]
+            box.setLayout(box_layout)
+            layout.addWidget(box)
+
+        button_box = QtWidgets.QDialogButtonBox()
+        button_box.addButton(QtWidgets.QDialogButtonBox.StandardButton.Apply)
+        button_box.setCenterButtons(True)
+        button_box.clicked.connect(lambda: self.window_function_deltadd_accept(param_dict_change, param_window))
+        layout.addWidget(button_box)
+
+        windowIcon = QtGui.QIcon()
+        windowIcon.addPixmap(QtGui.QPixmap(':/icons/xrdPlanner.png'))
+        
+        param_window.setWindowIcon(windowIcon)
+        param_window.setLayout(layout)
+        param_window.setFixedSize(param_window.sizeHint())
+        param_window.exec()
+    
+    def window_function_deltadd_accept(self, dict, window):
+        self.plo.sensor_thickness = round(dict[0][0].value() * dict[0][1], 6)
+        self.plo.beam_divergence = round(dict[1][0].value() * dict[1][1], 6)
+        self.plo.energy_resolution = round(dict[2][0].value() * dict[2][1], 6)
+        self.plo.capillary_size = round(dict[3][0].value() * dict[3][1], 6)
+        self.plo.funct_deltadd_thresh = round(dict[4][0].value() * dict[4][1], 6)
+        self.action_funct_deltadd_show.setEnabled(True)
+        self.plo.show_deltadd = False
+        self.toggle_function_deltadd()
+        window.close()
+    
+    #############
+    #  UPDATE   #
+    #############
     def update_screen(self, val=None):
         if val is not None:
             if self.sender().objectName() == 'dist':
@@ -1829,21 +1934,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.get_reference()
             self.draw_reference()
 
-    def tree_ghost_select(self, item):
-        parent = item.parent()
-        # toplevel -> multiselect
-        if parent == None:
-            if item.isSelected():
-                [item.child(i).setSelected(True) for i in range(item.childCount())]
-            else:
-                [item.child(i).setSelected(False) for i in range(item.childCount())]
-        # sublevel -> single + top select
-        else:
-            if any([parent.child(i).isSelected() for i in range(parent.childCount())]):
-                parent.setSelected(True)
-            else:
-                parent.setSelected(False)
-
+    #############
+    #  EXPORT   #
+    #############
     def show_export_window(self):
         # set flags=QtCore.Qt.WindowType.Tool for the window
         # to not loose focus when the FileDialog is closed
@@ -2066,7 +2159,22 @@ class MainWindow(QtWidgets.QMainWindow):
         layout_qbox_btn.addWidget(button_export)
 
         self.export_window.show()
-        
+
+    def tree_ghost_select(self, item):
+        parent = item.parent()
+        # toplevel -> multiselect
+        if parent == None:
+            if item.isSelected():
+                [item.child(i).setSelected(True) for i in range(item.childCount())]
+            else:
+                [item.child(i).setSelected(False) for i in range(item.childCount())]
+        # sublevel -> single + top select
+        else:
+            if any([parent.child(i).isSelected() for i in range(parent.childCount())]):
+                parent.setSelected(True)
+            else:
+                parent.setSelected(False)
+
     def export_to(self):
         # make detector bank/dict from selection
         det_bank = {}
@@ -2125,6 +2233,135 @@ class MainWindow(QtWidgets.QMainWindow):
                 if action.text() == basename:
                     action.setChecked(True)
 
+    #############
+    #  UTILITY  #
+    #############
+    def show_about_window(self):
+        msgBox = QtWidgets.QDialog()
+        #msgBox.setWindowTitle('About')
+        
+        windowIcon = QtGui.QIcon()
+        windowIcon.addPixmap(QtGui.QPixmap(':/icons/xrdPlanner.png'))
+        
+        font_title = QtGui.QFont()
+        font_title.setPointSize(48)
+        icon = QtWidgets.QLabel()
+        icon.setPixmap(QtGui.QPixmap(':/icons/xrdPlanner.png'))
+        title = QtWidgets.QLabel(f'<b>xrdPlanner</b>')
+        title.setFont(font_title)
+        suptitle = QtWidgets.QLabel(f'<b>Version {xrdPlanner.__version__}</b> (released {xrdPlanner.__date__})')
+        github = QtWidgets.QLabel(f'<br>A tool to project X-ray diffraction cones on a detector screen at different \
+                                    geometries (tilt, rotation, offset) and X-ray energies. For more information visit \
+                                    us on <a href="https://github.com/LennardKrause/xrdPlanner">Github</a>.')
+        github.setWordWrap(True)
+        github.setOpenExternalLinks(True)
+        published = QtWidgets.QLabel(f'<br>The article is published in<br><a href="https://doi.org/10.1107/S1600577523011086">\
+                                       <i>J. Synchrotron Rad.</i> (2024). <b>31</b></a>')
+        published.setOpenExternalLinks(True)
+        authors = QtWidgets.QLabel(f'<br><b>Authors:</b><br>{"<br>".join(xrdPlanner.__authors__)}')
+        email = QtWidgets.QLabel(f'<br>Feedback? <a href="mailto:{xrdPlanner.__email__}?subject=xrdPlanner feedback">{xrdPlanner.__email__}</a>')
+        email.setOpenExternalLinks(True)
+
+        box_layout = QtWidgets.QVBoxLayout()
+        box_layout.setSpacing(0)
+        for widget in [title, suptitle, github, published, authors, email]:
+            box_layout.addWidget(widget)
+        
+        box = QtWidgets.QGroupBox()
+        box.setFlat(True)
+        box.setLayout(box_layout)
+
+        layout = QtWidgets.QHBoxLayout()
+        layout.addWidget(icon)
+        layout.addWidget(box)
+
+        msgBox.setWindowIcon(windowIcon)
+        msgBox.setLayout(layout)
+        msgBox.setFixedSize(msgBox.sizeHint())
+        msgBox.exec()
+
+    def resize_window(self):
+        # figure out proper plot dimensions
+        self.xdim = (self.det.hms * self.det.hmn + self.det.pxs * self.det.hgp * self.det.hmn + self.det.cbh)/2
+        self.ydim = (self.det.vms * self.det.vmn + self.det.pxs * self.det.vgp * self.det.vmn + self.det.cbh)/2
+        
+        # limit the axis x and y
+        self.ax.setXRange(-self.xdim, self.xdim, padding=0, update=True)
+        self.ax.setYRange(-self.ydim, self.ydim, padding=0, update=True)
+
+        if self.plo.plot_size <= 0:
+            _app = QtWidgets.QApplication.instance()
+            _height = _app.primaryScreen().availableGeometry().height()
+            self.plo.plot_size = int(np.ceil(_height*0.9))
+        
+        # get proper dimensions
+        self.width = int(np.ceil(self.plo.plot_size * self.xdim / self.ydim))
+        self.height = self.plo.plot_size + self.plo.slider_margin//2 + self.offset_win32
+
+        # fix the window size
+        if self.plo.plot_size_fixed:
+            self.setMaximumHeight(self.height)
+            self.setMinimumHeight(self.height)
+            self.setMaximumWidth(self.width)
+            self.setMinimumWidth(self.width)
+
+        # resize the window
+        self.resize(self.width, self.height)
+
+    def set_window_title(self):
+        if self.geo.reference.lower() == 'none':
+            self.setWindowTitle(f'{self.det.name} - {self.active_settings}')
+        else:
+            self.setWindowTitle(f'{self.det.name} - {self.geo.reference} - {self.active_settings}')
+
+    def set_menu_action(self, action, target, *args):
+        action.triggered.connect(lambda: target(*args))
+
+    def calc_unit(self, tth, return_dict=False):
+        # calc_unit expects 2-Theta in radians
+
+        # Conversion factor keV to Angstrom: 12.398
+        # sin(t)/l: np.sin(Theta) / lambda -> (12.398/geo_energy)
+        stl = np.sin(tth/2)/(12.398/self.geo.ener)
+        # d-spacing: l = 2 d sin(t) -> 1/2(sin(t)/l)
+        dsp = 1/(2*stl)
+        units = {0:np.rad2deg(tth), 1:dsp, 2:stl*4*np.pi, 3:stl}
+        if return_dict:
+            return units
+        else:
+            return units[self.geo.unit]
+
+    #############
+    # SETTINGS  #
+    #############
+    def get_active_settings_file(self):
+        # settings token file exists
+        # get settings file
+        if os.path.exists(self.path_settings_token):
+            with open(self.path_settings_token, 'r') as rf:
+                name = rf.read()
+            if os.path.exists(os.path.join(self.path_settings, name)):
+                return name
+        # otherwise reset and return default
+        # -> last exit ended with crash
+        # get defaults
+        self.get_defaults_all()
+        # set active settings to default
+        self.active_settings = os.path.basename(self.path_settings_default)
+        # reset/save default file
+        self.save_settings()
+        return self.active_settings
+    
+    def delete_active_settings_file(self):
+        if os.path.exists(self.path_settings_token):
+            os.remove(self.path_settings_token)
+
+    def set_active_settings_file(self):
+        if not os.path.exists(self.path_settings):
+            os.makedirs(self.path_settings)
+        with open(self.path_settings_token, 'w') as wf:
+            wf.write(self.active_settings)
+
     def delete_settings_files(self):
         # todo change button from 'open' to 'delete'
         fnames, filter = QtWidgets.QFileDialog.getOpenFileNames(self, 'Delete settings files', self.path_settings_current, "Settings files (*.json)")
@@ -2143,9 +2380,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # to the settings file.
         # unless this function is called!
         self._geo.__dict__.update(self.geo.__dict__)
-        self.save_par()
+        self.save_settings()
 
-    def save_par(self, target=None):
+    def save_settings(self, target=None):
         if target == None:
             target = os.path.join(self.path_settings, self.active_settings)
         target_base = os.path.dirname(target)
@@ -2156,7 +2393,7 @@ class MainWindow(QtWidgets.QMainWindow):
         with open(target, 'w') as wf:
             json.dump({'geo':self._geo.__dict__, 'plo':self.plo.__dict__, 'thm':self.thm.__dict__, 'lmt':self.lmt.__dict__}, wf, indent=4)
 
-    def load_par(self, skip=[]):
+    def load_settings(self, skip=[]):
         # Some parameters need to be protected to save
         # the user some waiting time
         #
@@ -2179,6 +2416,8 @@ class MainWindow(QtWidgets.QMainWindow):
                           'tilt_stp':( 1,  100,   1),
                           'bsdx_stp':( 1,  100,   1),
                 }
+        # Add 'key':'val to the dict to enforce 'key' to be set to 'val'
+        _force = {'show_deltadd':False}
         # Opening JSON file as dict
         try:
             with open(self.path_settings_current, 'r') as of:
@@ -2199,6 +2438,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     if p in _warn and x not in range(_warn[p][0], _warn[p][1]+1):
                             print(f'WARNING: {p} set to {x}!\nAllowed values are within {_warn[p][0], _warn[p][1]}, parameter set to {_warn[p][2]}.')
                             x = _warn[p][2]
+                    if p in _force:
+                        x = _force[p]
                     setattr(conv[key], p, x)
                 else:
                     print(f'WARNING: "{p}" is not a valid key!')
@@ -2206,34 +2447,35 @@ class MainWindow(QtWidgets.QMainWindow):
             # store the initial values of geo
             self._geo.__dict__.update(self.geo.__dict__)
 
-    def get_active_settings_file(self):
-        # settings token file exists
-        # get settings file
-        if os.path.exists(self.path_settings_token):
-            with open(self.path_settings_token, 'r') as rf:
-                name = rf.read()
-            if os.path.exists(os.path.join(self.path_settings, name)):
-                return name
-        # otherwise reset and return default
-        # -> last exit ended with crash
-        # get defaults
-        self.get_defaults_all()
-        # set active settings to default
-        self.active_settings = os.path.basename(self.path_settings_default)
-        # reset/save default file
-        self.save_par()
-        return self.active_settings
+    def edit_settings_file(self, command):
+        os.system(f'{command} {self.path_settings_current}')
+
+    def get_settings_files(self):
+        return sorted(map(os.path.basename, glob.glob(os.path.join(self.path_settings, '*.json'))))
+
+    def change_settings_file(self, name):
+        self.active_settings = name
+        self.path_settings_current = os.path.join(self.path_settings, name)
+        self.reload_settings()
     
-    def delete_active_settings_file(self):
-        if os.path.exists(self.path_settings_token):
-            os.remove(self.path_settings_token)
+    def import_settings_file(self):
+        fname, filter = QtWidgets.QFileDialog.getOpenFileName(self, 'Import settings file', '', "Settings files (*.json)")
+        if fname:
+            # copy to settings folder
+            shutil.copy(fname, self.path_settings)
+            bname = os.path.basename(fname)
+            # Add to menu
+            cset_action = QtGui.QAction(bname, self, checkable=True)
+            self.set_menu_action(cset_action, self.change_settings_file, bname)
+            self.menu_custom_settings.addAction(cset_action)
+            self.group_cset.addAction(cset_action)
+            cset_action.setChecked(True)
+            # change settings and reload
+            self.change_settings_file(bname)
 
-    def set_active_settings_file(self):
-        if not os.path.exists(self.path_settings):
-            os.makedirs(self.path_settings)
-        with open(self.path_settings_token, 'w') as wf:
-            wf.write(self.active_settings)
-
+    #############
+    #   EVENT   #
+    #############
     def dragEnterEvent(self, event):
         # Drag-and-Drop cif-file
         if event.mimeData().hasUrls():
@@ -2277,6 +2519,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self.change_units(2)
         elif k == QtCore.Qt.Key.Key_S:
             self.change_units(3)
+        elif k == QtCore.Qt.Key.Key_U:
+            self.toggle_unit_hover()
+        elif k == QtCore.Qt.Key.Key_F1:
+            self.show_about_window()
+        #elif k == QtCore.Qt.Key.Key_R:
+        #    self.toggle_function_deltadd()
 
     def closeEvent(self, event):
         # Save current settings file for
@@ -2286,6 +2534,42 @@ class MainWindow(QtWidgets.QMainWindow):
         # and the defaul is loaded.
         self.set_active_settings_file()
         event.accept()
+
+    def hoverEvent(self, event):
+        """Hover event linked to cormap
+        and should only be active while
+        either or both maps are displayed """
+        if event.isExit():
+            self.cor_label.hide()
+            self.unit_label.setText(f'{self.unit_names[self.geo.unit]}')
+            return
+        
+        # hoverEvent is only called if
+        # either or both maps are active
+        # -> always show on isEnter event
+        if event.isEnter():
+            self.cor_label.show()
+
+        # cormap displays the product of both corrections
+        # but the individual values can be retrieves from their arrays
+        # -> _polcor and _solang
+        y, x = map(int, np.clip(event.pos(), [0,0], np.array(self.patches['overlay'].image.shape)[::-1]-1))
+
+        # unit label value
+        if not isinstance(self._tth, float):
+            unit = self.calc_unit(self._tth[x,y])
+            self.unit_label.setText(f'{self.unit_names[self.geo.unit]} {unit:.2f}')
+        
+        _text = []
+        # calc_overlays returns either a np.array (if active)
+        # or a float (inactive) for _polcor and _solang. 
+        if not isinstance(self._polcor, float):
+            _text.append(f'P: {self._polcor[x,y]:.2f}')
+        if not isinstance(self._solang, float):
+            _text.append(f'S: {self._solang[x,y]:.2f}')
+        #if not isinstance(self._deltadd, float):
+        #    _text.append(f'log10(\u03B4d/d): {self._deltadd[x,y]:.2f}')
+        self.cor_label.setText('\n'.join(_text))
 
     """
     def update_menu_entries(self):
