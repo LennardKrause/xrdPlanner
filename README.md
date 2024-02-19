@@ -60,7 +60,7 @@ P_{ij} = 1 - [p (\vec{v}_{ij} \cdot  \vec{e}_x)^2+(1-p) (\vec{v}_{ij} \cdot  \ve
  - $p$ = $0.0$ *vertical polarisation*
 
 where $p$ is the polarisation factor, $\vec{v}_{ij}$ is the normalised vector coordinate of the $ij^{th}$ pixel, and $\vec{e}_x$ and $\vec{e}_y$ are the horizontal and vertical basis vectors.
-**NB:** The polarisation factor differs from the pyFAI convention, which goes from -1 to 1 rather than from 0 to 1.
+**NB:** The polarisation factor differs from the pyFAI convention, which goes from -1 to 1 rather than from 0 to 1, such that $p=(p _{pyFAI}+1)/2$  
 
 ## Solid-angle
 The solid-angle correction factor is defined as the normalized reciprocal of the cubed length of the vector pointing from the sample position to the $ih^{th}$ pixel.
