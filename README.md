@@ -63,10 +63,11 @@ where $p$ is the polarisation factor, $\vec{v}_{ij}$ is the normalised vector co
 **NB:** The polarisation factor differs from the pyFAI convention, which goes from -1 to 1 rather than from 0 to 1, such that $p=(p _{pyFAI}+1)/2$  
 
 ## Solid-angle
-The solid-angle correction factor is defined as the normalized reciprocal of the cubed length of the vector pointing from the sample position to the $ih^{th}$ pixel.
+The solid-angle correction factor $S_{ij}$ is defined as the normalized reciprocal of the cubed length of the vector $v_{ij}$ pointing from the sample position to the detector pixel $p_{ij}$.
 ```math
 S_{ij} = \left(\frac{|\vec{v}_{ij}|}{SDD}\right)^{-3}
 ```
+where $SDD$ is the sample to detector distance.
 
 ## Use pre-set beamline settings files:
   - Download a settings file from here (e.g. settings/DanMAX.json).
@@ -150,6 +151,7 @@ S_{ij} = \left(\frac{|\vec{v}_{ij}|}{SDD}\right)^{-3}
 
 | Key        | Action                    |
 | ---------- | ------------------------- |
+| F1         | Show About window         |
 | #          | *Display units*           |
 | t          | 2-Theta                   |
 | d          | d-spacing                 |
@@ -159,6 +161,7 @@ S_{ij} = \left(\frac{|\vec{v}_{ij}|}{SDD}\right)^{-3}
 | p          | Show polarisation         |
 | a          | Show solid angle          |
 | h          | Highlight / Transparency  |
+| u          | Toggle unit hover display |
 | #          | *Cycle colormaps*         |
 | c          | Next                      |
 | Shift + c  | Previous                  |
