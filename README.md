@@ -89,10 +89,14 @@ where $SDD$ is the sample to detector distance.
   - **slider_label_xxxx** (ener, dist, rota, voff, hoff, tilt, bsdx) accept any string to customise the labels for the sliders.
 
 ## Latest updates:
-  - 2024-02-17 Bugfix: Fixed crash on importing settings files (Thanks to Andy).
+  - 2024-05-02 Update: Added the option to calculate the [resolution function](https://doi.org/10.1107/S2053273321007506) (as FWHM, H) for powder diffraction with area detectors (Thanks Stefano).
+  - 2024-05-02 Update: Automatic label placement (conic_label_auto, default=True).
+  - 2024-05-02 Update: Dynamic cones try to keep the number of visible conics constant (conic_tth_auto, default=True).
+  - 2024-05-02 Update: Current colors are displayed in the export window and a colorpicker is used.
+  - 2024-02-17 Bugfix: Fixed crash on importing settings files (Thanks Andy).
   - 2024-02-16 Update: Added a unit value at mouse position (hover) to the overlay.
   - 2024-02-09 Update: Updated the About window with links to github and the publication.
-  - 2024-02-08 Bugfix: Fixed crash on cif drag/drop (Thanks to Mads).
+  - 2024-02-08 Bugfix: Fixed crash on cif drag/drop (Thanks Mads).
 
 <details>
 <summary>Older updates</summary>
