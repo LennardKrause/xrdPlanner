@@ -16,9 +16,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # set path home
         self.path_home = os.path.dirname(__file__)
-
-        # add an icon
-        self.setWindowIcon(QtGui.QIcon(':/icons/xrdPlanner.png'))
         #self.setMouseTracking(True)
 
         # enable antialiasing
@@ -68,6 +65,11 @@ class MainWindow(QtWidgets.QMainWindow):
         # the settings parameter keys
         # to their description
         self.get_tooltips()
+
+        # get X-ray attenuation lengths
+        # for the FWHM / detector sensor
+        # thickness calculation
+        self.get_att_lengths()
 
         # menubar is displayed within the main window on Windows
         # so we need to make space for it
@@ -123,8 +125,11 @@ class MainWindow(QtWidgets.QMainWindow):
         # initialize the screen
         self.init_screen()
 
+        # add an icon
+        self.setWindowIcon(self.icon)
+
         # disable/reset delta_d/d toggles
-        #self.action_funct_deltadd_show.setEnabled(False)
+        self.action_funct_fwhm_show.setEnabled(False)
 
         # add the slider frame
         # this calls draw_conics(), 
@@ -229,7 +234,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # disable pan/zoom
             self.ax.setMouseEnabled(x=True, y=True)
             # disable right click  context menu
-            self.ax.setMenuEnabled(True)
+            #self.ax.setMenuEnabled(True)
 
         # define font to label conics
         font = QtGui.QFont()
@@ -240,7 +245,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.patches = {'beamcenter':None,
                         'beamstop':None,
                         'overlay':None,
-                        #'deltadd':None,
+                        #'fwhm':None,
+                        #'isocurve':None,
                         'poni':None,
                         'bs_label':None,
                         'conic':[],
@@ -268,13 +274,23 @@ class MainWindow(QtWidgets.QMainWindow):
             self.patches['reference'][i].sigClicked.connect(self.show_tooltip)
             self.patches['reference'][i].name = None
 
-        # add isocurve for delta d/d
-        #self.patches['deltadd'] = QtWidgets.QGraphicsEllipseItem()
-        #_pen = pg.mkPen((255,255,255,255), width=self.plo.conic_linewidth, style=QtCore.Qt.PenStyle.DashLine)
-        #_pen.setCapStyle(QtCore.Qt.PenCapStyle.FlatCap)
-        #_pen.setDashPattern([4,8])
-        #self.patches['deltadd'].setPen(_pen)
-        #self.ax.addItem(self.patches['deltadd'])
+        # # add isocurve for delta d/d
+        # self.patches['isocurve'] = QtWidgets.QGraphicsEllipseItem()
+        # _pen = pg.mkPen((255,255,255,255), width=self.plo.conic_linewidth, style=QtCore.Qt.PenStyle.DashLine)
+        # _pen.setCapStyle(QtCore.Qt.PenCapStyle.FlatCap)
+        # _pen.setDashPattern([4,8])
+        # self.patches['isocurve'].setPen(_pen)
+        # self.ax.addItem(self.patches['isocurve'])
+
+        # self.patches['fwhm'] = pg.ImageItem()
+        # self.patches['fwhm'].hoverEvent = self.hoverEvent
+        # self.ax.addItem(self.patches['fwhm'])
+        # # set overlay colors
+        # _high = QtGui.QColor(self.plot_bg_color)
+        # _high.setAlphaF(0.0)
+        # cm = pg.ColorMap(pos=[0.0,1.0], color=['green', _high])
+        # cm.setMappingMode('clip')
+        # self.patches['fwhm'].setColorMap(cm)
 
         # add empty plot per contour line
         for i in range(self.plo.conic_tth_num):
@@ -526,19 +542,19 @@ class MainWindow(QtWidgets.QMainWindow):
         ####################
         # VIEW - FUNCTIONS #
         ####################
-        #menu_functions = menu_view.addMenu('Functions')
-        # set deltadd parameters toggle
-        #self.action_funct_deltadd_set = QtGui.QAction('Setup \u03B4d/d', self)
-        #self.set_menu_action(self.action_funct_deltadd_set, self.window_function_deltadd)
-        #menu_functions.addAction(self.action_funct_deltadd_set)
-        # show deltadd toggle
-        #self.action_funct_deltadd_show = QtGui.QAction('Show \u03B4d/d', self, checkable=True)
-        #self.set_menu_action(self.action_funct_deltadd_show, self.toggle_function_deltadd)
-        #if self.plo.show_deltadd:
-        #    self.action_funct_deltadd_show.setChecked(True)
-        #else:
-        #    self.action_funct_deltadd_show.setChecked(False)
-        #menu_functions.addAction(self.action_funct_deltadd_show)
+        menu_functions = menu_view.addMenu('Functions')
+        #set fwhm parameters toggle
+        self.action_funct_fwhm_set = QtGui.QAction('Setup FWHM', self)
+        self.set_menu_action(self.action_funct_fwhm_set, self.window_function_fwhm)
+        menu_functions.addAction(self.action_funct_fwhm_set)
+        #show fwhm toggle
+        self.action_funct_fwhm_show = QtGui.QAction('Show FWHM', self, checkable=True)
+        self.set_menu_action(self.action_funct_fwhm_show, self.toggle_function_fwhm)
+        if self.plo.show_fwhm:
+           self.action_funct_fwhm_show.setChecked(True)
+        else:
+           self.action_funct_fwhm_show.setChecked(False)
+        menu_functions.addAction(self.action_funct_fwhm_show)
 
         ############
         # SETTINGS #
@@ -607,6 +623,9 @@ class MainWindow(QtWidgets.QMainWindow):
         action_about = QtGui.QAction('xrdPlanner', self)
         self.set_menu_action(action_about, self.show_about_window)
         menu_help.addAction(action_about)
+        action_geometry = QtGui.QAction('Geometry conventions', self)
+        self.set_menu_action(action_geometry, self.show_geometry_window)
+        menu_help.addAction(action_geometry)
 
     def init_unit_label(self):
         font = QtGui.QFont()
@@ -625,7 +644,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cor_label.setFont(font)
         self.ax.addItem(self.cor_label)
         self.cor_label.hide()
-        self.cor_label.setToolTip('Correction factors:\nP: Polarisation\nS: Solid angle')
+        self.cor_label.setToolTip('P: Polarisation\nS: Solid angle\nF: FWHM [\u00B0]')
         self.cor_label.setPos(self.xdim, -self.ydim)
 
     def apply_theme(self, use_dark, redraw=False):
@@ -641,23 +660,26 @@ class MainWindow(QtWidgets.QMainWindow):
             _highlight_text = _color_dark.darker(150)
         # define color palette
         if use_dark:
+            # icon
+            self.pixmap = QtGui.QPixmap(':/icons/xrdPlanner_dark')
+            self.icon = QtGui.QIcon(':/icons/xrdPlanner_dark')
             # reference contour
-            self.conic_label_fill = self.thm.dark_conic_label_fill
-            self.conic_ref_color = self.thm.dark_conic_ref_color
-            self.det_module_color = self.thm.dark_det_module_color
-            self.det_module_fill = self.thm.dark_det_module_fill
+            self.conic_label_fill = QtGui.QColor(self.thm.dark_conic_label_fill)
+            self.conic_ref_color = QtGui.QColor(self.thm.dark_conic_ref_color)
+            self.det_module_color = QtGui.QColor(self.thm.dark_det_module_color)
+            self.det_module_fill = QtGui.QColor(self.thm.dark_det_module_fill)
             # general
-            self.plot_bg_color = self.thm.dark_plot_bg_color
-            self.beamstop_color = self.thm.dark_beamstop_color
-            self.beamstop_edge_color = self.thm.dark_beamstop_edge_color
-            self.unit_label_color = self.thm.dark_unit_label_color
-            self.unit_label_fill = self.thm.dark_unit_label_fill
-            self.overlay_threshold_color = self.thm.dark_overlay_threshold_color
+            self.plot_bg_color = QtGui.QColor(self.thm.dark_plot_bg_color)
+            self.beamstop_color = QtGui.QColor(self.thm.dark_beamstop_color)
+            self.beamstop_edge_color = QtGui.QColor(self.thm.dark_beamstop_edge_color)
+            self.unit_label_color = QtGui.QColor(self.thm.dark_unit_label_color)
+            self.unit_label_fill = QtGui.QColor(self.thm.dark_unit_label_fill)
+            self.overlay_threshold_color = QtGui.QColor(self.thm.dark_overlay_threshold_color)
             # slider
-            self.slider_border_color = self.thm.dark_slider_border_color
-            self.slider_bg_color = self.thm.dark_slider_bg_color
-            self.slider_bg_hover = self.thm.dark_slider_bg_hover
-            self.slider_label_color = self.thm.dark_slider_label_color
+            self.slider_border_color = QtGui.QColor(self.thm.dark_slider_border_color)
+            self.slider_bg_color = QtGui.QColor(self.thm.dark_slider_bg_color)
+            self.slider_bg_hover = QtGui.QColor(self.thm.dark_slider_bg_hover)
+            self.slider_label_color = QtGui.QColor(self.thm.dark_slider_label_color)
             # palette
             palette = QtGui.QPalette()
             palette.setColor(QtGui.QPalette.ColorRole.Window,          _color_dark)
@@ -674,24 +696,26 @@ class MainWindow(QtWidgets.QMainWindow):
             palette.setColor(QtGui.QPalette.ColorRole.ToolTipBase,     _color_dark)
             palette.setColor(QtGui.QPalette.ColorRole.ToolTipText,     _color_light)
         else:
+            # icon
+            self.pixmap = QtGui.QPixmap(':/icons/xrdPlanner')
+            self.icon = QtGui.QIcon(':/icons/xrdPlanner')
             # reference contour
-            self.conic_label_fill = self.thm.light_conic_label_fill
-            self.conic_ref_color = self.thm.light_conic_ref_color
-            self.det_module_color = self.thm.light_det_module_color
-            self.det_module_fill = self.thm.light_det_module_fill
+            self.conic_label_fill = QtGui.QColor(self.thm.light_conic_label_fill)
+            self.conic_ref_color = QtGui.QColor(self.thm.light_conic_ref_color)
+            self.det_module_color = QtGui.QColor(self.thm.light_det_module_color)
+            self.det_module_fill = QtGui.QColor(self.thm.light_det_module_fill)
             # general
-            self.plot_bg_color = self.thm.light_plot_bg_color
-            self.beamstop_color = self.thm.light_beamstop_color
-            self.beamstop_edge_color = self.thm.light_beamstop_edge_color
-            self.unit_label_color = self.thm.light_unit_label_color
-            self.unit_label_fill = self.thm.light_unit_label_fill
-            self.overlay_threshold_color = self.thm.light_overlay_threshold_color
+            self.plot_bg_color = QtGui.QColor(self.thm.light_plot_bg_color)
+            self.beamstop_color = QtGui.QColor(self.thm.light_beamstop_color)
+            self.beamstop_edge_color = QtGui.QColor(self.thm.light_beamstop_edge_color)
+            self.unit_label_color = QtGui.QColor(self.thm.light_unit_label_color)
+            self.unit_label_fill = QtGui.QColor(self.thm.light_unit_label_fill)
+            self.overlay_threshold_color = QtGui.QColor(self.thm.light_overlay_threshold_color)
             # slider
-            self.slider_border_color = self.thm.light_slider_border_color
-            self.slider_bg_color = self.thm.light_slider_bg_color
-            self.slider_bg_hover = self.thm.light_slider_bg_hover
-            self.slider_label_color = self.thm.light_slider_label_color
-
+            self.slider_border_color = QtGui.QColor(self.thm.light_slider_border_color)
+            self.slider_bg_color = QtGui.QColor(self.thm.light_slider_bg_color)
+            self.slider_bg_hover = QtGui.QColor(self.thm.light_slider_bg_hover)
+            self.slider_label_color = QtGui.QColor(self.thm.light_slider_label_color)
             # palette
             palette = QtGui.QPalette()
             palette.setColor(QtGui.QPalette.ColorRole.Window,          _color_light)
@@ -752,15 +776,15 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_overlay_warn.setChecked(False)
         self.redraw_canvas()
 
-    #def toggle_function_deltadd(self):
-    #    if not self.action_funct_deltadd_show.isEnabled():
-    #        return
-    #    self.plo.show_deltadd = not self.plo.show_deltadd
-    #    if self.plo.show_deltadd:
-    #        self.action_funct_deltadd_show.setChecked(True)
-    #    else:
-    #        self.action_funct_deltadd_show.setChecked(False)
-    #    self.redraw_canvas()
+    def toggle_function_fwhm(self):
+       if not self.action_funct_fwhm_show.isEnabled():
+           return
+       self.plo.show_fwhm = not self.plo.show_fwhm
+       if self.plo.show_fwhm:
+           self.action_funct_fwhm_show.setChecked(True)
+       else:
+           self.action_funct_fwhm_show.setChecked(False)
+       self.redraw_canvas()
 
     #############
     #   REDO    #
@@ -900,13 +924,15 @@ class MainWindow(QtWidgets.QMainWindow):
         # - geometry contour section - 
         plo.conic_tth_min = 5               # [int]    Minimum 2-theta contour line
         plo.conic_tth_max = 100             # [int]    Maximum 2-theta contour line
-        plo.conic_tth_num = 15              # [int]    Number of contour lines
+        plo.conic_tth_num = 12              # [int]    Number of contour lines
+        plo.conic_tth_auto = True           # [bool]   Dynamic contour levels
         plo.beamcenter_marker = 'o'         # [marker] Beamcenter marker
         plo.beamcenter_size = 6             # [int]    Beamcenter size
         plo.poni_marker = 'x'               # [marker] Poni marker
         plo.poni_size = 8                   # [int]    Poni size
         plo.conic_linewidth = 2.0           # [float]  Contour linewidth (lw)
         plo.conic_label_size = 14           # [int]    Contour labelsize
+        plo.conic_label_auto = True         # [bool]   Dynamic label positions
         # - reference contour section - 
         plo.conic_ref_linewidth = 2.0       # [float]  Reference contour linewidth
         plo.conic_ref_num = 250             # [int]    Number of reference contours
@@ -932,12 +958,13 @@ class MainWindow(QtWidgets.QMainWindow):
         plo.overlay_resolution = 300        # [int]    Overlay resolution
         plo.overlay_toggle_warn = True      # [bool]   Overlay warn color threshold
         # - extra functions -
-        #plo.show_deltadd = False            # [bool]   Show delta_d/d function
-        #plo.sensor_thickness = 100e-6       # [float]  Detector sensor thickness [m]
-        #plo.beam_divergence = 10e-6         # [float]  X-ray beam divergence [rad]
-        #plo.scattering_diameter = 100e-6    # [float]  Scattering volume diameter [m]
-        #plo.energy_resolution = 100e-6      # [float]  X-ray beam resolution [eV/keV]
-        #plo.funct_deltadd_thresh = -4       # [float]  Log10 threshold for delta d/d contour
+        plo.show_fwhm = False               # [bool]   Show delta_d/d function
+        plo.sensor_thickness = 1000e-6      # [float]  Detector sensor thickness [m]
+        plo.sensor_material = 'CdTe'        # [str]    Detector sensor material
+        plo.beam_divergence = 10e-6         # [float]  X-ray beam divergence [rad]
+        plo.scattering_diameter = 100e-6    # [float]  Scattering volume diameter [m]
+        plo.energy_resolution = 1.4e-4      # [float]  X-ray beam resolution [eV/keV]
+        #plo.funct_fwhm_thresh = 1e-3       # 
         # - slider section - 
         plo.slider_margin = 12              # [int]    Slider frame top margin
         plo.slider_border_width = 1         # [int]    Slider frame border width
@@ -1223,6 +1250,19 @@ class MainWindow(QtWidgets.QMainWindow):
             'size' : {'4343':(1,1)},
             }
         
+        #############################
+        # Specifications for CITIUS #
+        #############################
+        detectors['CITIUS (TEST)'] = {
+            'hms' : 52.85,  # [mm]  Module size (horizontal) 728
+            'vms' : 27.88,  # [mm]  Module size (vertical) 384
+            'pxs' : 72.6e-3,# [mm]  Pixel size
+            'hgp' : 22,      # [pix] Gap between modules (horizontal)
+            'vgp' : 36,      # [pix] Gap between modules (vertical)
+            'cbh' : 0,      # [mm]  Central beam hole
+            'size' : {'20.2':(6,12)},
+            }
+        
         # make file dump
         if not os.path.exists(self.path_detdb) or reset:
             with open(self.path_detdb, 'w') as wf:
@@ -1380,9 +1420,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.plo.set_debug:
             print('DEBUG: Check tooltips for completeness')
             _d = {'geo':self.geo.__dict__,
-                'plo':self.plo.__dict__,
-                'thm':self.thm.__dict__,
-                'lmt':self.lmt.__dict__}
+                  'plo':self.plo.__dict__,
+                  'thm':self.thm.__dict__,
+                  'lmt':self.lmt.__dict__}
             for k,v in _d.items():
                 for i in v.keys():
                     if i not in self.tooltips[k].keys():
@@ -1437,8 +1477,8 @@ class MainWindow(QtWidgets.QMainWindow):
         _comp_shift = -(self.geo.voff - self.geo.dist * np.tan(_omega) - np.deg2rad(self.geo.tilt) * self.geo.dist)
 
         # overlay
-        if self.plo.show_polarisation or self.plo.show_solidangle or self.plo.show_unit_hover:# or self.plo.show_deltadd:
-            _grd, self._tth, self._polcor, self._solang = self.calc_overlays(_omega, res=self.plo.overlay_resolution, pol=self.plo.polarisation_fac)
+        if self.plo.show_polarisation or self.plo.show_solidangle or self.plo.show_unit_hover or self.plo.show_fwhm:
+            _grd, self._tth, self._polcor, self._solang, self._fwhm = self.calc_overlays(_omega, res=self.plo.overlay_resolution, pol=self.plo.polarisation_fac)
             self.patches['overlay'].setImage(_grd * self._polcor * self._solang,
                                              autoLevels=False,
                                              levels=[0.0,1.0],
@@ -1446,12 +1486,6 @@ class MainWindow(QtWidgets.QMainWindow):
                                                    -self.ydim,
                                                     self.xdim * 2,
                                                     self.ydim * 2))
-            #if self.plo.show_deltadd:
-            #    _poni_shift = -(self.geo.voff - np.deg2rad(self.geo.tilt) * self.geo.dist)
-            #    self.patches['isocurve'].setRect(self.geo.hoff - self._deltadd_width/2,
-            #                                     _poni_shift - self._deltadd_width/2,
-            #                                     self._deltadd_width,
-            #                                     self._deltadd_width)
         else:
             self.patches['overlay'].setImage(None)
             self.cor_label.hide()
@@ -1469,23 +1503,38 @@ class MainWindow(QtWidgets.QMainWindow):
 
             # calculate the conic section corresponding to the theta angle
             # :returns False is conic is outside of visiblee area
-            x, y, label_pos = self.calc_conic(_omega, bs_theta, steps=self.plo.conic_steps)
+            x, y = self.calc_conic(_omega, bs_theta, steps=self.plo.conic_steps)
             if x is False:
                 self.patches['beamstop'].setVisible(False)
                 self.patches['bs_label'].setVisible(False)
             else:
-                # plot the conic section
-                self.patches['beamstop'].setData(x, y, fillLevel=y.max())
-                self.patches['beamstop'].setVisible(True)
+                # figure out the label positions
+                if self.plo.conic_label_auto:
+                    label_pos = self.calc_label_pos_auto(x, y)
+                else:
+                    label_pos = self.calc_label_pos_static(x, y, self.xdim, self.ydim, _omega, bs_theta)
+                
+                # continue if label can be placed
+                if not label_pos is False:
+                    # plot the conic section
+                    self.patches['beamstop'].setData(x, y, fillLevel=y.max())
+                    self.patches['beamstop'].setVisible(True)
 
-                _unit = self.calc_unit(bs_theta)
-                self.patches['bs_label'].setPos(self.geo.hoff, label_pos)
-                self.patches['bs_label'].setText(f'{_unit:.2f}')
-                self.patches['bs_label'].setVisible(True)
+                    _unit = self.calc_unit(bs_theta)
+                    self.patches['bs_label'].setPos(*label_pos)
+                    self.patches['bs_label'].setText(f'{_unit:.2f}')
+                    self.patches['bs_label'].setVisible(True)
         else:
             self.patches['beamstop'].setVisible(False)
             self.patches['bs_label'].setVisible(False)
-
+        
+        # calculate the maximum resolution for the given geometry
+        if self.plo.conic_tth_auto:
+            theta_max = np.rad2deg(self.calc_max_resolution(m=0.90))
+            # make new array of 2theta values
+            self.cont_geom_num = np.linspace(theta_max/self.plo.conic_tth_num, theta_max, self.plo.conic_tth_num)
+        
+        # plot conics at given 2theta values
         for _n, _ttd in enumerate(self.cont_geom_num):
             self.patches['conic'][_n].setVisible(False)
             self.patches['labels'][_n].setVisible(False)
@@ -1497,16 +1546,25 @@ class MainWindow(QtWidgets.QMainWindow):
 
             # calculate the conic section corresponding to the theta angle
             # :returns False is conic is outside of visiblee area
-            x, y, label_pos = self.calc_conic(_omega, theta, steps=self.plo.conic_steps)
-            if x is False or len(x) == 0:
+            x, y = self.calc_conic(_omega, theta, steps=self.plo.conic_steps)
+            if x is False or x.size == 0:
+                continue
+
+            # figure out the label positions
+            if self.plo.conic_label_auto:
+                label_pos = self.calc_label_pos_auto(x, y)
+            else:
+                label_pos = self.calc_label_pos_static(x, y, self.xdim, self.ydim, _omega, theta)
+            # continue if label can be placed
+            if label_pos is False:
                 continue
 
             # plot the conic section
             self.patches['conic'][_n].setData(x, y, pen=pg.mkPen(self.cont_cmap.map(_f, mode='qcolor'), width=self.plo.conic_linewidth))
             self.patches['conic'][_n].setVisible(True)
-
+            
             _unit = self.calc_unit(theta)
-            self.patches['labels'][_n].setPos(self.geo.hoff, label_pos)
+            self.patches['labels'][_n].setPos(*label_pos)
             self.patches['labels'][_n].setText(f'{_unit:.2f}', color=self.cont_cmap.map(_f, mode='qcolor'))
             self.patches['labels'][_n].setVisible(True)
 
@@ -1539,7 +1597,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 
                 # calculate the conic section corresponding to the theta angle
                 # :returns False is conic is outside of visiblee area
-                x, y, _ = self.calc_conic(_omega, theta, steps=self.plo.conic_steps)
+                x, y = self.calc_conic(_omega, theta, steps=self.plo.conic_steps)
                 if x is False:
                     continue
 
@@ -1600,7 +1658,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # add margin to slightly extend
         # conics outside of visible area
         _xdim = self.xdim * 1.05
-        _ydim = self.ydim * 1.05
+        #_ydim = self.ydim * 1.05
         # evaluate the eccentricity and parameterise
         # the resulting conic accordingly
         if abs(ecc) == 0:
@@ -1659,28 +1717,11 @@ class MainWindow(QtWidgets.QMainWindow):
             y = y0 + (y1-y2)/2 - h * np.cosh(t)
         elif abs(ecc) >= 100:
             # line
-            t = np.linspace(-_xdim, _xdim, 2)
+            t = np.linspace(-_xdim, _xdim, steps)
             x = t
             y = y0 + np.ones(len(t)) * y1
-
-        # check if conic is visible
-        cx = np.argwhere((x >= -_xdim) & (x <= _xdim))
-        cy = np.argwhere((y >= -_ydim) & (y <= _ydim))
-        if len(cx) == 0 or len(cy) == 0:
-            # outside detector area
-            return False, False, False
         
-        # adjust the label position to maintain readibility
-        # this works for most cases but is not the most optimal solution yet
-        # OR: use the actual beam position to determine label position
-        # beam_pos_y = -(self.geo.voff + np.tan(np.deg2rad(self.geo.rota))*self.geo.dist)
-        if omega <= 0:
-            label_pos = max(y) if theta < np.pi/2 else min(y)
-        else:
-            label_pos = min(y) if theta < np.pi/2 else max(y)
-        
-        # return x, y and the label position
-        return x, y, label_pos
+        return x, y
 
     def calc_ref_from_cif(self, fpath):
         # called when a cif is dropped onto the window
@@ -1718,7 +1759,70 @@ class MainWindow(QtWidgets.QMainWindow):
         self.set_window_title()
 
         self.draw_reference()
-    
+
+    def calc_label_pos_auto(self, x, y):
+        # This tries to place labels as close as possible
+        #  to the horizontal center.
+        # Adjust the label position to maintain readibility
+        #  XX% of detector dimensions make sure the label 
+        #  stays within visible boundaries.
+        # Available label positions depend on the stepsize
+        #  used to calculate the conic section. E.g. finer
+        #  stepping makes labels follow the conics smoother.
+        _condition = np.nonzero((x >= -self.xdim*0.96)&
+                                (x <=  self.xdim*0.96)&
+                                (y >= -self.ydim*0.98)&
+                                (y <=  self.ydim*0.98))
+        # regions in x and y matching the condition
+        _visible_x = x[_condition]
+        _visible_y = y[_condition]
+        # check if conic is visible
+        if _visible_x.size == 0 and _visible_y.size == 0:
+            # outside visible area
+            return False
+        # if conic is not cut-off, use horizontal offset as x value.
+        # this makes the display is cleaner, as the positions otherwise
+        # rely on the sampling of the conic e.g. rough stepping.
+        if _visible_y.max() == y.max():
+            label_x = self.geo.hoff
+            label_y = _visible_y.max()
+        elif _visible_y.min() == y.min():
+            label_x = self.geo.hoff
+            label_y = _visible_y.min()
+        else:
+            # place label as close as possible to the horizontal center
+            # get the two smallest indices (absolute -> positive and negative).
+            # we don't know if the positive or the negative value is closer to
+            # the target so we get all possible four (2x, 2y) and find the best
+            # combination in the next step.
+            _sorted = abs(_visible_x - self.geo.hoff).argsort()[:4]
+            # get the index of the largest sum (-> upper right)
+            _visible = np.argmax(_visible_x[_sorted]+_visible_y[_sorted])
+            # get the index of the target value
+            _idx = _sorted[_visible]
+            # depending on the curvature use either maximum or
+            # minimum value as label y position.
+            label_x = _visible_x[_idx]
+            label_y = _visible_y[_idx]
+        return [label_x, label_y]
+        
+    def calc_label_pos_static(self, x, y, xdim, ydim, omega, theta):
+        # check if conic is visible
+        cx = np.argwhere((x >= -xdim) & (x <= xdim))
+        cy = np.argwhere((y >= -ydim) & (y <= ydim))
+        if len(cx) == 0 or len(cy) == 0:
+            # outside detector area
+            return False
+        # adjust the label position to maintain readibility
+        # this works for most cases but is not the most optimal solution yet
+        # OR: use the actual beam position to determine label position
+        # beam_pos_y = -(self.geo.voff + np.tan(np.deg2rad(self.geo.rota))*self.geo.dist)
+        if omega <= 0:
+            label_pos = [self.geo.hoff, max(y)] if theta < np.pi/2 else [self.geo.hoff, min(y)]
+        else:
+            label_pos = [self.geo.hoff, min(y)] if theta < np.pi/2 else [self.geo.hoff, max(y)]
+        return label_pos
+
     def show_tooltip(self, widget, event):
         if not widget.name or not self.cont_ref_hkl:
             event.ignore()
@@ -1763,7 +1867,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # POBI distance
             D_a = _res[2] * 1e-3 # m
             # 2theta - Angle between pixel, sample, and POBI
-            tth = np.arctan(R_a/D_a)
+            tth = np.arctan2(R_a,D_a)
             # remove very small values (tth < 0.057 deg) to avoid zero divide
             tth[tth < 1e-3] = np.nan
 
@@ -1787,13 +1891,15 @@ class MainWindow(QtWidgets.QMainWindow):
             sa = 1 / _mag**3
             sa = sa / np.max(sa)
         
-        """# delta d / d
-        dd_grid = 1.0
-        dd_width = 0.0
-        if self.plo.show_deltadd:
-            
-            c = self.plo.capillary_size
-            t = self.plo.scattering_diameter
+        # delta d / d
+        fwhm = 1.0
+        #fwhm_width = 0.0
+        if self.plo.show_fwhm:
+            c = self.plo.scattering_diameter
+            if len(self.att_lengths[self.plo.sensor_material]) > int(self.geo.ener):
+                t = min(self.plo.sensor_thickness, self.att_lengths[self.plo.sensor_material][int(self.geo.ener)])
+            else:
+                t = self.plo.sensor_thickness
             p = self.det.pxs * 1e-3
             phi = self.plo.beam_divergence
             dE_E = self.plo.energy_resolution
@@ -1806,37 +1912,42 @@ class MainWindow(QtWidgets.QMainWindow):
             # PONI distance
             D_a = self.geo.dist * 1e-3 # m
             # 2theta-alpha - Angle between pixel, sample, and PONI
-            _tth_a = np.arctan(R_a/D_a)
+            _tth_a = np.arctan2(R_a,D_a)
             # remove very small values (tth < 0.057 deg) to avoid zero divide
             _tth_a[_tth_a < 1e-3] = np.nan
             # estimate of the SDD spread (independent of rotation)
-            dD = np.sqrt(1/4 * (c**2 + t**2))
+            #dD = np.sqrt(1/4 * (c**2 + t**2))
             # estimate of the pixel radial spread in the detector plane
-            dR = np.sqrt(1/4*(c**2/(np.cos(_tth_a)**2)          \
-                            + p**2 + t**2*np.tan(_tth_a)**2     \
-                            + phi**2*D_a**2/(np.cos(_tth_a)**4) \
-                             )                                  \
-                        )
+            #dR = np.sqrt(1/4*(c**2/(np.cos(_tth_a)**2)          \
+            #                + p**2 + t**2*np.tan(_tth_a)**2     \
+            #                + phi**2*D_a**2/(np.cos(_tth_a)**4) \
+            #                 )                                  \
+            #            )
             
             # delta d over d
-            _dd = np.sqrt(1/4*np.tan(_tth_a/2)**(-2)                \
-                          * np.sin(_tth_a)**2 * np.cos(_tth_a)**2   \
-                          * ((dD/D_a)**2 + (dR/R_a)**2) + (dE_E)**2 \
-                          )
+            # _dd = np.sqrt(1/4*np.tan(_tth_a/2)**(-2)                \
+            #               * np.sin(_tth_a)**2 * np.cos(_tth_a)**2   \
+            #               * ((dD/D_a)**2 + (dR/R_a)**2) + (dE_E)**2 \
+            #               )
             # H2, FWHM
-            #_dd = 32*np.log(2)*( np.cos(_tth_a)**4/(16*D_a**2) \
+            A = 2*np.log(2) / D_a**2 * (p**2-2*t**2-c**2)
+            B = 2*np.log(2) / D_a**2 * (2*t**2 + 2*c**2)
+            C = 2*np.log(2) * phi**2
+            M = (4*np.sqrt(2*np.log(2)) * dE_E)**2 * ((1-np.cos(_tth_a))/(1+np.cos(_tth_a)))
+            X = np.cos(_tth_a)
+            H2 = A*X**4 + B*X**2 + C + M
+            # _h2 = 32*np.log(2)*( np.cos(_tth_a)**4/(16*D_a**2) \
             #             * ((np.tan(_tth_a)**2 \
             #             * (c**2 + 2*t**2) \
             #             + p**2 \
             #             + c**2/np.cos(_tth_a)**2 \
             #             + (D_a**2*phi**2)/np.cos(_tth_a)**4) ))
-            dd_grid = np.log10(_dd * 180**2 / np.pi**2)
-            _ra = R_a[dd_grid < self.plo.funct_deltadd_thresh]
-            if any(_ra):
-                dd_width = np.nanmin(_ra) * 2 * 1e3
-        """
+            fwhm = np.sqrt(H2)# * 180 / np.pi
+            #_ra = R_a[fwhm < self.plo.funct_fwhm_thresh]
+            #if any(_ra):
+            #    fwhm_width = np.nanmin(_ra) * 2 * 1e-3
 
-        return grd, tth, pc, sa#, dd_grid, dd_width
+        return grd, tth, pc, sa, fwhm#, fwhm_width
 
     def rot_100(self, a, cc=1):
         #Omega in radians
@@ -1847,57 +1958,116 @@ class MainWindow(QtWidgets.QMainWindow):
                          [0,  ca, sa],
                          [0, -sa, ca]])
 
-    def window_function_deltadd(self):
+    def window_function_fwhm(self):
+        # window to enter instrument/beam details
+        #
+        # Sensor thickness : Estimated *effective thickness* of the detector absorption layer
+        #                    depending on sensor material and incident wavelength
+        # Sensor material : currently Si, CdTe are available
+        # Divergence : Estimated beam divergence
+        # Energy resolution : Expected bandwidth of the incident X-ray beam
+        # Scattering volume : Intersection of the sample size and the beam size as the diameter
+        #
+        # - The effective thickness is calculated from the attenuation length of the detector sensor
+        #   material at the given energy and the sensor thickness. The smaller value is used.
+        # - Attenuation lengths are stored (up to 150 keV) and are retrieved by calling get_att_lengths()
         param_window = QtWidgets.QDialog()
-
-        param_dict = {'Detector':[(0, 'Sensor thickness', self.plo.sensor_thickness, 1e-6, '\u00B5m')],
-                      'Beam':[(1, 'Divergence', self.plo.beam_divergence, 1e-6, '\u00B5rad'),
-                              (2, 'Energy resolution', self.plo.energy_resolution, 1e-6, '\u00B5eV/keV')],
-                      'Sample':[(3, 'Scattering volume \u2300', self.plo.scattering_diameter, 1e-6, '\u00B5m')],
-                      'Display':[(4, 'Threshold', self.plo.funct_deltadd_thresh, 1, 'log10(\u03B4d/d)')]}
+        # dict: index: needed to identify the vars upon reassignment (window_function_fwhm_accept) and to link it to the tooltips
+        #       name: Display string
+        #       variable: the variable to use
+        #       exponent: exponent to display the value more intuitive
+        #       decimals: how many decimals to display
+        #       stepsize: single step size
+        #       unit: unit to display
+        param_dict = {'Detector':[(0, 'Sensor thickness', self.plo.sensor_thickness, 1e-6, 0, 1, '\u00B5m'),
+                                  (1, 'Sensor material', self.plo.sensor_material, 0, 0, 1, '')],
+                          'Beam':[(2, 'Divergence', self.plo.beam_divergence, 1e-6, 0, 1, '\u00B5rad'),
+                                  (3, 'Energy resolution \u0394E/E', self.plo.energy_resolution, 1e-4, 2, 0.1, '\u00B710\u207b\u2074')],
+                        'Sample':[(4, 'Scattering volume \u2300', self.plo.scattering_diameter, 1e-6, 0, 1, '\u00B5m')],}
+                      #'Display':[(5, 'FWHM threshold', self.plo.funct_fwhm_thresh, 1e-3, 'FWHM [m\u00B0]')]}
         param_dict_change = {}
-
+        # tooltip dictionary
+        tooltips = {0:'Estimated effective thickness of the detector absorption layer depending on sensor material and incident wavelength.',
+                    1:'Detector sensor layer material.',
+                    2:'Estimated beam divergence.',
+                    3:'Expected bandwidth of the incident X-ray beam.',
+                    4:'Intersection of the sample size and the beam size as the diameter.'}
+        # add user input spinboxes for the variables
+        #  - it uses doublespinboxes for all floats
+        #    and a combobox to choose the sensor material.
+        #    Distinction is made by setting the divisor to 0.
         layout = QtWidgets.QVBoxLayout()
         for title, entry in param_dict.items():
             box = QtWidgets.QGroupBox(title=title)
+            box.setStyleSheet("QGroupBox{font-weight:bold;}")
             box_layout = QtWidgets.QVBoxLayout()
             box_layout.setContentsMargins(0,0,0,0)
-            for idx, label, value, div, unit in entry:
+            for idx, label, value, div, decimals, step, unit in entry:
                 entry_box = QtWidgets.QFrame()
                 entry_layout = QtWidgets.QHBoxLayout()
-                box_combobox = QtWidgets.QSpinBox(singleStep=1, minimum=-10, maximum=1000, value=int(value/div))
-                entry_layout.addWidget(QtWidgets.QLabel(label))
+                entry_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+                if div > 0:
+                    box_combobox = QtWidgets.QDoubleSpinBox(decimals=decimals, singleStep=step, minimum=step, maximum=1000, value=value/div)
+                else:
+                    box_combobox = QtWidgets.QComboBox()
+                    box_combobox.addItems(self.att_lengths.keys())
+                    box_combobox.setCurrentIndex(box_combobox.findText(self.plo.sensor_material))
+                box_combobox.setToolTip(tooltips[idx])
+                entry_label = QtWidgets.QLabel(label)
+                entry_label.setToolTip(tooltips[idx])
+                entry_layout.addWidget(entry_label)
                 entry_layout.addWidget(box_combobox)
-                entry_layout.addWidget(QtWidgets.QLabel(unit))
+                entry_unit = QtWidgets.QLabel(unit)
+                entry_unit.setToolTip(tooltips[idx])
+                entry_layout.addWidget(entry_unit)
                 entry_box.setLayout(entry_layout)
                 box_layout.addWidget(entry_box)
                 param_dict_change[idx] = [box_combobox, div]
             box.setLayout(box_layout)
             layout.addWidget(box)
 
+        description = QtWidgets.QLabel(f'This feature is currently in <b>test phase</b>, feedback is very welcome!<br>\
+                                         The estimated FWHM (H, in degrees) is shown in the bottom right corner.')
+        description.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(description)
+        # Add the apply button
         button_box = QtWidgets.QDialogButtonBox()
         button_box.addButton(QtWidgets.QDialogButtonBox.StandardButton.Apply)
         button_box.setCenterButtons(True)
-        button_box.clicked.connect(lambda: self.window_function_deltadd_accept(param_dict_change, param_window))
+        button_box.clicked.connect(lambda: self.window_function_fwhm_accept(param_dict_change, param_window))
         layout.addWidget(button_box)
+        # Disclimer box info
+        citation_box = QtWidgets.QGroupBox()
+        citation_box.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        citation_box_layout = QtWidgets.QVBoxLayout()
+        citation_box_layout.setContentsMargins(6,6,6,6)
+        citation_box.setLayout(citation_box_layout)
+        citation = QtWidgets.QLabel(f'The interested user is referred to the article:<br>\
+                                      <b>On the resolution function for powder diffraction with area detectors</b><br>\
+                                      <a href="https://doi.org/10.1107/S2053273321007506">\
+                                      D. Chernyshov <i> et al., Acta Cryst.</i> (2021). <b>A77</b>, 497-505</a>')
+        citation.setOpenExternalLinks(True)
+        citation.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        citation_box_layout.addWidget(citation)
+        layout.addWidget(citation_box)
 
-        windowIcon = QtGui.QIcon()
-        windowIcon.addPixmap(QtGui.QPixmap(':/icons/xrdPlanner.png'))
-        
-        param_window.setWindowIcon(windowIcon)
+        param_window.setWindowIcon(self.icon)
         param_window.setLayout(layout)
         param_window.setFixedSize(param_window.sizeHint())
         param_window.exec()
     
-    def window_function_deltadd_accept(self, dict, window):
+    def window_function_fwhm_accept(self, dict, window):
+        # assign combo/spinbox values
+        # Index:[combo/spinbox widget, divisor]
         self.plo.sensor_thickness = round(dict[0][0].value() * dict[0][1], 6)
-        self.plo.beam_divergence = round(dict[1][0].value() * dict[1][1], 6)
-        self.plo.energy_resolution = round(dict[2][0].value() * dict[2][1], 6)
-        self.plo.capillary_size = round(dict[3][0].value() * dict[3][1], 6)
-        self.plo.funct_deltadd_thresh = round(dict[4][0].value() * dict[4][1], 6)
-        self.action_funct_deltadd_show.setEnabled(True)
-        self.plo.show_deltadd = False
-        self.toggle_function_deltadd()
+        self.plo.sensor_material = str(dict[1][0].currentText())
+        self.plo.beam_divergence = round(dict[2][0].value() * dict[2][1], 6)
+        self.plo.energy_resolution = round(dict[3][0].value() * dict[3][1], 6)
+        self.plo.scattering_diameter = round(dict[4][0].value() * dict[4][1], 6)
+        #self.plo.funct_fwhm_thresh = round(dict[5][0].value() * dict[5][1], 6)
+        self.action_funct_fwhm_show.setEnabled(True)
+        self.plo.show_fwhm = False
+        self.toggle_function_fwhm()
         window.close()
     
     #############
@@ -2101,23 +2271,42 @@ class MainWindow(QtWidgets.QMainWindow):
                         box.setMinimum(-1e9)
                         box.setMaximum(1e9)
                         return box
+                    elif isinstance(index.data(0), str) and index.data(0).startswith('#'):
+                        current_color = QtGui.QColor(index.data(0))
+                        box = QtWidgets.QColorDialog(current_color, parent)
+                        box.setOption(QtWidgets.QColorDialog.ColorDialogOption.ShowAlphaChannel, on=True)
+                        return box
                     else:
                         return super(MyTreeDelegate, self).createEditor(parent, option, index)
                 return None
             
+            def setModelData(self, editor, model, index):
+                if isinstance(editor, QtWidgets.QColorDialog):
+                    model.setData(index, editor.selectedColor().name(format=QtGui.QColor.NameFormat.HexArgb))
+                    model.setData(index.siblingAtColumn(2), QtGui.QBrush(editor.selectedColor()), QtCore.Qt.ItemDataRole.BackgroundRole)
+                else:
+                    return super(MyTreeDelegate, self).setModelData(editor, model, index)
+
         # Parameter tree widget
         self.tree_par = QtWidgets.QTreeWidget()
-        self.tree_par.setColumnCount(2)
-        self.tree_par.setHeaderLabels(['Parameter', 'Value'])
-        self.tree_par.header().setFont(font_header)
+        self.tree_par.setColumnCount(3)
+        #self.tree_par.setHeaderLabels(['Parameter', 'Value', '#'])
+        #self.tree_par.header().setFont(font_header)
+        self.tree_par.setHeaderHidden(True)
         self.tree_par.setAlternatingRowColors(True)
         self.tree_par.setItemDelegate(MyTreeDelegate())
         # det_bank and bs_list need some special treatment
         # to facilitate their editing
         dont_show = ['det_bank', 'bs_list']
+        # detailed header
+        translation = {'geo':'Geometry',
+                       'plo':'Plot layout',
+                       'thm':'Theme',
+                       'lmt':'Limits'}
         for section, values in {'geo':self.geo.__dict__, 'plo':self.plo.__dict__, 'thm':self.thm.__dict__, 'lmt':self.lmt.__dict__}.items():
-            item = QtWidgets.QTreeWidgetItem([str(section)])
+            item = QtWidgets.QTreeWidgetItem([translation[section]])
             item.setFont(0, font_header)
+            item.setText(1, section)
             #item.setFlags(QtCore.Qt.ItemFlag.ItemIsSelectable|QtCore.Qt.ItemFlag.ItemIsEnabled)
             for par, val in values.items():
                 if par in dont_show:
@@ -2128,6 +2317,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     child.setToolTip(0, self.tooltips[section][par])
                     child.setToolTip(1, self.tooltips[section][par])
                 child.setData(1, 2, val)
+                if isinstance(val, str) and val.startswith('#'):
+                    child.setBackground(2, QtGui.QBrush(QtGui.QColor(val)))
                 child.setFont(0, font_normal)
                 child.setFont(1, font_normal)
                 child.setFlags(item.flags()|QtCore.Qt.ItemFlag.ItemIsEditable)
@@ -2191,7 +2382,7 @@ class MainWindow(QtWidgets.QMainWindow):
         settings = dict()
         for i in range(self.tree_par.topLevelItemCount()):
             top = self.tree_par.topLevelItem(i)
-            key = top.data(0, 0)
+            key = top.data(1, 0)
             settings[key] = dict()
             for j in range(top.childCount()):
                 k = top.child(j).data(0, 0)
@@ -2237,19 +2428,18 @@ class MainWindow(QtWidgets.QMainWindow):
     #  UTILITY  #
     #############
     def show_about_window(self):
+        # Show popup window with short description,
+        # version number and links to relevant information
         msgBox = QtWidgets.QDialog()
         #msgBox.setWindowTitle('About')
         
-        windowIcon = QtGui.QIcon()
-        windowIcon.addPixmap(QtGui.QPixmap(':/icons/xrdPlanner.png'))
-        
+        # title font
         font_title = QtGui.QFont()
         font_title.setPointSize(48)
-        icon = QtWidgets.QLabel()
-        icon.setPixmap(QtGui.QPixmap(':/icons/xrdPlanner.png'))
         title = QtWidgets.QLabel(f'<b>xrdPlanner</b>')
         title.setFont(font_title)
         suptitle = QtWidgets.QLabel(f'<b>Version {xrdPlanner.__version__}</b> (released {xrdPlanner.__date__})')
+        # add information
         github = QtWidgets.QLabel(f'<br>A tool to project X-ray diffraction cones on a detector screen at different \
                                     geometries (tilt, rotation, offset) and X-ray energies. For more information visit \
                                     us on <a href="https://github.com/LennardKrause/xrdPlanner">Github</a>.')
@@ -2261,21 +2451,26 @@ class MainWindow(QtWidgets.QMainWindow):
         authors = QtWidgets.QLabel(f'<br><b>Authors:</b><br>{"<br>".join(xrdPlanner.__authors__)}')
         email = QtWidgets.QLabel(f'<br>Feedback? <a href="mailto:{xrdPlanner.__email__}?subject=xrdPlanner feedback">{xrdPlanner.__email__}</a>')
         email.setOpenExternalLinks(True)
-
+        path = QtWidgets.QLabel(f'<br>Open settings file <a href=file:///{self.path_settings}>location</a>')
+        path.setOpenExternalLinks(True)
+        # add widgets to layout
         box_layout = QtWidgets.QVBoxLayout()
         box_layout.setSpacing(0)
-        for widget in [title, suptitle, github, published, authors, email]:
+        for widget in [title, suptitle, github, published, authors, email, path]:
             box_layout.addWidget(widget)
-        
+        # box containing info
         box = QtWidgets.QGroupBox()
         box.setFlat(True)
         box.setLayout(box_layout)
-
+        # label containing the logo
+        icon = QtWidgets.QLabel()
+        icon.setPixmap(self.pixmap.scaledToHeight(box.sizeHint().height(), mode=QtCore.Qt.TransformationMode.SmoothTransformation))
+        # add both to the window layout
         layout = QtWidgets.QHBoxLayout()
         layout.addWidget(icon)
         layout.addWidget(box)
-
-        msgBox.setWindowIcon(windowIcon)
+        # finish the window and make it unresizable
+        msgBox.setWindowIcon(self.icon)
         msgBox.setLayout(layout)
         msgBox.setFixedSize(msgBox.sizeHint())
         msgBox.exec()
@@ -2317,7 +2512,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def set_menu_action(self, action, target, *args):
         action.triggered.connect(lambda: target(*args))
 
-    def calc_unit(self, tth, return_dict=False):
+    def calc_unit(self, tth):
         # calc_unit expects 2-Theta in radians
 
         # Conversion factor keV to Angstrom: 12.398
@@ -2326,11 +2521,164 @@ class MainWindow(QtWidgets.QMainWindow):
         # d-spacing: l = 2 d sin(t) -> 1/2(sin(t)/l)
         dsp = 1/(2*stl)
         units = {0:np.rad2deg(tth), 1:dsp, 2:stl*4*np.pi, 3:stl}
-        if return_dict:
-            return units
-        else:
-            return units[self.geo.unit]
+        return units[self.geo.unit]
 
+    def get_att_lengths(self):
+        # X-ray attenuation lengths z for Si and CdTe in meter [m] where z = ln(1/e)/mu
+        # calculated in 1 keV steps from 1-150 keV
+        # table values from Chantler (2000) https://doi.org/10.1063/1.1321055
+        # calculated using the xraydb python module https://xraypy.github.io/XrayDB/
+        self.att_lengths = {'Si':[2.92336338e-06, 1.52940940e-06, 4.41817449e-06, 9.68094927e-06,
+                                  1.81408951e-05, 3.02711037e-05, 4.66249577e-05, 6.77473199e-05,
+                                  9.52638566e-05, 1.30549774e-04, 1.73447018e-04, 2.24595659e-04,
+                                  2.84605387e-04, 3.54031165e-04, 4.33380209e-04, 5.23140541e-04,
+                                  6.23712068e-04, 7.35455743e-04, 8.58680607e-04, 9.93585970e-04,
+                                  1.14037836e-03, 1.29916870e-03, 1.46997950e-03, 1.65282867e-03,
+                                  1.84755219e-03, 2.05413078e-03, 2.27435657e-03, 2.51166980e-03,
+                                  2.76076718e-03, 3.02154479e-03, 3.29339416e-03, 3.57595496e-03,
+                                  3.86839569e-03, 4.17070154e-03, 4.48147168e-03, 4.80065791e-03,
+                                  5.12767462e-03, 5.46137164e-03, 5.80102998e-03, 6.15160747e-03,
+                                  6.50892811e-03, 6.87076056e-03, 7.23575505e-03, 7.60377581e-03,
+                                  7.97432820e-03, 8.34584473e-03, 8.71928990e-03, 9.09192353e-03,
+                                  9.46569452e-03, 9.83772142e-03, 1.02072666e-02, 1.05776192e-02,
+                                  1.09433726e-02, 1.13091543e-02, 1.16704952e-02, 1.20265003e-02,
+                                  1.23811631e-02, 1.27324096e-02, 1.30769437e-02, 1.34176491e-02,
+                                  1.37548957e-02, 1.40888666e-02, 1.44155703e-02, 1.47396457e-02,
+                                  1.50576116e-02, 1.53688649e-02, 1.56783348e-02, 1.59792892e-02,
+                                  1.62758741e-02, 1.65681895e-02, 1.68560238e-02, 1.71398554e-02,
+                                  1.74122248e-02, 1.76875177e-02, 1.79512540e-02, 1.82145339e-02,
+                                  1.84671438e-02, 1.87236452e-02, 1.89677703e-02, 1.92079643e-02,
+                                  1.94519568e-02, 1.96857927e-02, 1.99143713e-02, 2.01393629e-02,
+                                  2.03608585e-02, 2.05788754e-02, 2.07833706e-02, 2.09941098e-02,
+                                  2.12017351e-02, 2.14014048e-02, 2.15968609e-02, 2.17951736e-02,
+                                  2.19821326e-02, 2.21717840e-02, 2.23511828e-02, 2.25366433e-02,
+                                  2.27091166e-02, 2.28903416e-02, 2.30570644e-02, 2.32331077e-02,
+                                  2.33946370e-02, 2.35541564e-02, 2.37235475e-02, 2.38780490e-02,
+                                  2.40302885e-02, 2.41803970e-02, 2.43399625e-02, 2.44882422e-02,
+                                  2.46323882e-02, 2.47746094e-02, 2.49149003e-02, 2.50533840e-02,
+                                  2.51901681e-02, 2.53252522e-02, 2.54586507e-02, 2.55903974e-02,
+                                  2.57204103e-02, 2.58490340e-02, 2.59762024e-02, 2.61018936e-02,
+                                  2.62261777e-02, 2.63492097e-02, 2.64707961e-02, 2.65910939e-02,
+                                  2.67101422e-02, 2.68280390e-02, 2.69448830e-02, 2.70602934e-02,
+                                  2.71637201e-02, 2.72706288e-02, 2.73828591e-02, 2.74939145e-02,
+                                  2.76039513e-02, 2.77130685e-02, 2.78212863e-02, 2.79285825e-02,
+                                  2.80224089e-02, 2.81218802e-02, 2.82264203e-02, 2.83300579e-02,
+                                  2.84220811e-02, 2.85159760e-02, 2.86172018e-02, 2.87175212e-02,
+                                  2.88171887e-02, 2.89147878e-02, 2.89995540e-02, 2.90922933e-02,
+                                  2.91891453e-02, 2.92852862e-02],
+                          'CdTe':[8.86140064e-08, 4.41597213e-07, 1.15951587e-06, 8.36374589e-07,
+                                  8.36034310e-07, 1.32724815e-06, 1.97362567e-06, 2.79221097e-06,
+                                  3.79736962e-06, 5.07172559e-06, 6.58646052e-06, 8.34536221e-06,
+                                  1.03633319e-05, 1.26445947e-05, 1.51992203e-05, 1.80585164e-05,
+                                  2.12380712e-05, 2.47559111e-05, 2.86220163e-05, 3.28393095e-05,
+                                  3.74211141e-05, 4.23847110e-05, 4.77396937e-05, 5.34604046e-05,
+                                  5.95357580e-05, 6.58583493e-05, 2.02635396e-05, 2.23180704e-05,
+                                  2.45073128e-05, 2.68096054e-05, 2.92163420e-05, 1.99269432e-05,
+                                  2.15332477e-05, 2.32726190e-05, 2.51068287e-05, 2.70499442e-05,
+                                  2.90850735e-05, 3.12143579e-05, 3.34390888e-05, 3.57606328e-05,
+                                  3.81810110e-05, 4.07109020e-05, 4.33566740e-05, 4.61081874e-05,
+                                  4.89663832e-05, 5.19342068e-05, 5.50092594e-05, 5.81952784e-05,
+                                  6.14950533e-05, 6.49069814e-05, 6.84326118e-05, 7.20745366e-05,
+                                  7.58320671e-05, 7.97392476e-05, 8.37930712e-05, 8.79696403e-05,
+                                  9.22722203e-05, 9.66991799e-05, 1.01254296e-04, 1.05935695e-04,
+                                  1.10745003e-04, 1.15686534e-04, 1.20756232e-04, 1.25977939e-04,
+                                  1.31365089e-04, 1.36890012e-04, 1.42551567e-04, 1.48351972e-04,
+                                  1.54290824e-04, 1.60366939e-04, 1.66584684e-04, 1.72943591e-04,
+                                  1.79440083e-04, 1.86083525e-04, 1.92866175e-04, 1.99789869e-04,
+                                  2.06859516e-04, 2.14074597e-04, 2.21432043e-04, 2.28971821e-04,
+                                  2.36785318e-04, 2.44789163e-04, 2.52956288e-04, 2.61270529e-04,
+                                  2.69748772e-04, 2.78374465e-04, 2.87160014e-04, 2.96098601e-04,
+                                  3.05197594e-04, 3.14457023e-04, 3.23869498e-04, 3.33440320e-04,
+                                  3.43178015e-04, 3.53053462e-04, 3.63091886e-04, 3.73283283e-04,
+                                  3.83651351e-04, 3.94156444e-04, 4.04836771e-04, 4.15653703e-04,
+                                  4.26625960e-04, 4.37759844e-04, 4.49053794e-04, 4.60495597e-04,
+                                  4.72077099e-04, 4.83837118e-04, 4.95744109e-04, 5.07781340e-04,
+                                  5.19964672e-04, 5.32316813e-04, 5.44823489e-04, 5.57483665e-04,
+                                  5.70297686e-04, 5.83249863e-04, 5.96338131e-04, 6.09594120e-04,
+                                  6.23013435e-04, 6.36594830e-04, 6.50297249e-04, 6.64142222e-04,
+                                  6.78147980e-04, 6.92282395e-04, 7.06561344e-04, 7.20987946e-04,
+                                  7.35548731e-04, 7.50255560e-04, 7.65122247e-04, 7.80063756e-04,
+                                  7.95147555e-04, 8.10396744e-04, 8.25793330e-04, 8.41276246e-04,
+                                  8.56872987e-04, 8.72612687e-04, 8.88496254e-04, 9.04519016e-04,
+                                  9.20619462e-04, 9.36881518e-04, 9.53292628e-04, 9.69782092e-04,
+                                  9.86397315e-04, 1.00312754e-03, 1.01996070e-03, 1.03689757e-03,
+                                  1.05395590e-03, 1.07113920e-03, 1.08845123e-03, 1.10583974e-03,
+                                  1.12333211e-03, 1.14094222e-03]}
+
+    def show_geometry_window(self):
+        msgBox = QtWidgets.QDialog()
+        msgBox.setWindowTitle('Geometry conventions')
+        
+        font_title = QtGui.QFont()
+        font_title.setPointSize(28)
+        title = QtWidgets.QLabel(f'<b>Geometry conventions</b>')
+        title.setFont(font_title)
+        description = QtWidgets.QLabel('<b>Translations</b> without any <b>tilt</b>/<b>rotation</b> are the horizontal and vertical distances '
+                                       'between the centre of the detector and the point of normal incidence PONI (<i>top</i>). The SDD is the distance from '
+                                       'the sample to the PONI. A <b>rotation</b> moves the detector along the goniometer circle '
+                                       '(constant SDD), keeping the PONI at the same position relative to the detector '
+                                       'surface, here the detector centre (<i>lower left</i>). A <b>tilt</b> rolls the detector surface on '
+                                       'the goniometer circle, hence the SDD is fixed, but the PONI shifts along the detector '
+                                       'face (<i>lower right</i>).')
+        description.setAlignment(QtCore.Qt.AlignmentFlag.AlignJustify)
+        description.setWordWrap(True)
+        pmap = QtGui.QPixmap(':/icons/xrdPlanner_geom').scaled(512, 512, aspectRatioMode=QtCore.Qt.AspectRatioMode.KeepAspectRatio, transformMode=QtCore.Qt.TransformationMode.SmoothTransformation)
+        icon = QtWidgets.QLabel()
+        icon.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        icon.setPixmap(pmap)
+        
+        published = QtWidgets.QLabel('For more information see:<a href="https://doi.org/10.1107/S1600577523011086"> '
+                                     '<i>J. Synchrotron Rad.</i> (2024). <b>31</b></a> or <a href="https://github.com/LennardKrause/xrdPlanner">Github</a>.')
+        published.setOpenExternalLinks(True)
+
+        box_layout = QtWidgets.QVBoxLayout()
+        box_layout.setSpacing(6)
+        box_layout.addWidget(title)
+        box_layout.addWidget(description)
+        box_layout.addWidget(icon)
+        box_layout.addWidget(published)
+
+        box = QtWidgets.QGroupBox()
+        box.setFlat(True)
+        box.setLayout(box_layout)
+        box.setContentsMargins(0,0,0,0)
+
+        layout = QtWidgets.QVBoxLayout()
+        layout.addWidget(box)
+        
+        msgBox.setWindowIcon(self.icon)
+        msgBox.setLayout(layout)
+        msgBox.setFixedSize(msgBox.sizeHint())
+        msgBox.exec()
+
+    def calc_max_resolution(self, m=1.0):
+        # calculate the maximum 2theta angle for the given geometry
+        #  - used to generate 2theta values to draw conics
+        #  - m is a multiplier used to shrink the 2theta angle
+        #    to keep the maximum resolution conic visible
+        # make screen grid
+        size_h = np.array([-self.xdim, self.xdim])*m
+        size_v = np.array([-self.ydim, self.ydim])*m
+        _gx, _gy = np.meshgrid(size_h, size_v, sparse=True)
+        # build vector -> 3 x n x m
+        _vec = np.full((3, 2, 2), self.geo.dist)
+        _vec[0,:,:] = _gx - self.geo.hoff
+        # Compensate for vertical offset and PONI offset caused by the tilt (sdd*tilt)
+        _vec[1,:,:] = _gy + self.geo.voff - np.deg2rad(self.geo.tilt) * self.geo.dist
+        # apply combined rotation and tilt
+        _rot = self.rot_100(-np.deg2rad(self.geo.tilt + self.geo.rota))
+        # reshape to allow matrix multiplication
+        # _rot: 3 x 3 @ _norm: 3 x n*m -> _res: 3 x n x m
+        _res = np.reshape(_rot @ np.reshape(_vec, (3,-1)), _vec.shape)
+        # Distance POBI - pixel on grid
+        R_a = np.sqrt(np.sum(_res[0:2]**2, axis=0))
+        # POBI distance
+        D_a = _res[2]
+        # 2theta - Angle between pixel, sample, and POBI
+        tth = np.arctan2(R_a, D_a)
+        # 2theta max 
+        return tth.max()
+        
     #############
     # SETTINGS  #
     #############
@@ -2389,6 +2737,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # create folder if not existing
         if not os.path.exists(target_base):
             os.makedirs(target_base)
+        # Don't overwrite beamlime standard settings
+        if not os.access(target, os.W_OK):
+            #print(f'{os.path.basename(target)} is protected.')
+            return
         # Writing geo as dict to file
         with open(target, 'w') as wf:
             json.dump({'geo':self._geo.__dict__, 'plo':self.plo.__dict__, 'thm':self.thm.__dict__, 'lmt':self.lmt.__dict__}, wf, indent=4)
@@ -2403,21 +2755,21 @@ class MainWindow(QtWidgets.QMainWindow):
         #
         # Add 'key':('minimum', 'maximum', 'default') to the dict
         _warn = {'conic_ref_cif_kev':( 5,   25,  12),
-                     #'conic_tth_min':( 1,   10,   5),
-                     #'conic_tth_max':(10,  180,  90),
-                     #'conic_tth_num':( 1,  100,  20),
-                     #'conic_ref_num':( 1,  500, 200),
-                       'conic_steps':(10, 1000, 100),
-                          'ener_stp':( 1,  100,   1),
-                          'dist_stp':( 1,  100,   1),
-                          'hoff_stp':( 1,  100,   1),
-                          'voff_stp':( 1,  100,   1),
-                          'rota_stp':( 1,  100,   1),
-                          'tilt_stp':( 1,  100,   1),
-                          'bsdx_stp':( 1,  100,   1),
+                    #'conic_tth_min':( 1,   10,   5),
+                    #'conic_tth_max':(10,  180,  90),
+                    #'conic_tth_num':( 1,  100,  20),
+                    #'conic_ref_num':( 1,  500, 200),
+                    'conic_steps':(10, 1000, 100),
+                        'ener_stp':( 1,  100,   1),
+                        'dist_stp':( 1,  100,   1),
+                        'hoff_stp':( 1,  100,   1),
+                        'voff_stp':( 1,  100,   1),
+                        'rota_stp':( 1,  100,   1),
+                        'tilt_stp':( 1,  100,   1),
+                        'bsdx_stp':( 1,  100,   1),
                 }
         # Add 'key':'val to the dict to enforce 'key' to be set to 'val'
-        _force = {'show_deltadd':False}
+        _force = {'show_fwhm':False}
         # Opening JSON file as dict
         try:
             with open(self.path_settings_current, 'r') as of:
@@ -2523,8 +2875,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.toggle_unit_hover()
         elif k == QtCore.Qt.Key.Key_F1:
             self.show_about_window()
-        #elif k == QtCore.Qt.Key.Key_R:
-        #    self.toggle_function_deltadd()
+        elif k == QtCore.Qt.Key.Key_R:
+            self.toggle_function_fwhm()
 
     def closeEvent(self, event):
         # Save current settings file for
@@ -2547,7 +2899,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # hoverEvent is only called if
         # either or both maps are active
         # -> always show on isEnter event
-        if event.isEnter():
+        if event.isEnter() and (self.action_funct_fwhm_show.isChecked() or self.action_show_ang.isChecked() or self.action_show_pol.isChecked()):
             self.cor_label.show()
 
         # cormap displays the product of both corrections
@@ -2567,102 +2919,10 @@ class MainWindow(QtWidgets.QMainWindow):
             _text.append(f'P: {self._polcor[x,y]:.2f}')
         if not isinstance(self._solang, float):
             _text.append(f'S: {self._solang[x,y]:.2f}')
-        #if not isinstance(self._deltadd, float):
-        #    _text.append(f'log10(\u03B4d/d): {self._deltadd[x,y]:.2f}')
+        if not isinstance(self._fwhm, float):
+            _text.append(f'H: {self._fwhm[x,y]:.4f}\u00B0')
+            #_text.append(f'H: {self.calc_unit(self._fwhm[x,y]):.4f}')
         self.cor_label.setText('\n'.join(_text))
-
-    """
-    def update_menu_entries(self):
-        # set checkmark: references none
-        for action in self.menu_ref.actions():
-            if action.text() == self.geo.reference:
-                action.setChecked(True)
-        # set checkmark: references pyFAI
-        for action in self.sub_menu_pyFAI.actions():
-            if action.text() == self.geo.reference :
-                action.setChecked(True)
-        # set checkmark: references custom
-        for action in self.sub_menu_custom.actions():
-            if action.text() == self.geo.reference :
-                action.setChecked(True)
-        # set checkmark: beamstop none
-        for action in self.menu_bs.actions():
-            if action.text() == str(self.geo.bssz):
-                action.setChecked(True)
-        # set checkmark: beamstop custom
-        for action in self.sub_menu_bs.actions():
-            if action.text() == str(self.geo.bssz):
-                action.setChecked(True)
-        # set checkmark: colormap
-        for action in self.menu_cmap.actions():
-            if action.text() == self.geo.colormap:
-                action.setChecked(True)
-        # set checkmark: active settings
-        for action in self.menu_custom_settings.actions():
-            if action.text() == self.active_settings:
-                action.setChecked(True)
-
-        # set checkmark: detectors
-        # - move through submenus
-        for menu in self.menu_det.actions():
-            if menu.text() == self.geo.det_type:
-                for action in menu.menu().actions():
-                    if action.text() == self.geo.det_size:
-                        action.setChecked(True)
-        
-        # set checkmark: units
-        # - self.geo.unit is int
-        for num, action in enumerate(self.menu_unit.actions()):
-            if num == self.geo.unit:
-                action.setChecked(True)
-
-        # set checkmark: theme
-        # - self.geo.darkmode is bool
-        conv = {'Light': False, 'Dark': True}
-        for action in self.menu_theme.actions():
-            if conv[action.text()] == self.geo.darkmode:
-                action.setChecked(True)
-        
-        # check show_polarisation
-        if self.plo.show_polarisation:
-            self.polmap_action.setChecked(True)
-        else:
-            self.polmap_action.setChecked(False)
-        
-        # check show_solidangle
-        if self.plo.show_solidangle:
-            self.solang_action.setChecked(True)
-        else:
-            self.solang_action.setChecked(False)
-
-        # menu Beamstop: add sizes list
-        if self.geo.bssz not in self.geo.bs_list and not isinstance(self.geo.bssz, str):
-            self.geo.bs_list.append(self.geo.bssz)
-            self.geo.bs_list.sort()
-        
-        # update menu Beamstop
-        self.sub_menu_bs.clear()
-        for bs_size in sorted(self.geo.bs_list):
-            bs_sub_action = QtGui.QAction(str(bs_size), self, checkable=True)
-            self.set_menu_action(bs_sub_action, self.change_beamstop, bs_size)
-            self.sub_menu_bs.addAction(bs_sub_action)
-            self.group_bs.addAction(bs_sub_action)
-            if bs_size == self.geo.bssz:
-                bs_sub_action.setChecked(True)
-        
-        # update menu Detectors
-        self.menu_det.clear()
-        for d in sorted(self.detector_db):
-            d_menu = QtWidgets.QMenu(d, self)
-            self.menu_det.addMenu(d_menu)
-            for s in self.detector_db[d]['size']:
-                det_action = QtGui.QAction(s, self, checkable=True)
-                self.set_menu_action(det_action, self.change_detector, d, s)
-                d_menu.addAction(det_action)
-                self.group_det.addAction(det_action)
-                if d == self.geo.det_type and s == self.geo.det_size:
-                    det_action.setChecked(True)
-    """
 
 class container(object):
     pass
@@ -2703,19 +2963,19 @@ class SliderWidget(QtWidgets.QFrame):
     def apply_style(self):
         self.box.setStyleSheet(f'''
             QFrame {{
-                border: {self.parent().plo.slider_border_width}px solid {self.parent().slider_border_color};
+                border: {self.parent().plo.slider_border_width}px solid {self.parent().slider_border_color.name(format=QtGui.QColor.NameFormat.HexArgb)};
                 border-radius: {self.parent().plo.slider_border_radius}px;
-                background: {self.parent().slider_bg_color};
+                background: {self.parent().slider_bg_color.name(format=QtGui.QColor.NameFormat.HexArgb)};
             }}
             QFrame:hover {{
-                background: {self.parent().slider_bg_hover};
+                background: {self.parent().slider_bg_hover.name(format=QtGui.QColor.NameFormat.HexArgb)};
             }}
         ''')
         self.frame.setStyleSheet(f'''
             QFrame {{
-                border: {self.parent().plo.slider_border_width}px solid {self.parent().slider_border_color};
+                border: {self.parent().plo.slider_border_width}px solid {self.parent().slider_border_color.name(format=QtGui.QColor.NameFormat.HexArgb)};
                 border-radius: {self.parent().plo.slider_border_radius}px;
-                background: {self.parent().slider_border_color};
+                background: {self.parent().slider_border_color.name(format=QtGui.QColor.NameFormat.HexArgb)};
             }}
         ''')
 
@@ -2812,7 +3072,7 @@ class SliderWidget(QtWidgets.QFrame):
         label_name.setFont(font)
         label_name.setStyleSheet(f'''
             QLabel {{
-                color: {self.parent().slider_label_color};
+                color: {self.parent().slider_label_color.name(format=QtGui.QColor.NameFormat.HexArgb)};
                 border: 0px solid none;
                 background: transparent;
             }}
@@ -2824,7 +3084,7 @@ class SliderWidget(QtWidgets.QFrame):
         label_value.setText(str(int(lval)))
         label_value.setStyleSheet(f'''
             QLabel {{
-                color: {self.parent().slider_label_color};
+                color: {self.parent().slider_label_color.name(format=QtGui.QColor.NameFormat.HexArgb)};
                 border: 0px solid transparent;
                 background: transparent;
             }}
