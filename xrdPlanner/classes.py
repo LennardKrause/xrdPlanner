@@ -1005,7 +1005,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # light mode
         thm.light_conic_label_fill = '#FFFFFF'        # [color]  Contour label fill color
         thm.light_conic_ref_color = '#DCDCDC'         # [color]  Reference contour color
-        thm.light_beamstop_color = '#FF000080'        # [color]  Beamstop color
+        thm.light_beamstop_color = '#80FF0000'        # [color]  Beamstop color
         thm.light_beamstop_edge_color = '#FF0000'     # [color]  Beamstop edge color
         thm.light_det_module_color = '#404040'        # [color]  Detector module border color
         thm.light_det_module_fill = '#404040'         # [color]  Detector module background color
@@ -1020,7 +1020,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # dark mode
         thm.dark_conic_label_fill = '#000000'         # [color]  Contour label fill color
         thm.dark_conic_ref_color = '#303030'          # [color]  Reference contour color
-        thm.dark_beamstop_color = '#FF0000AA'         # [color]  Beamstop color
+        thm.dark_beamstop_color = '#AAFF0000'         # [color]  Beamstop color
         thm.dark_beamstop_edge_color = '#FF0000'      # [color]  Beamstop edge color
         thm.dark_det_module_color = '#EEEEEE'         # [color]  Detector module border color
         thm.dark_det_module_fill = '#EEEEEE'          # [color]  Detector module background color
@@ -1942,7 +1942,7 @@ class MainWindow(QtWidgets.QMainWindow):
             #             + p**2 \
             #             + c**2/np.cos(_tth_a)**2 \
             #             + (D_a**2*phi**2)/np.cos(_tth_a)**4) ))
-            fwhm = np.sqrt(H2)# * 180 / np.pi
+            fwhm = np.sqrt(H2) * 180 / np.pi
             #_ra = R_a[fwhm < self.plo.funct_fwhm_thresh]
             #if any(_ra):
             #    fwhm_width = np.nanmin(_ra) * 2 * 1e-3
