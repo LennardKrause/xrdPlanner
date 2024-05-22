@@ -1633,7 +1633,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # reject overlap of the 'backscattering'
         # -> limitation of the current implementation
         if theta > np.pi/2 + abs(omega):
-            return False, False, False
+            return False, False
 
         # y axis offset of the cone center
         dy_cone = self.geo.dist * np.tan(omega)
@@ -1666,7 +1666,7 @@ class MainWindow(QtWidgets.QMainWindow):
             h = (y1+y2)/2
             # check if the circle is visible
             if h - np.sqrt(y0**2 + x0**2) > np.sqrt(self.ydim**2 + self.xdim**2):
-                return False, False, False
+                return False, False
             t = np.linspace(0, 2*np.pi, 2*steps)
             x = x0 + h * np.sin(t)
             y = y0 + (y1-y2)/2 + h * np.cos(t)
@@ -1686,7 +1686,7 @@ class MainWindow(QtWidgets.QMainWindow):
             _xlim2 = (_xdim - x0) / w
             # check if the ellipse is visible
             if _xlim1 < 0 and _xlim2 < 0:
-                return False, False, False
+                return False, False
             if _xlim1 < 1 and _xlim2 < 1:
                 l = -np.arcsin(_xlim1)
                 r =  np.arcsin(_xlim2)
@@ -1708,7 +1708,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # hyperbola
             h = np.sign(omega) * (y1+y2)/2
             if h == 0:
-                return False, False, False
+                return False, False
             w = h * np.sqrt(ecc**2-1)
             l = -np.arcsinh((_xdim + x0) / w)
             r =  np.arcsinh((_xdim - x0) / w)
