@@ -89,6 +89,7 @@ where $SDD$ is the sample to detector distance.
   - **slider_label_xxxx** (ener, dist, rota, voff, hoff, tilt, bsdx) accept any string to customise the labels for the sliders.
 
 ## Latest updates:
+  - 2024-05-30 Update: Added support for custom unit cells to calculate and plot conics.
   - 2024-05-22 Bugfix: Fixed a bug removing conics (Thanks Mads).
   - 2024-05-02 Update: Added the option to calculate the [resolution function](https://doi.org/10.1107/S2053273321007506) (as FWHM, H) for powder diffraction with area detectors (Thanks Stefano).
   - 2024-05-02 Update: Automatic label placement (conic_label_auto, default=True).
