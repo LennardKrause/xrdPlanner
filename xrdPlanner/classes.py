@@ -30,6 +30,7 @@ class MainWindow(QtWidgets.QMainWindow):
         #  - xtl.Scatter.powder()
         self.setAcceptDrops(True)
 
+        self.default_custom_cell = [6,6,6,90,90,90]
         # set path to settings folder
         self.path_settings = os.path.join(self.path_home, 'settings',)
         # set path to active settings token
@@ -270,7 +271,7 @@ class MainWindow(QtWidgets.QMainWindow):
             ref = pg.PlotCurveItem(useCache=True)
             self.ax.addItem(ref)
             self.patches['reference'].append(ref)
-            self.patches['reference'][i].setClickable(True, width=self.plo.conic_ref_linewidth)
+            self.patches['reference'][i].setClickable(True, width=self.plo.conic_ref_linewidth*2)
             self.patches['reference'][i].sigClicked.connect(self.show_tooltip)
             self.patches['reference'][i].name = None
 
@@ -424,6 +425,11 @@ class MainWindow(QtWidgets.QMainWindow):
         # menu Reference: add Custom
         self.sub_menu_custom = QtWidgets.QMenu('Custom', self)
         menu_ref.addMenu(self.sub_menu_custom)
+
+        # menu Reference: add None
+        cell_action = QtGui.QAction('From Cell', self)
+        cell_action.triggered.connect(self.window_unit_cell)
+        menu_ref.addAction(cell_action)
         
         ############
         # BEAMSTOP #
@@ -1607,8 +1613,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 irel = 1.0
                 if self.cont_ref_hkl:
                     h, k, l, itot, irel = self.cont_ref_hkl[_n]
-                    irel *= self.plo.conic_ref_cif_lw_mult
-                    if self.plo.conic_hkl_show_int:
+                    if self.plo.conic_hkl_show_int and itot > 0:
+                        irel *= self.plo.conic_ref_cif_lw_mult
                         # alignment of the tooltip text is far from trivial
                         # detour via QTextEdit -> setAlignment and toHtml
                         # hence the <br> instead of \n
@@ -1617,6 +1623,7 @@ class MainWindow(QtWidgets.QMainWindow):
                         self.patches['reference'][_n].name = f'({h: 2.0f} {k: 2.0f} {l: 2.0f})<br>{round(itot, 0):,.0f}'
                     else:
                         self.patches['reference'][_n].name = f'({h: 2.0f} {k: 2.0f} {l: 2.0f})'
+                        irel = 1.0
                     if not self.plo.conic_ref_cif_irel:
                         irel = 1.0
                 else:
@@ -1833,6 +1840,269 @@ class MainWindow(QtWidgets.QMainWindow):
         QtWidgets.QToolTip.showText(pos, text.toHtml())
         event.ignore()
 
+    def window_unit_cell(self):
+        self.uc_window = QtWidgets.QDialog()
+
+        layout = QtWidgets.QVBoxLayout()
+        layout.setSpacing(0)
+
+        box = QtWidgets.QGroupBox(title='Enter unit cell parameters')
+        box.setStyleSheet("QGroupBox{font-weight:bold;}")
+        box_layout = QtWidgets.QVBoxLayout()
+        box_layout.setSpacing(0)
+        box_layout.setContentsMargins(0,0,0,0)
+        self.uc_dict_change = {}
+        self.uc_check_boxes = {}
+        self.linked_axes = True
+        #              label,        unit,  link, min, max
+        uc_widgets = [('a',     ' \u212b', [1,2],   1,  99),
+                      ('b',     ' \u212b',  True,   1,  99),
+                      ('c',     ' \u212b',  True,   1,  99),
+                      ('\u03b1', '\u00b0', False,  60, 150),
+                      ('\u03b2', '\u00b0', False,  60, 150),
+                      ('\u03b3', '\u00b0', False,  60, 150),
+                      ('Centring',  False, False,   0,   0),
+                      ('Sampling',  True, False,   0,   0),
+                      ('Name',       None, False,   0,   0)]
+        for idx, (label, unit, link, minval, maxval) in enumerate(uc_widgets):
+            entry_box = QtWidgets.QFrame()
+            entry_layout = QtWidgets.QHBoxLayout()
+            entry_layout.setSpacing(6)
+            entry_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            entry_label = QtWidgets.QLabel(label)
+            entry_layout.addWidget(entry_label)
+            if unit is None:
+                box_widget = QtWidgets.QLineEdit(text=f'Custom {len(self.ref_custom):>02}')
+                entry_layout.addWidget(box_widget)
+            elif unit is False:
+                box_widget = QtWidgets.QComboBox()
+                box_widget.addItems(['P','F','I','C','A','B'])
+                entry_layout.addWidget(box_widget)
+            elif unit is True:
+                box_widget = QtWidgets.QComboBox()
+                box_widget.addItems(['1','2','3','4'])
+                entry_layout.addWidget(box_widget)
+            else:
+                box_widget = QtWidgets.QDoubleSpinBox(decimals=1, singleStep=0.1, minimum=minval, maximum=maxval, value=self.default_custom_cell[idx], suffix=unit)
+                box_widget.setProperty('linked', link)
+                box_widget.setProperty('index', idx)
+                #box_widget.setStepType(QtWidgets.QDoubleSpinBox.StepType.AdaptiveDecimalStepType)
+                entry_layout.addWidget(box_widget)
+                box_check = QtWidgets.QCheckBox()
+                box_check.setProperty('index', idx)
+                self.uc_check_boxes[idx] = box_check
+                if link is True:
+                    box_check.setChecked(True)
+                else:
+                    box_check.setChecked(False)
+                    box_check.setEnabled(False)
+                entry_layout.addWidget(box_check)
+            
+            entry_box.setLayout(entry_layout)
+            box_layout.addWidget(entry_box)
+            self.uc_dict_change[idx] = box_widget
+        
+        for idx in range(6):
+            self.uc_dict_change[idx].valueChanged.connect(self.set_linked_spinboxes)
+            self.uc_check_boxes[idx].stateChanged.connect(self.set_linked_checkboxes)
+
+        box.setLayout(box_layout)
+        layout.addWidget(box)
+
+        button_box = QtWidgets.QFrame()
+        button_layout = QtWidgets.QHBoxLayout()
+        # Add the apply button
+        button_apply = QtWidgets.QDialogButtonBox()
+        button_apply.addButton(QtWidgets.QDialogButtonBox.StandardButton.Apply)
+        button_apply.setCenterButtons(True)
+        button_apply.clicked.connect(lambda: self.window_unit_cell_apply(self.uc_dict_change))
+        button_layout.addWidget(button_apply)
+        # Add the OK button
+        button_ok = QtWidgets.QDialogButtonBox()
+        button_ok.addButton(QtWidgets.QDialogButtonBox.StandardButton.Ok)
+        button_ok.setCenterButtons(True)
+        button_ok.clicked.connect(self.window_unit_cell_accept)
+        button_layout.addWidget(button_ok)
+        # Set the button box layout
+        button_box.setLayout(button_layout)
+        layout.addWidget(button_box)
+
+        self.uc_window.setWindowIcon(self.icon)
+        self.uc_window.setWindowTitle('Add custom unit cell')
+        self.uc_window.setLayout(layout)
+        self.uc_window.setFixedSize(self.uc_window.sizeHint())
+        self.uc_window.accepted.connect(self.window_unit_cell_accept)
+        self.uc_window.rejected.connect(self.window_unit_cell_close)
+        self.uc_window.exec()
+    
+    def window_unit_cell_apply(self, dict):
+        '''
+        catch window close event to store data
+        '''
+        uc = []
+        for i in range(6):
+            uc.append(dict[i].value())
+        hkld = self.calc_hkld(uc, dec=int(dict[7].currentText()), cen=dict[6].currentText())
+        self.default_custom_cell = uc
+
+        self.cont_ref_dsp = hkld[:,3]
+        # hkl -> integer
+        # cast hkl array to list of tuples (for easy display)
+        _zeros = np.zeros(hkld.shape[0])
+        self.cont_ref_hkl = list(zip(hkld[:,0], hkld[:,1], hkld[:,2], _zeros, _zeros))
+
+        self.geo.reference = dict[8].text()
+        self.ref_custom[self.geo.reference] = self.cont_ref_dsp
+        self.ref_custom_hkl[self.geo.reference] = self.cont_ref_hkl
+        
+        # update window title
+        self.set_window_title()
+        self.draw_reference()
+
+    def window_unit_cell_accept(self):
+        self.window_unit_cell_apply(self.uc_dict_change)
+        ref_action = QtGui.QAction(self.geo.reference, self, checkable=True)
+        self.set_menu_action(ref_action, self.change_reference, self.geo.reference)
+        self.sub_menu_custom.addAction(ref_action)
+        self.group_ref.addAction(ref_action)
+        ref_action.setChecked(True)
+        self.uc_window.close()
+
+    def window_unit_cell_close(self):
+        self.uc_window.close()
+    
+    def set_linked_spinboxes(self):
+        widget = self.sender()
+        linked = widget.property('linked')
+        if linked is True:
+            widget.setProperty('linked', False)
+            self.uc_check_boxes[widget.property('index')].setChecked(False)
+        elif isinstance(linked, list):
+            for idx in linked:
+                checkbox = self.uc_check_boxes[idx]
+                child = self.uc_dict_change[idx]
+                if checkbox.isChecked():
+                    child.blockSignals(True)
+                    child.setValue(widget.value())
+                    child.blockSignals(False)
+    
+    def set_linked_checkboxes(self):
+        check = self.sender()
+        self.uc_dict_change[check.property('index')].setProperty('linked', check.isChecked())
+
+    def calc_hkld(self, ucp, res=0.2e-10, dec=4, cen='P'):
+        """
+        Generate hkls for unit cell parameters
+        Calculate resolution in d-spacing (dsp)
+        Round dsp to decimals, only use unique numbers
+        :param ucp: Unit cell parameters, list, [a, b, c, alpha, beta, gamma]
+        :param res: Maximum resolution
+        :param dec: d-spacing sampling rate, remove multiplicity
+        :param cen: Remove systematic absences according to centring
+        :return: array of [[h k l dsp]]
+        """
+        def cart_from_cell(cell):
+            """
+            Calculate a,b,c vectors in cartesian system from lattice constants.
+            :param cell: a,b,c,alpha,beta,gamma lattice constants.
+            :return: a, b, c vector
+            """
+            if cell.shape != (6,):
+                raise ValueError('Lattice constants must be 1d array with 6 elements')
+            a, b, c = cell[:3]*1E-10
+            alpha, beta, gamma = np.radians(cell[3:])
+            av = np.array([a, 0, 0], dtype=float)
+            bv = np.array([b * np.cos(gamma), b * np.sin(gamma), 0], dtype=float)
+            # calculate vector c
+            x = np.cos(beta)
+            y = (np.cos(alpha) - x * np.cos(gamma)) / np.sin(gamma)
+            z = np.sqrt(1. - x**2. - y**2.)
+            cv = np.array([x, y, z], dtype=float)
+            cv /= np.linalg.norm(cv)
+            cv *= c
+            return av, bv, cv
+        
+        def matrix_from_cell(cell):
+            """
+            Calculate transform matrix from lattice constants.
+            :param cell: a,b,c,alpha,beta,gamma lattice constants in
+                                    angstrom and degree.
+            :param lattice_type: lattice type: P, A, B, C, H
+            :return: transform matrix A = [a*, b*, c*]
+            """
+            cell = np.array(cell)
+            av, bv, cv = cart_from_cell(cell)
+            a_star = (np.cross(bv, cv)) / (np.cross(bv, cv).dot(av))
+            b_star = (np.cross(cv, av)) / (np.cross(cv, av).dot(bv))
+            c_star = (np.cross(av, bv)) / (np.cross(av, bv).dot(cv))
+            A = np.zeros((3, 3), dtype='float')  # transform matrix
+            A[:, 0] = a_star
+            A[:, 1] = b_star
+            A[:, 2] = c_star
+            return np.round(A,6)
+
+        def applyExtinctionRules(hkl, centering='P'):
+            hkl = np.atleast_2d(hkl)
+
+            if centering == 'P':
+                pass
+        
+            elif centering == 'I':
+                # h+k+l = even
+                hkl = hkl[np.sum(hkl, axis=1)%2 == 0]
+        
+            elif centering == 'A':
+                # k + l = even
+                hkl = hkl[np.sum(hkl[:,1:], axis=1)%2 == 0]
+        
+            elif centering == 'B':
+                # h + l = even
+                hkl = hkl[np.sum(hkl[:,[0,2]], axis=1)%2 == 0]
+        
+            elif centering == 'C':
+                # h + k = even
+                hkl = hkl[np.sum(hkl[:,:2], axis=1)%2 == 0]
+        
+            elif centering == 'F':
+                # h, k, l all odd or all even
+                hkl = hkl[np.sum(hkl%2 == 0, axis=1)%3 == 0]
+        
+            return hkl
+        
+        A = matrix_from_cell(ucp)
+        q_cutoff = 1. / res
+        max_h = min(int(np.ceil(q_cutoff / np.linalg.norm(A[:,0]))), 127)
+        max_k = min(int(np.ceil(q_cutoff / np.linalg.norm(A[:,1]))), 127)
+        max_l = min(int(np.ceil(q_cutoff / np.linalg.norm(A[:,2]))), 127)
+        # hkl grid
+        hh = np.arange(max_h, -max_h-1, -1)
+        kk = np.arange(max_k, -max_k-1, -1)
+        ll = np.arange(max_l, -max_l-1, -1)
+        # this determines (for no obvious reason)
+        # the order of the array
+        ks, hs, ls = np.meshgrid(kk, hh, ll)
+        hkl = np.ones((hs.size, 3), dtype=np.int8)
+        hkl[:,0] = hs.reshape(-1)
+        hkl[:,1] = ks.reshape(-1)
+        hkl[:,2] = ls.reshape(-1)
+        # remove 0 0 0 reflection
+        hkl = np.delete(hkl, len(hkl)//2, 0)
+        # remove high resolution hkls
+        # too expensive to be useful
+        #hkl = hkl[(np.linalg.norm(A.dot(hkl.T).T, axis=1) <= q_cutoff)]
+        # apply systematic absences from centring
+        hkl = applyExtinctionRules(hkl, centering=cen)
+        # calculate the d-spacing
+        # go from meters to Angstrom
+        # cast to int to speed up the next step
+        #  -> np.unique sorting
+        dsp = ((1/np.linalg.norm(A.dot(hkl.T).T, axis=1))*10**(10+dec)).astype(np.uint16)
+        # get reduced indices
+        dsp, idx = np.unique(dsp, return_index=True)
+        # stack the hkl and dsp
+        out = np.hstack([hkl[idx], (dsp*10**(-dec)).reshape(-1,1)])[::-1]
+        return out
+    
     #############
     #  OVERLAY  #
     #############

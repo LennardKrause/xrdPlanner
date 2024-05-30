@@ -1,5 +1,5 @@
-__version__ = '1.7.2'
+__version__ = '1.8.0'
 __author__ = 'Lennard Krause'
 __email__ = 'lkrause@chem.au.dk'
-__date__ = '22.05.2024'
+__date__ = '30.05.2024'
 __year__ = '2024'
