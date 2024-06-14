@@ -16,9 +16,9 @@
  - Type _xrdPlanner_ in a terminal and hit enter.
  - Choose a detector and a model from the _Detector_ menu.
  - Plot diffraction cone contours:
-   - Pick a reference from the _Reference_ menu ([pyFAI](https://pyfai.readthedocs.io/en/v2023.1/)).
+   - Pick a reference from the _Reference_ menu ([pyFAI](https://pyfai.readthedocs.io/en/v2023.1/)), no hkl tooltip available.
    - Drop a .cif file onto the window ([Dans_Diffraction](https://github.com/DanPorter/Dans_Diffraction)), click a contour to get a hkl tooltip.
-   - Enter custom unit cell dimensions.
+   - Enter custom unit cell dimensions, click a contour to get a hkl tooltip.
  - Use the units from the _Units_ menu you are the most comfortable with.
  - Hover over the grey line at the top to show the sliders. Click it to make it stay open.
  - Drag the sliders to change energy and geometry.
@@ -154,7 +154,7 @@ where $SDD$ is the sample to detector distance.
 ![Preview](https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_1_example_dark.png)
 
 #### Export window
-##### Use the export window to select and build up the available detecor / beamstop bank and review/change parameters.
+##### Use the export window to select and build up the available detector / beamstop bank and review/change parameters.
 ![Preview](https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_3_export_window.png)
 
 ## Hotkeys
