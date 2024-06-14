@@ -15,13 +15,16 @@
  - (python3 -m) pip install xrdPlanner.
  - Type _xrdPlanner_ in a terminal and hit enter.
  - Choose a detector and a model from the _Detector_ menu.
- - Pick a reference from the _Reference_ menu to plot its contours ([pyFAI](https://pyfai.readthedocs.io/en/v2023.1/)).
- - Drop a .cif file onto the window to draw its contours ([Dans_Diffraction](https://github.com/DanPorter/Dans_Diffraction)), click a contour to get a hkl tooltip.
+ - Plot diffraction cone contours:
+   - Pick a reference from the _Reference_ menu ([pyFAI](https://pyfai.readthedocs.io/en/v2023.1/)).
+   - Drop a .cif file onto the window ([Dans_Diffraction](https://github.com/DanPorter/Dans_Diffraction)), click a contour to get a hkl tooltip.
+   - Enter custom unit cell dimensions.
  - Use the units from the _Units_ menu you are the most comfortable with.
  - Hover over the grey line at the top to show the sliders. Click it to make it stay open.
  - Drag the sliders to change energy and geometry.
 
 ## Customisation:
+  - Use the [export window](#export-window) from the settings menu.
   - Edit the _settings.json_ file and the _detector_db.json_ files.
   - Use _Settings_ -> _Edit files_ to edit the _current settings_ or _Detector db_ file.
   - Reload the settings file to see the difference.
@@ -29,7 +32,7 @@
   - _plo_ customises the general layout and visuals.
   - _thm_ makes it look the way you want.
   - _lmt_ sets the limiting values of the geometry/energy sliders.
-  - Check the [settings file documentation](#settings-file-documentation).
+  - Check the [settings file documentation](#the-export-window-with-options to select and build up the available detecor / beamstop bank and review/change parameters.).
   - Add all the missing detectors to the _detector_db.json_, see the [detector db entries](#detector-db-entries).
 
 ## Conventions
@@ -150,7 +153,8 @@ where $SDD$ is the sample to detector distance.
 #### A rotated EIGER2 9M detector and a Rubrene sample (darkmode).
 ![Preview](https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_1_example_dark.png)
 
-#### The export window with options to select and build up the available detecor / beamstop bank and review/change parameters.
+#### Export window
+##### Use the export window to select and build up the available detecor / beamstop bank and review/change parameters.
 ![Preview](https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_3_export_window.png)
 
 ## Hotkeys
