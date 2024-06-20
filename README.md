@@ -86,12 +86,10 @@ where $SDD$ is the sample to detector distance.
 
 ## After the update:
    Sometimes I might change the name of a parameter and you will get a warning message upon startup looking something like this: _WARNING: "conic_ref_min_int" is not a valid key_! Either that key is no longer in use or its name got changed and is now reset to the default value. The settings file is updated and the warning should no longer appear after restart. Apart from this, your edited settings file will not be altered after updating.
-#### Added new keys:
-  - **conic_ref_cif_kev**: this key sets the energy at which Dans_Dffraction calculates the intensities from a cif, increasing the value allows for higher resolution reference conics. However, the calculation will get slower. 
-  - use **poni_marker** and **poni_size** to adjust the poni marker style and size, the color is picked from the colormap.
-  - **slider_label_xxxx** (ener, dist, rota, voff, hoff, tilt, bsdx) accept any string to customise the labels for the sliders.
 
 ## Latest updates:
+  - 2024-06-20 Update: Added highlighting of a clicked contour.
+  - 2024-06-20 Bugfix: Incorrect removal of beamstop contour.
   - 2024-05-30 Update: Added support for custom unit cells to calculate and plot conics.
   - 2024-05-22 Bugfix: Fixed a bug removing conics (Thanks Mads).
   - 2024-05-02 Update: Added the option to calculate the [resolution function](https://doi.org/10.1107/S2053273321007506) (as FWHM, H) for powder diffraction with area detectors (Thanks Stefano).
