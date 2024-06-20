@@ -30,6 +30,9 @@ class MainWindow(QtWidgets.QMainWindow):
         #  - xtl.Scatter.powder()
         self.setAcceptDrops(True)
 
+        # list to keep track of currently highlighted contours
+        self.highlight_timers = []
+        # default unit cell parameters for custom cell window
         self.default_custom_cell = [6,6,6,90,90,90]
         # set path to settings folder
         self.path_settings = os.path.join(self.path_home, 'settings',)
@@ -941,6 +944,7 @@ class MainWindow(QtWidgets.QMainWindow):
         plo.conic_label_auto = True         # [bool]   Dynamic label positions
         # - reference contour section - 
         plo.conic_ref_linewidth = 2.0       # [float]  Reference contour linewidth
+        plo.conic_ref_timeout = 500         # [int]    highlight contour on click (msec)
         plo.conic_ref_num = 250             # [int]    Number of reference contours
         plo.conic_ref_cif_int = 0.01        # [float]  Minimum display intensity (cif)
         plo.conic_ref_cif_kev = 10.0        # [float]  Energy [keV] for intensity calculation
@@ -1501,6 +1505,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # update beam center
         self.patches['poni'].setData([self.geo.hoff],[-(self.geo.voff - np.deg2rad(self.geo.tilt)*self.geo.dist)])
 
+        # hide beamstop contour and label
+        self.patches['beamstop'].setVisible(False)
+        self.patches['bs_label'].setVisible(False)
+        # check if beamstop is on screen, change visibility
         if self.geo.bssz and not (isinstance(self.geo.bssz, str) and self.geo.bssz.lower() == 'none'):
             # make sure it is a float (might be a string from the export window!)
             self.geo.bssz = float(self.geo.bssz)
@@ -1510,10 +1518,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # calculate the conic section corresponding to the theta angle
             # :returns False is conic is outside of visiblee area
             x, y = self.calc_conic(_omega, bs_theta, steps=self.plo.conic_steps)
-            if x is False:
-                self.patches['beamstop'].setVisible(False)
-                self.patches['bs_label'].setVisible(False)
-            else:
+            if x is not False:
                 # figure out the label positions
                 if self.plo.conic_label_auto:
                     label_pos = self.calc_label_pos_auto(x, y)
@@ -1521,7 +1526,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     label_pos = self.calc_label_pos_static(x, y, self.xdim, self.ydim, _omega, bs_theta)
                 
                 # continue if label can be placed
-                if not label_pos is False:
+                if label_pos is not False:
                     # plot the conic section
                     self.patches['beamstop'].setData(x, y, fillLevel=y.max())
                     self.patches['beamstop'].setVisible(True)
@@ -1530,9 +1535,6 @@ class MainWindow(QtWidgets.QMainWindow):
                     self.patches['bs_label'].setPos(*label_pos)
                     self.patches['bs_label'].setText(f'{_unit:.2f}')
                     self.patches['bs_label'].setVisible(True)
-        else:
-            self.patches['beamstop'].setVisible(False)
-            self.patches['bs_label'].setVisible(False)
         
         # calculate the maximum resolution for the given geometry
         if self.plo.conic_tth_auto:
@@ -1610,11 +1612,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 # if hkl are available
                 # put them in the proper container for the contour
                 # so indexing gets it right
-                irel = 1.0
+                width = 1.0
                 if self.cont_ref_hkl:
                     h, k, l, itot, irel = self.cont_ref_hkl[_n]
-                    if self.plo.conic_hkl_show_int and itot > 0:
-                        irel *= self.plo.conic_ref_cif_lw_mult
+                    if self.plo.conic_ref_cif_irel and irel > 0:
+                        width = irel * self.plo.conic_ref_cif_lw_mult
+                    if self.plo.conic_hkl_show_int:
                         # alignment of the tooltip text is far from trivial
                         # detour via QTextEdit -> setAlignment and toHtml
                         # hence the <br> instead of \n
@@ -1623,16 +1626,13 @@ class MainWindow(QtWidgets.QMainWindow):
                         self.patches['reference'][_n].name = f'({h: 2.0f} {k: 2.0f} {l: 2.0f})<br>{round(itot, 0):,.0f}'
                     else:
                         self.patches['reference'][_n].name = f'({h: 2.0f} {k: 2.0f} {l: 2.0f})'
-                        irel = 1.0
-                    if not self.plo.conic_ref_cif_irel:
-                        irel = 1.0
                 else:
                     self.patches['reference'][_n].name = None
                 
                 # plot the conic section
                 self.patches['reference'][_n].setData(x, y, pen=pg.mkPen(self.conic_ref_color,
                                                                          width=max(self.plo.conic_ref_cif_lw_min, 
-                                                                                   self.plo.conic_ref_linewidth * irel)))
+                                                                                   self.plo.conic_ref_linewidth * width)))
                 self.patches['reference'][_n].setVisible(True)
     
     def calc_conic(self, omega, theta, steps=100):
@@ -1834,11 +1834,28 @@ class MainWindow(QtWidgets.QMainWindow):
         if not widget.name or not self.cont_ref_hkl:
             event.ignore()
             return False
+        # show hkl tooltip at position
         text = QtWidgets.QTextEdit(str(widget.name))
         text.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         pos = QtCore.QPoint(*map(int, event.screenPos()))# - QtCore.QPoint(10,20)
         QtWidgets.QToolTip.showText(pos, text.toHtml())
-        event.ignore()
+        # highlight the contour
+        current_width = widget.opts['pen'].width()
+        timer = QtCore.QTimer()
+        timer.setSingleShot(True)
+        timer.timeout.connect(lambda: self.remove_highlight(widget, current_width, timer))
+        widget.setPen(pg.mkPen(self.cont_cmap.map(0.0, mode='qcolor'), width=current_width))
+        # add timer to self.list to keep pointers alive
+        # remove -> remove_highlight
+        self.highlight_timers.append(timer)
+        timer.start(self.plo.conic_ref_timeout)
+    
+    def remove_highlight(self, widget, width, timer):
+        # reset contour color
+        widget.setPen(pg.mkPen(self.conic_ref_color, width=width))
+        # remove timer
+        if timer in self.highlight_timers:
+            self.highlight_timers.remove(timer)
 
     def window_unit_cell(self):
         self.uc_window = QtWidgets.QDialog()
@@ -1855,16 +1872,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.uc_check_boxes = {}
         self.linked_axes = True
         #              label,        unit,  link, min, max
-        uc_widgets = [('a',     ' \u212b', [1,2],   1,  99),
-                      ('b',     ' \u212b',  True,   1,  99),
-                      ('c',     ' \u212b',  True,   1,  99),
-                      ('\u03b1', '\u00b0', False,  60, 150),
-                      ('\u03b2', '\u00b0', False,  60, 150),
-                      ('\u03b3', '\u00b0', False,  60, 150),
-                      ('Centring',  False, False,   0,   0),
-                      ('Sampling',  True, False,   0,   0),
-                      ('Name',       None, False,   0,   0)]
-        for idx, (label, unit, link, minval, maxval) in enumerate(uc_widgets):
+        uc_widgets = [('a',     ' \u212b', [1,2],   1,  99, 2),
+                      ('b',     ' \u212b',  True,   1,  99, 2),
+                      ('c',     ' \u212b',  True,   1,  99, 2),
+                      ('\u03b1', '\u00b0', False,  60, 150, 1),
+                      ('\u03b2', '\u00b0', False,  60, 150, 1),
+                      ('\u03b3', '\u00b0', False,  60, 150, 1),
+                      ('Centring',  False, False,   0,   0, 0),
+                      ('Sampling',   True, False,   0,   0, 0),
+                      ('Name',       None, False,   0,   0, 0)]
+        for idx, (label, unit, link, minval, maxval, decimals) in enumerate(uc_widgets):
             entry_box = QtWidgets.QFrame()
             entry_layout = QtWidgets.QHBoxLayout()
             entry_layout.setSpacing(6)
@@ -1880,10 +1897,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 entry_layout.addWidget(box_widget)
             elif unit is True:
                 box_widget = QtWidgets.QComboBox()
-                box_widget.addItems(['1','2','3','4'])
+                box_widget.addItems(['1','2','3','4','5'])
+                box_widget.setCurrentIndex(2)
                 entry_layout.addWidget(box_widget)
             else:
-                box_widget = QtWidgets.QDoubleSpinBox(decimals=1, singleStep=0.1, minimum=minval, maximum=maxval, value=self.default_custom_cell[idx], suffix=unit)
+                box_widget = QtWidgets.QDoubleSpinBox(decimals=decimals, singleStep=10**(-decimals), minimum=minval, maximum=maxval, value=self.default_custom_cell[idx], suffix=unit)
                 box_widget.setProperty('linked', link)
                 box_widget.setProperty('index', idx)
                 #box_widget.setStepType(QtWidgets.QDoubleSpinBox.StepType.AdaptiveDecimalStepType)
@@ -2096,7 +2114,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # go from meters to Angstrom
         # cast to int to speed up the next step
         #  -> np.unique sorting
-        dsp = ((1/np.linalg.norm(A.dot(hkl.T).T, axis=1))*10**(10+dec)).astype(np.uint16)
+        dsp = ((1/np.linalg.norm(A.dot(hkl.T).T, axis=1))*10**(10+dec)).astype(np.uint32)
         # get reduced indices
         dsp, idx = np.unique(dsp, return_index=True)
         # stack the hkl and dsp
