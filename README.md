@@ -38,14 +38,22 @@
 ## Conventions
 The geometry is defined with the center of rotation at the sample position, such that the radius of the rotation circle is equal to the sample to detector distance (SDD). That is, the rotation moves the detector along the goniometer circle, keeping the point of normal incidence (PONI) at the same position relative to the detector surface. At 0° the detector is vertical and at 90° the detector is horizontal with the detector normal pointing down.
 The tilt angle is defined relative to the detector face and such that the PONI shifts along the detector face, keeping the SDD fixed. The detector face is thus always tangential to the goniometer circle. The $tilt$ can intuitively be described as a rolling motion along the goniometer circle and is considered a convenience function as it is equivalent to a combination of $rotation$ and $y_{offset}$. Consequently, the vertical shift of the PONI position ($\Delta y_{PONI}$) on the detector face is equal to the arclength of a section on the goniometer circle with an angular span equal to the tilt angle.
-$$\Delta y_{PONI} = SDD \cdot tilt$$
+```math
+\Delta y_{PONI} = SDD \cdot tilt
+```
 The vertical shift of the point of beam incidence (POBI) in the detector reference frame ($\Delta y_{POBI}$) can be described by the side length of the right-angle triangle spanned by the goniometer origin, the PONI, and the POBI, subtracted from the vertical shift of the PONI.
-$$\Delta y_{POBI} = SDD \cdot \left( tilt - tan \left( rotation + tilt \right) \right)$$
+```math
+\Delta y_{POBI} = SDD \cdot \left( tilt - tan \left( rotation + tilt \right) \right)
+```
 
 [**pyFAI**](https://pyfai.readthedocs.io/en/v2023.1/geometry.html#geometry) uses three rotations, $rot1$, $rot2$, and $rot3$, and three translations, $dist$, $poni1$, and $poni2$, to define the detector position. xrdPlanner uses the same translations ($SDD$, $y_{offset}$, and $x_{offset}$), but only one of the rotations ($rot2$). Apart from the change in sign, the pyFAI $rot2$ and xrdPlanner $rotation$ are equivalent, however, the $tilt$ in pyFAI convention is described by a combination of $rot2$ and shift of $poni1$:
-$$rot2 = -\left( rotation + tilt\right)$$
+```math
+rot2 = -\left( rotation + tilt\right)
+```
 combined with
-$$\Delta poni1 = SDD \cdot tilt + y_{offset}$$
+```math
+\Delta poni1 = SDD \cdot tilt + y_{offset}
+```
 Additionally, pyFAI places the origin at the lower left corner of the detector, whereas xrdPlanner uses the center of the detector as origin, so one must account for translational shifts corresponding to half the width and height of the detector.
 
 ## Polarisation
