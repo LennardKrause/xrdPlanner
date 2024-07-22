@@ -25,14 +25,17 @@
 
 ## Customisation:
   - Use the [export window](#export-window) from the settings menu.
-  - Edit the _settings.json_ file and the _detector_db.json_ files.
-  - Use _Settings_ -> _Edit files_ to edit the _current settings_ or _Detector db_ file.
-  - Reload the settings file to see the difference.
-  - _geo_ determines the startup defaults.
-  - _plo_ customises the general layout and visuals.
-  - _thm_ makes it look the way you want.
-  - _lmt_ sets the limiting values of the geometry/energy sliders.
-  - Check the [settings file documentation](#the-export-window-with-options to select and build up the available detecor / beamstop bank and review/change parameters.).
+    - Build up the available detector and beamstop bank.
+    - Review and change the parameters.
+    - Tooltips should help you along the way.
+  - Or edit the _settings.json_ file and the _detector_db.json_ files directly.
+    - Use _Settings_ -> _Edit files_ to edit the _current settings_ or _Detector db_ file.
+    - Reload the settings file to see the difference.
+    - _geo_ determines the startup defaults.
+    - _plo_ customises the general layout and visuals.
+    - _thm_ makes it look the way you want.
+    - _lmt_ sets the limiting values of the geometry/energy sliders.
+  - Check the [settings file documentation](#settings-file-documentation) to get started.
   - Add all the missing detectors to the _detector_db.json_, see the [detector db entries](#detector-db-entries).
 
 ## Conventions
