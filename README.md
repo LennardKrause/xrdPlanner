@@ -386,12 +386,12 @@ The detector_db.json is stored as a dictionary
  
  | Entry |  Value  | Hint |
  |-------|---------|------|
- |  hms  | 83.8    | [mm]   Module size (horizontal)
- |  vms  | 33.5    | [mm]   Module size (vertical)
- |  pxs  | 172e-3  | [mm]   Pixel size
- |  hgp  | 7       | [pix]  Gap between modules (horizontal)
- |  vgp  | 17      | [pix]  Gap between modules (vertical)
- |  cbh  | 0       | [mm]   Central beam hole
+ |  pxs  | 172e-3  | [mm] Pixel size
+ |  hmp  | 487     | [px] Module size (horizontal)
+ |  vmp  | 195     | [px] Module size (vertical)
+ |  hgp  | 7       | [px] Gap between modules (horizontal)
+ |  vgp  | 17      | [px] Gap between modules (vertical)
+ |  cbh  | 0       | [px] Central beam hole
 
 The size Entry is a dictionary {key:value,}
 - key: detector size / type, e.g. 300K
@@ -401,9 +401,9 @@ The size Entry is a dictionary {key:value,}
  
 #### Example of the PILATUS3 entry
     "PILATUS3": {
-        "hms": 83.8,
-        "vms": 33.5,
         "pxs": 0.172,
+        "hmp": 487,
+        "vmp": 195,
         "hgp": 7,
         "vgp": 17,
         "cbh": 0,
