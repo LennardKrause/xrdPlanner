@@ -11,6 +11,15 @@
  - The module building code is designed for [Dectris](https://www.dectris.com) [PILATUS3](https://www.dectris.com/detectors/x-ray-detectors/pilatus3/) / [EIGER2](https://www.dectris.com/detectors/x-ray-detectors/eiger2/) or [SACLA](https://sacla.xfel.jp/?lang=en) MPCCD Detectors (central hole geometry) but one-module systems like the [Bruker](https://www.bruker.com/en.html) [Photon II](https://www.bruker.com/en/products-and-solutions/diffractometers-and-scattering-systems/single-crystal-x-ray-diffractometers/sc-xrd-components/detectors.html) and [Rayonix](https://www.rayonix.com/) [MX-HS](https://www.rayonix.com/rayonix-mx-hs-series/) are possible as well.
  - It uses [python3](https://www.python.org), [numpy](https://numpy.org), [pyqt6](https://www.riverbankcomputing.com/software/pyqt/), [pyqtgraph](https://pyqtgraph.readthedocs.io/en/latest/), [pyFAI](https://pyfai.readthedocs.io/en/v2023.1/) and [Dans_Diffraction](https://github.com/DanPorter/Dans_Diffraction).
 
+## Update to Version 2.0.0 (released 23.09.2024)
+ - The definition of detector modules was changed from mm to px to be more accurate and consistent.
+ - Consequently, custom detectors added to the detector_db file are no longer available.
+ - A new detector editor was added (_Settings_ > _Detector db editor_) to make the addition of custom detectors more feasible.
+ - Define and add whatever detector you collect your data with, now more easily.
+ - If something goes wrong use _Settings_ > _Reset detector db_.
+ - There is a backup of your _custom_ detector_db (detector_db.json.bak) in the xrdPlanner folder (_Help_ > _xrdPlanner_).
+ - A new parameter was added to allow for detector screen padding (geo.plot_padding), default is 0.
+
 ## Short how-to:
  - (python3 -m) pip install xrdPlanner.
  - Type _xrdPlanner_ in a terminal and hit enter.
@@ -28,6 +37,10 @@
     - Build up the available detector and beamstop bank.
     - Review and change the parameters.
     - Tooltips should help you along the way.
+  - Use the detector db editor.
+    - Define the detector you collect your data with.
+    - Add all the different sizes and versions.
+    - Use _Preview_ to play around and _Save_ to update the data bank.
   - Or edit the _settings.json_ file and the _detector_db.json_ files directly.
     - Use _Settings_ -> _Edit files_ to edit the _current settings_ or _Detector db_ file.
     - Reload the settings file to see the difference.
@@ -99,6 +112,9 @@ where $SDD$ is the sample to detector distance.
    Sometimes I might change the name of a parameter and you will get a warning message upon startup looking something like this: _WARNING: "conic_ref_min_int" is not a valid key_! Either that key is no longer in use or its name got changed and is now reset to the default value. The settings file is updated and the warning should no longer appear after restart. Apart from this, your edited settings file will not be altered after updating.
 
 ## Latest updates:
+  - 2024-09-23 Update: Added a detector editor to define and add whatever detector you collect your data with, now more easily.
+  - 2024-09-23 Update: Changed the detector module definition from mm to px (added custom detectors won't be available!).
+  - 2024-09-23 Update: Added a preview plot to the FWHM setup window.
   - 2024-06-20 Update: Added highlighting of a clicked contour.
   - 2024-06-20 Bugfix: Incorrect removal of beamstop contour.
   - 2024-05-30 Update: Added support for custom unit cells to calculate and plot conics.
@@ -107,14 +123,14 @@ where $SDD$ is the sample to detector distance.
   - 2024-05-02 Update: Automatic label placement (conic_label_auto, default=True).
   - 2024-05-02 Update: Dynamic cones try to keep the number of visible conics constant (conic_tth_auto, default=True).
   - 2024-05-02 Update: Current colors are displayed in the export window and a colorpicker is used.
-  - 2024-02-17 Bugfix: Fixed crash on importing settings files (Thanks Andy).
-  - 2024-02-16 Update: Added a unit value at mouse position (hover) to the overlay.
-  - 2024-02-09 Update: Updated the About window with links to github and the publication.
-  - 2024-02-08 Bugfix: Fixed crash on cif drag/drop (Thanks Mads).
 
 <details>
 <summary>Older updates</summary>
   
+  - 2024-02-17 Bugfix: Fixed crash on importing settings files (Thanks Andy).
+  - 2024-02-16 Update: Added a unit value at mouse position (hover) to the overlay.
+  - 2024-02-09 Update: Updated the About window with links to github and the publication.
+  - 2024-02-08 Bugfix: Fixed crash on cif drag/drop (Thanks Mads).
   - 2023-11-28 Update: Added hotkeys to toggle between units/colormaps/overlays.
   - 2023-11-28 Update: Added polarisation and solid angle correction factor overlays.
   - 2023-11-12 Update: Added a new window to export settings to a file.
@@ -176,6 +192,9 @@ where $SDD$ is the sample to detector distance.
 | d          | d-spacing                 |
 | q          | q-space                   |
 | s          | $sin(\theta)/\lambda$     |
+| #          | *Label Position*          |
+| up arrow   | Top left                  |
+| down arrow | Bottom left               |
 | #          | *Toggle Overlay*          |
 | p          | Show polarisation         |
 | a          | Show solid angle          |
