@@ -2195,7 +2195,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 entry_layout = QtWidgets.QHBoxLayout()
                 entry_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
                 if div > 0:
-                    box_combobox = QtWidgets.QDoubleSpinBox(decimals=decimals, singleStep=step, minimum=step, maximum=1000, value=value/div)
+                    box_combobox = QtWidgets.QDoubleSpinBox(decimals=decimals, singleStep=step, minimum=step, maximum=100000, value=value/div)
                     box_combobox.valueChanged.connect(self.win_fwhm_update)
                     box_combobox.setObjectName(f'{idx} {div}')
                 else:
