@@ -13,7 +13,7 @@
 
 ## Update to Version 2.0.0 (released 23.09.2024)
  - The definition of detector modules was changed from mm to px to be more accurate and consistent.
- - Consequently, custom detectors added to the detector_db file are no longer available.
+ - Consequently, custom detectors added to the detector_db file pre 2.0.0 are no longer working.
  - A new [detector db editor](#detector-db-editor) was added (_Settings_ > _Detector db editor_) to make the addition of custom detectors more feasible.
  - Define and add whatever detector you collect your data with, now more easily.
  - If something goes wrong use _Settings_ > _Reset detector db_.
@@ -113,7 +113,7 @@ where $SDD$ is the sample to detector distance.
 
 ## Latest updates:
   - 2024-09-23 Update: Added a [detector db editor](#detector-db-editor) to define and add whatever detector you collect your data with, now more easily.
-  - 2024-09-23 Update: Changed the detector module definition from mm to px (added custom detectors won't be available!).
+  - 2024-09-23 Update: Changed the detector module definition from mm to px (pre 2.0.0 custom detectors won't work!).
   - 2024-09-23 Update: Added a preview plot to the FWHM setup window.
   - 2024-06-20 Update: Added highlighting of a clicked contour.
   - 2024-06-20 Bugfix: Incorrect removal of beamstop contour.
