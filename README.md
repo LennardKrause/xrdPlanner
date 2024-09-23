@@ -14,7 +14,7 @@
 ## Update to Version 2.0.0 (released 23.09.2024)
  - The definition of detector modules was changed from mm to px to be more accurate and consistent.
  - Consequently, custom detectors added to the detector_db file are no longer available.
- - A new detector editor was added (_Settings_ > _Detector db editor_) to make the addition of custom detectors more feasible.
+ - A new [detector db editor](#detector-db-editor) was added (_Settings_ > _Detector db editor_) to make the addition of custom detectors more feasible.
  - Define and add whatever detector you collect your data with, now more easily.
  - If something goes wrong use _Settings_ > _Reset detector db_.
  - There is a backup of your _custom_ detector_db (detector_db.json.bak) in the xrdPlanner folder (_Help_ > _xrdPlanner_).
@@ -37,7 +37,7 @@
     - Build up the available detector and beamstop bank.
     - Review and change the parameters.
     - Tooltips should help you along the way.
-  - Use the detector db editor.
+  - Use the [detector db editor](#detector-db-editor).
     - Define the detector you collect your data with.
     - Add all the different sizes and versions.
     - Use _Preview_ to play around and _Save_ to update the data bank.
@@ -112,7 +112,7 @@ where $SDD$ is the sample to detector distance.
    Sometimes I might change the name of a parameter and you will get a warning message upon startup looking something like this: _WARNING: "conic_ref_min_int" is not a valid key_! Either that key is no longer in use or its name got changed and is now reset to the default value. The settings file is updated and the warning should no longer appear after restart. Apart from this, your edited settings file will not be altered after updating.
 
 ## Latest updates:
-  - 2024-09-23 Update: Added a detector editor to define and add whatever detector you collect your data with, now more easily.
+  - 2024-09-23 Update: Added a [detector db editor](#detector-db-editor) to define and add whatever detector you collect your data with, now more easily.
   - 2024-09-23 Update: Changed the detector module definition from mm to px (added custom detectors won't be available!).
   - 2024-09-23 Update: Added a preview plot to the FWHM setup window.
   - 2024-06-20 Update: Added highlighting of a clicked contour.
@@ -181,6 +181,10 @@ where $SDD$ is the sample to detector distance.
 #### Export window
 ##### Use the export window to select and build up the available detector / beamstop bank and review/change parameters.
 ![Preview](https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_3_export_window.png)
+
+#### Detector db editor
+##### Define and add the detector you collect your data with.
+![Preview](https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_4_detector_db_editor.png)
 
 ## Hotkeys
 
