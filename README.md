@@ -18,7 +18,7 @@
  - Define and add whatever detector you collect your data with, now more easily.
  - If something goes wrong use _Settings_ > _Reset detector db_.
  - There is a backup of your _custom_ detector_db (detector_db.json.bak) in the xrdPlanner folder (_Help_ > _xrdPlanner_).
- - A new parameter was added to allow for detector screen padding (geo.plot_padding), default is 0.
+ - A new parameter was added to allow for detector screen padding (plo.plot_padding), default is 0.
 
 ## Short how-to:
  - (python3 -m) pip install xrdPlanner.
