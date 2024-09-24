@@ -11,45 +11,35 @@
  - The module building code is designed for [Dectris](https://www.dectris.com) [PILATUS3](https://www.dectris.com/detectors/x-ray-detectors/pilatus3/) / [EIGER2](https://www.dectris.com/detectors/x-ray-detectors/eiger2/) or [SACLA](https://sacla.xfel.jp/?lang=en) MPCCD Detectors (central hole geometry) but one-module systems like the [Bruker](https://www.bruker.com/en.html) [Photon II](https://www.bruker.com/en/products-and-solutions/diffractometers-and-scattering-systems/single-crystal-x-ray-diffractometers/sc-xrd-components/detectors.html) and [Rayonix](https://www.rayonix.com/) [MX-HS](https://www.rayonix.com/rayonix-mx-hs-series/) are possible as well.
  - It uses [python3](https://www.python.org), [numpy](https://numpy.org), [pyqt6](https://www.riverbankcomputing.com/software/pyqt/), [pyqtgraph](https://pyqtgraph.readthedocs.io/en/latest/), [pyFAI](https://pyfai.readthedocs.io/en/v2023.1/) and [Dans_Diffraction](https://github.com/DanPorter/Dans_Diffraction).
 
-## Update to Version 2.0.0 (released 23.09.2024)
- - The definition of detector modules was changed from mm to px to be more accurate and consistent.
- - Consequently, custom detectors added to the detector_db file pre 2.0.0 are no longer working.
- - A new [detector db editor](#detector-db-editor) was added (_Settings_ > _Detector db editor_) to make the addition of custom detectors more feasible.
- - Define and add whatever detector you collect your data with, now more easily.
- - If something goes wrong use _Settings_ > _Reset detector db_.
- - There is a backup of your _custom_ detector_db (detector_db.json.bak) in the xrdPlanner folder (_Help_ > _xrdPlanner_).
- - A new parameter was added to allow for detector screen padding (plo.plot_padding), default is 0.
-
-## Short how-to:
- - (python3 -m) pip install xrdPlanner.
- - Type _xrdPlanner_ in a terminal and hit enter.
- - Choose a detector and a model from the _Detector_ menu.
- - Plot diffraction cone contours:
-   - Pick a reference from the _Reference_ menu ([pyFAI](https://pyfai.readthedocs.io/en/v2023.1/)), no hkl tooltip available.
-   - Drop a .cif file onto the window ([Dans_Diffraction](https://github.com/DanPorter/Dans_Diffraction)), click a contour to get a hkl tooltip.
-   - Enter custom unit cell dimensions, click a contour to get a hkl tooltip.
- - Use the units from the _Units_ menu you are the most comfortable with.
- - Hover over the grey line at the top to show the sliders. Click it to make it stay open.
- - Drag the sliders to change energy and geometry.
-
-## Customisation:
-  - Use the [export window](#export-window) from the settings menu.
-    - Build up the available detector and beamstop bank.
-    - Review and change the parameters.
-    - Tooltips should help you along the way.
-  - Use the [detector db editor](#detector-db-editor).
-    - Define the detector you collect your data with.
-    - Add all the different sizes and versions.
-    - Use _Preview_ to play around and _Save_ to update the data bank.
-  - Or edit the _settings.json_ file and the _detector_db.json_ files directly.
-    - Use _Settings_ -> _Edit files_ to edit the _current settings_ or _Detector db_ file.
-    - Reload the settings file to see the difference.
-    - _geo_ determines the startup defaults.
-    - _plo_ customises the general layout and visuals.
-    - _thm_ makes it look the way you want.
-    - _lmt_ sets the limiting values of the geometry/energy sliders.
-  - Check the [settings file documentation](#settings-file-documentation) to get started.
-  - Add all the missing detectors to the _detector_db.json_, see the [detector db entries](#detector-db-entries).
+>[!TIP]
+>## Short how-to:
+> - (python3 -m) pip install xrdPlanner.
+> - Type _xrdPlanner_ in a terminal and hit enter.
+> - Choose a detector and a model from the _Detector_ menu.
+> - Plot diffraction cone contours:
+>   - Pick a reference from the _Reference_ menu ([pyFAI](https://pyfai.readthedocs.io/en/v2023.1/)), no hkl tooltip available.
+>   - Drop a .cif file onto the window ([Dans_Diffraction](https://github.com/DanPorter/Dans_Diffraction)), click a contour to get a hkl tooltip.
+>   - Enter custom unit cell dimensions, click a contour to get a hkl tooltip.
+> - Use the units from the _Units_ menu you are the most comfortable with.
+> - Hover over the grey line at the top to show the sliders. Click it to make it stay open.
+> - Drag the sliders to change energy and geometry.
+> - Use [hotkeys](#hotkeys) to streamline your experience.
+>
+>## Customisation:
+>  - Use the [export window](#export-window) from the settings menu.
+>    - Build up the available detector and beamstop bank.
+>    - Review and change the parameters.
+>    - Tooltips should help you along the way.
+>  - Use the [detector db editor](#detector-db-editor).
+>    - Define the detector you collect your data with.
+>    - Add all the different sizes and versions.
+>    - Use _Preview_ to play around and _Save_ to update the data bank.
+>  - Or edit the _settings.json_ file and the _detector_db.json_ files directly.
+>    - Use _Settings_ -> _Edit files_ to edit the _current settings_ or _Detector db_ file.
+>    - Check the [settings file documentation](#settings-file-documentation) to get started.
+>  - Use pre-set beamline settings files:
+>    - Download a settings file from here (e.g. settings/DanMAX.json).
+>    - Use the import settings function from the GUI to import.
 
 ## Conventions
 The geometry is defined with the center of rotation at the sample position, such that the radius of the rotation circle is equal to the sample to detector distance (SDD). That is, the rotation moves the detector along the goniometer circle, keeping the point of normal incidence (PONI) at the same position relative to the detector surface. At 0° the detector is vertical and at 90° the detector is horizontal with the detector normal pointing down.
@@ -96,20 +86,15 @@ S_{ij} = \left(\frac{|\vec{v}_{ij}|}{SDD}\right)^{-3}
 ```
 where $SDD$ is the sample to detector distance.
 
-## Use pre-set beamline settings files:
-  - Download a settings file from here (e.g. settings/DanMAX.json).
-  - Use the import settings function from the GUI to import.
-  - You can switch between all imported settings.
-  - Use the export window to customise and export your settings.
-
-## Known bugs and limitations:
-  - On Windows: Switching Dark/Light mode requires restart to change the window frame color.
-  - As of now, there is no consistency check performed on the imported .json file.
-  - The projections fail at a combined angle (rotation + tilt) of 90 degrees and beyond.
-  - If the program crashes (libc++abi) when opening the export window (on a Mac) please update PyQt6 to the latest version.
-
-## After the update:
-   Sometimes I might change the name of a parameter and you will get a warning message upon startup looking something like this: _WARNING: "conic_ref_min_int" is not a valid key_! Either that key is no longer in use or its name got changed and is now reset to the default value. The settings file is updated and the warning should no longer appear after restart. Apart from this, your edited settings file will not be altered after updating.
+>[!NOTE]
+>## Update to Version 2.0.0 (released 23.09.2024)
+> - The definition of detector modules was changed from mm to px to be more accurate and consistent.
+> - Consequently, custom detectors added to the detector_db file pre 2.0.0 are no longer working.
+> - A new [detector db editor](#detector-db-editor) was added (_Settings_ > _Detector db editor_) to make the addition of custom detectors more feasible.
+> - Define and add whatever detector you collect your data with, now more easily.
+> - If something goes wrong use _Settings_ > _Reset detector db_.
+> - There is a backup of your _custom_ detector_db (detector_db.json.bak) in the xrdPlanner folder (_Help_ > _xrdPlanner_).
+> - A new parameter was added to allow for detector screen padding (plo.plot_padding), default is 0.
 
 ## Latest updates:
   - 2024-09-23 Update: Added a [detector db editor](#detector-db-editor) to define and add whatever detector you collect your data with, now more easily.
@@ -171,6 +156,19 @@ where $SDD$ is the sample to detector distance.
   - 2022-04-25 Bugfix: Calculation of the beamcenter (rotation and tilt).
 </details>
 
+<details>
+<summary>After the update</summary>
+ 
+  - Sometimes I might change the name of a parameter and you will get a warning message upon startup looking something like this: _WARNING: "conic_ref_min_int" is not a valid key_! Either that key is no longer in use or its name got changed and is now reset to the default value. The settings file is updated and the warning should no longer appear after restart. Apart from this, your edited settings file will not be altered after updating.
+</details>
+
+>[!IMPORTANT]
+>## Known bugs and limitations:
+>  - On Windows: Switching Dark/Light mode requires restart to change the window frame color.
+>  - As of now, there is no consistency check performed on the imported .json file.
+>  - The projections fail at a combined angle (rotation + tilt) of 90 degrees and beyond.
+>  - If the program crashes (libc++abi) when opening the export window (on a Mac) please update PyQt6 to the latest version.
+
 ## Examples
 #### A PILATUS3 300K detector and a Rubrene sample.
 ![Preview](https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_2_example_light.png)
@@ -209,8 +207,9 @@ where $SDD$ is the sample to detector distance.
 | Shift + c  | Previous                  |
 
 ## Settings file documentation
-
-#### geo - startup defaults
+<details>
+<summary>geo - startup defaults</summary>
+ 
     det_type = 'EIGER2'  # [str]  Pilatus3 / Eiger2 / etc.
                          #        -> Detector menu entry
     det_size = '4M'      # [str]  300K 1M 2M 6M / 1M 4M 9M 16M
@@ -237,8 +236,11 @@ where $SDD$ is the sample to detector distance.
                2.5,
                3.0,
                5.0]
+</details>
 
-#### plo - plot settings
+<details>
+<summary>plo - plot settings</summary>
+ 
     # - geometry contour section - 
     conic_tth_min = 5               # [int]    Minimum 2-theta contour line
     conic_tth_max = 100             # [int]    Maximum 2-theta contour line
@@ -308,7 +310,11 @@ where $SDD$ is the sample to detector distance.
     # - debug/testing -
     set_debug = False               # [bool]   Debug mode
 
-#### thm - theme
+</details>
+
+<details>
+<summary>thm - theme</summary>
+ 
     color_dark = '#404040'                # [color]  Global dark color
     color_light = '#EEEEEE'               # [color]  Global light color
     
@@ -342,7 +348,10 @@ where $SDD$ is the sample to detector distance.
     dark_slider_bg_hover = '#303030'      # [color]  Slider frame hover color
     dark_slider_label_color = '#C0C0C0'   # [color]  Slider frame label color
 
-#### lmt - limits
+</details>
+
+<details>
+<summary>lmt - limits</summary>
 
     # energy [keV]
     ener_min =  5    # [int] Energy minimum [keV]
@@ -378,7 +387,10 @@ where $SDD$ is the sample to detector distance.
     bsdx_max = 1000  # [int] Beamstop distance maximum [mm]
     bsdx_stp = 1     # [int] Beamstop distance step size [mm]
 
-## Detector db entries
+</details>
+
+<details>
+<summary>Detector db entries</summary>
 
 The detector_db.json is stored as a dictionary
 - key: detector name e.g. PILATUS3
@@ -415,7 +427,12 @@ The size Entry is a dictionary {key:value,}
         }
     },
 
-## Example code for adding xrdPlanner as a widget into an existing GUI
+</details>
+
+## Example code 
+<details>
+<summary>Example code for adding xrdPlanner as a widget into an existing GUI</summary>
+ 
 #### xrdPlanner uses its own menu bar, setting the GUI as the parent for xrdPlanner makes it add its menus to the parents menu bar, and likely more in the future.
 
     import sys
@@ -439,5 +456,6 @@ The size Entry is a dictionary {key:value,}
         window = MainWindow()
         window.show()
         app.exec()
+</details>
 
-#### I hope this turns out to be useful for someone!
+## I hope this turns out to be useful for someone!
