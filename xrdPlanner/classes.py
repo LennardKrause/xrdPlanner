@@ -2953,9 +2953,10 @@ class MainWindow(QtWidgets.QMainWindow):
         size_row = self.table_size.currentRow()
         hmn = int(self.table_size.item(size_row, 1).text())
         vmn = int(self.table_size.item(size_row, 2).text())
+        pxs = self._db_dict[det]['pxs']
         xdim = self._db_dict[det]['hmp'] * hmn + self._db_dict[det]['hgp'] * (hmn-1) + self._db_dict[det]['cbh']
         ydim = self._db_dict[det]['vmp'] * vmn + self._db_dict[det]['vgp'] * (vmn-1) + self._db_dict[det]['cbh']
-        self._dim_mm.setText(f'{xdim * self._db_dict[det]['pxs']:.1f} \u00D7 {ydim * self._db_dict[det]['pxs']:.1f} mm\u00B2')
+        self._dim_mm.setText(f'{xdim * pxs:.1f} \u00D7 {ydim * pxs:.1f} mm\u00B2')
         self._dim_px.setText(f'{xdim:.0f} \u00D7 {ydim:.0f} px')
     
     def win_detdb_par_change(self, val):
