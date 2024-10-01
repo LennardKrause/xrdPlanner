@@ -97,6 +97,7 @@ where $SDD$ is the sample to detector distance.
 > - A new parameter was added to allow for detector screen padding (plo.plot_padding), default is 0.
 
 ## Latest updates:
+  - 2024-10-01 Bugfix: Fixed an error crashing the detector db editor on python < 3.12 (Thanks Lise).
   - 2024-09-23 Update: Added a [detector db editor](#detector-db-editor) to define and add whatever detector you collect your data with, now more easily.
   - 2024-09-23 Update: Changed the detector module definition from mm to px (pre 2.0.0 custom detectors won't work!).
   - 2024-09-23 Update: Added a preview plot to the FWHM setup window.
