@@ -10,8 +10,14 @@ from PyQt6 import QtWidgets, QtCore, QtGui
 from pyFAI import calibrant
 import xrdPlanner.resources
 
+# make cifs added to menu in init similar to calibrants
+# store only the path and calculate the rest on load
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, *args, **kwargs):
+        """
+        Initializes the main application window and sets up various components and configurations.
+        """
         super().__init__(*args, **kwargs)
 
         # set path home
@@ -45,6 +51,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.path_settings_current = os.path.join(self.path_settings, self.active_settings)
         # set path to detector database
         self.path_detdb = os.path.join(self.path_home, 'detector_db.json')
+        # set path to cif file paths
+        self.path_cif_db = os.path.join(self.path_settings, 'cif_db.json')
+        # initialize powder diffraction plot window
+        self.pxrd_win = None
+        # initialize fwhm parameter window
+        self.fwhm_win = None
+        # initialize about window
+        self.about_win = None
+        # initialize geometry window
+        self.geometry_win = None
+        # initialize hotkey window
+        self.hotkeys_win = None
 
         # move settings file from old location
         _old_settings_file = os.path.join(self.path_home, 'settings.json')
@@ -112,21 +130,24 @@ class MainWindow(QtWidgets.QMainWindow):
             self.geo.bs_list.append(self.geo.bssz)
             self.geo.bs_list.sort()
 
-        # What standards should be available as reference
-        # The d spacings will be imported from pyFAI
-        self.ref_library = calibrant.names()
-        # dict to store custom reference data
-        self.ref_custom = {}
-        self.ref_custom_hkl = {}
-
         # initialise all that depends on the settings
         # call this function to apply changes were made
         # to the settings file -> settings_reload()
         self.modifiables_init()
         
+        # What standards should be available as reference
+        # The d spacings will be imported from pyFAI
+        self.ref_library = calibrant.names()
+
         # populate the menus with detectors, references and units
         self.menu_init()
         
+        # dict to store custom reference data
+        self.ref_cif = {}
+        self.ref_cell = {}
+        # load stored cif file links
+        self.get_ref_db_from_file()
+
         # initialize the screen
         self.main_screen_init()
 
@@ -143,6 +164,23 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sliderWidget = SliderWidget(self)
 
     def modifiables_init(self):
+        """
+        Initializes modifiable parameters for the plotting environment.
+        This method performs the following tasks:
+        - Retrieves and optionally reverses the colormap based on the dark mode setting.
+        - Applies the theme based on the dark mode setting.
+        - Sets the background color of the plotting window.
+        - Generates contour levels for the plot.
+        - Translates units for the plot title.
+        - Validates the unit index and raises an error if it is out of range.
+        - Retrieves and updates the detector specifications.
+        - Selects the current detector parameters.
+        - Removes unavailable detectors from the detector database based on the detector bank.
+        - Updates the generic window settings.
+        - Initializes the tooltip for hkl labels with specified font settings.
+        Raises:
+            SystemExit: If the unit index is out of the valid range.
+        """
         # get colormap
         self.cont_cmap = pg.colormap.get(self.geo.colormap, skipCache=True)
         # reverse the colormap useful to increase visibility in darkmode
@@ -161,7 +199,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # translate unit for plot title
         self.unit_names = ['2\u03B8 [\u00B0]',
                            'd [\u212B]',
-                           'q [\u212B\u207B\u00B9]',
+                           'Q [\u212B\u207B\u00B9]',
                            'sin(\u03B8)/\u03BB [\u212B\u207B\u00B9]']
         if self.geo.unit >= len(self.unit_names):
             print(f'Error: Valid geo.unit range is from 0 to {len(self.unit_names)-1}, geo.unit={self.geo.unit}')
@@ -195,6 +233,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     for size in list(self.detector_db[det]['size'].keys()):
                         if size not in self.geo.det_bank[det]:
                             self.detector_db[det]['size'].pop(size)
+        
+        self.update_win_generic()
 
         # init the hkl tooltip
         font = QtGui.QFont()
@@ -203,6 +243,23 @@ class MainWindow(QtWidgets.QMainWindow):
         QtWidgets.QToolTip.setFont(font)
 
     def params_init(self):
+        """
+        Initialize parameters for the xrdPlanner class.
+
+        This method performs the following steps:
+        1. Fetches the default geometry, detector, plot specifications, and limits.
+        2. Checks if the settings file exists:
+           - If it does not exist, it saves the current settings to a file.
+           - If it exists, it loads the parameters from the file.
+        3. Resets to default settings if requested.
+        4. Updates the settings file with default values if requested, 
+           which can be useful for adding missing entries.
+
+        Attributes:
+            self.path_settings_current (str): Path to the current settings file.
+            self.plo.reset_settings (bool): Flag to reset settings to default.
+            self.plo.update_settings (bool): Flag to update settings with default values.
+        """
         # fetch the geometry, detector, plot specifications and limits
         self.get_defaults_all()
         # file name to store current settings
@@ -222,6 +279,33 @@ class MainWindow(QtWidgets.QMainWindow):
             self.settings_save_to_file()
 
     def main_screen_init(self):
+        """
+        Initializes the main screen for the application.
+
+        This method sets up the plot for contours and beam center, configures various
+        plot settings, and initializes containers and items for contour lines, beam stop,
+        reference lines, and other plot elements.
+
+        Steps performed:
+        1. Locks the aspect ratio of the plot.
+        2. Hides the bottom and left axes.
+        3. Disables mouse pan/zoom and right-click context menu.
+        4. Hides the autoscale button.
+        5. Enables debug mode functions if debug mode is set.
+        6. Defines the font for labeling conics.
+        7. Initializes containers for various plot elements.
+        8. Adds a scatter plot for the beam stop.
+        9. Adds empty plots for reference contour lines and makes them clickable.
+        10. Adds empty plots for contour lines and labels them.
+        11. Adds a label for the beam stop contour.
+        12. Adds scatter plots for the poni and beam center.
+        13. Adds an overlay image item and sets its color map.
+        14. Builds detector modules.
+        15. Resizes the window and plot to fit proper dimensions.
+        16. Initializes unit and correction labels.
+        17. Creates cones and draws contour lines.
+        18. Sets the window title.
+        """
         # init the plot for contours and beam center
         self.ax.setAspectLocked()
         #remove axes
@@ -276,7 +360,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.ax.addItem(ref)
             self.patches['reference'].append(ref)
             self.patches['reference'][i].setClickable(True, width=self.plo.conic_ref_linewidth*2)
-            self.patches['reference'][i].sigClicked.connect(self.tooltip_show)
+            self.patches['reference'][i].sigClicked.connect(self.tooltip_hkl_show)
             self.patches['reference'][i].name = None
 
         # add empty plot per contour line
@@ -333,7 +417,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # fix the window size
         # resize the window
         # resize the plot
-        self.resize_window()
+        self.resize_win()
 
         # add unit label
         self.label_unit_init()
@@ -349,6 +433,24 @@ class MainWindow(QtWidgets.QMainWindow):
     #  LABELS  #
     ############
     def label_unit_init(self):
+        """
+        Initializes and sets up the unit label for the plot.
+
+        This method creates a text item for the unit label using the specified font,
+        color, and fill properties. It then sets the text of the label to the name
+        of the current unit and adds it to the plot axis at a specified position.
+
+        Attributes:
+            self.unit_label (pg.TextItem): The text item for the unit label.
+            self.unit_label_color (QtGui.QColor): The color of the unit label text.
+            self.unit_label_fill (QtGui.QBrush): The fill color of the unit label background.
+            self.unit_names (dict): A dictionary mapping unit identifiers to their names.
+            self.geo.unit (str): The current unit identifier.
+            self.plo.unit_label_size (int): The pixel size of the unit label font.
+            self.xdim (float): The x-coordinate for positioning the unit label.
+            self.ydim (float): The y-coordinate for positioning the unit label.
+            self.ax (pg.PlotItem): The plot axis to which the unit label is added.
+        """
         font = QtGui.QFont()
         font.setPixelSize(self.plo.unit_label_size)
         self.unit_label = pg.TextItem(anchor=(0.0,0.0), color=self.unit_label_color, fill=self.unit_label_fill)
@@ -358,6 +460,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.unit_label.setPos(-self.xdim, self.ydim)
 
     def label_corr_init(self):
+        """
+        Initializes and configures the correction label for the plot.
+
+        This method sets up a text label with specific font size, color, and fill properties.
+        The label is initially hidden and positioned at the specified coordinates.
+        A tooltip is also added to the label to provide additional information.
+
+        Attributes:
+            cor_label (pg.TextItem): The text item used as the correction label.
+            plo.unit_label_size (int): The pixel size for the label font.
+            unit_label_color (str or QColor): The color of the label text.
+            unit_label_fill (str or QColor): The fill color of the label background.
+            xdim (float): The x-coordinate for positioning the label.
+            ydim (float): The y-coordinate for positioning the label.
+        """
         font = QtGui.QFont()
         font.setPixelSize(self.plo.unit_label_size)
         self.cor_label = pg.TextItem(anchor=(1.0,1.0), color=self.unit_label_color, fill=self.unit_label_fill)
@@ -369,6 +486,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cor_label.setPos(self.xdim, -self.ydim)
 
     def label_conic_pos_auto(self, x, y):
+        """
+        Adjusts the label position to maintain readability and ensures the label
+        stays within visible boundaries of the detector dimensions. This method 
+        tries to place labels as close as possible to the horizontal center.
+
+        Parameters:
+        x (numpy.ndarray): Array of x coordinates of the conic section.
+        y (numpy.ndarray): Array of y coordinates of the conic section.
+
+        Returns:
+        list: A list containing the x and y coordinates of the label position 
+              if the conic section is visible, otherwise returns False.
+        """
         # This tries to place labels as close as possible
         #  to the horizontal center.
         # Adjust the label position to maintain readibility
@@ -415,6 +545,25 @@ class MainWindow(QtWidgets.QMainWindow):
         return [label_x, label_y]
         
     def label_conic_pos_static(self, x, y, xdim, ydim, omega, theta):
+        """
+        Determine the label position for a conic section on a detector.
+
+        This method checks if the conic section defined by the coordinates (x, y) is within the detector area
+        defined by dimensions (xdim, ydim). If the conic section is within the detector area, it calculates
+        an appropriate label position based on the given angles omega and theta to maintain readability.
+
+        Parameters:
+        x (numpy.ndarray): Array of x-coordinates of the conic section.
+        y (numpy.ndarray): Array of y-coordinates of the conic section.
+        xdim (float): Half-width of the detector area.
+        ydim (float): Half-height of the detector area.
+        omega (float): Angle in degrees, used to determine label position.
+        theta (float): Angle in radians, used to determine label position.
+
+        Returns:
+        list or bool: A list containing the label position [hoff, y] if the conic section is within the detector area,
+                  otherwise False.
+        """
         # check if conic is visible
         cx = np.argwhere((x >= -xdim) & (x <= xdim))
         cy = np.argwhere((y >= -ydim) & (y <= ydim))
@@ -435,6 +584,22 @@ class MainWindow(QtWidgets.QMainWindow):
     #  THEME  #
     ###########
     def theme_apply(self, use_dark, redraw=False):
+        """
+        Apply the theme to the application.
+        This method sets the application's theme to either dark mode or light mode 
+        based on the `use_dark` parameter. It updates various UI elements such as 
+        icons, colors, and palettes to match the selected theme. Optionally, it can 
+        also redraw the canvas if the `redraw` parameter is set to True.
+        Parameters:
+        -----------
+        use_dark : bool
+            If True, apply the dark theme. If False, apply the light theme.
+        redraw : bool, optional
+            If True, redraw the canvas after applying the theme. Default is False.
+        Returns:
+        --------
+        None
+        """
         # set darkmode
         self.geo.darkmode = use_dark
         _color_dark = QtGui.QColor(self.thm.color_dark)
@@ -518,20 +683,54 @@ class MainWindow(QtWidgets.QMainWindow):
             palette.setColor(QtGui.QPalette.ColorRole.BrightText,      _color_dark)
             palette.setColor(QtGui.QPalette.ColorRole.ToolTipBase,     _color_light)
             palette.setColor(QtGui.QPalette.ColorRole.ToolTipText,     _color_dark)
-
+        
         # apply palette to app
         app = QtWidgets.QApplication.instance()
         app.setPalette(palette)
         app.setStyle('Fusion')
-        
+
+        # change palette for all child windows
+        self.change_palette_recursive(self, app.palette())
+
         # redraw the canvas
         if redraw:
             self.redraw_canvas()
+    
+    def change_palette_recursive(self, root, palette):
+        """
+        Recursively changes the palette of a given root widget and all its child widgets.
 
+        Args:
+            root (QtWidgets.QWidget): The root widget whose palette will be changed.
+            palette (QtGui.QPalette): The new palette to be applied to the root widget and its children.
+
+        Returns:
+            None
+        """
+        root.setPalette(palette)
+        for child in root.children():
+            if isinstance(child, QtWidgets.QWidget):
+                self.change_palette_recursive(child, palette)
+    
     ##########
     #  MENU  #
     ##########
+
     def menu_init(self, reset=False):
+        """
+        Initializes the menu bar for the application.
+        Parameters:
+        reset (bool): If True, clears the existing menu bar before initializing.
+        This method sets up various menus and submenus including:
+        - Detector: Allows selection of different detectors and their sizes.
+        - Reference: Allows selection of reference types including 'None', 'From pyFAI', 'From cif', and 'From cell'.
+        - Beamstop: Allows selection of beamstop sizes and 'None'.
+        - Unit: Allows selection of different units.
+        - View: Contains submenus for Theme, Colormap, Overlay, and Functions.
+        - Settings: Contains options to load, save, import, export settings, and edit files.
+        - Help: Provides information about the application, geometry conventions, and hotkeys.
+        Each menu item is associated with specific actions that are triggered when the item is selected.
+        """
 
         if reset:
             self.menu_bar.clear()
@@ -584,7 +783,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.geo.reference.lower() == 'none':
             ref_action.setChecked(True)
         # menu Reference: add pyFAI library
-        sub_menu_pyFAI = QtWidgets.QMenu('pyFAI', self)
+        sub_menu_pyFAI = QtWidgets.QMenu('From pyFAI', self)
         menu_ref.addMenu(sub_menu_pyFAI)
         for ref_name in sorted(self.ref_library):
             ref_action = QtGui.QAction(ref_name, self, checkable=True)
@@ -594,12 +793,17 @@ class MainWindow(QtWidgets.QMainWindow):
             if ref_name == self.geo.reference:
                 ref_action.setChecked(True)
 
-        # menu Reference: add Custom
-        self.sub_menu_custom = QtWidgets.QMenu('Custom', self)
-        menu_ref.addMenu(self.sub_menu_custom)
+        # menu Reference: add cif
+        self.sub_menu_cif = QtWidgets.QMenu('From cif', self)
+        menu_ref.addMenu(self.sub_menu_cif)
 
+        # menu Reference: add cell
+        self.sub_menu_cell = QtWidgets.QMenu('From cell', self)
+        menu_ref.addMenu(self.sub_menu_cell)
+
+        menu_ref.addSeparator()
         # menu Reference: add None
-        cell_action = QtGui.QAction('From Cell', self)
+        cell_action = QtGui.QAction('Calculate from Cell', self)
         cell_action.triggered.connect(self.win_uc_show)
         menu_ref.addAction(cell_action)
         
@@ -734,6 +938,11 @@ class MainWindow(QtWidgets.QMainWindow):
            self.action_funct_fwhm_show.setChecked(False)
         menu_functions.addAction(self.action_funct_fwhm_show)
 
+        # PXRD pattern
+        self.action_pxrd_pattern = QtGui.QAction('PXRD pattern', self)
+        self.menu_set_action(self.action_pxrd_pattern, self.win_pxrd_plot)
+        menu_view.addAction(self.action_pxrd_pattern)
+
         ############
         # SETTINGS #
         ############
@@ -814,19 +1023,37 @@ class MainWindow(QtWidgets.QMainWindow):
         # menu About
         menu_help = self.menu_bar.addMenu('Help')
         action_about = QtGui.QAction('xrdPlanner', self)
-        self.menu_set_action(action_about, self.show_about_window)
+        self.menu_set_action(action_about, self.show_about_win)
         menu_help.addAction(action_about)
         action_geometry = QtGui.QAction('Geometry conventions', self)
-        self.menu_set_action(action_geometry, self.show_geometry_window)
+        self.menu_set_action(action_geometry, self.show_geometry_win)
         menu_help.addAction(action_geometry)
+        action_hotkeys = QtGui.QAction('Hotkeys', self)
+        self.menu_set_action(action_hotkeys, self.show_hotkeys_win)
+        menu_help.addAction(action_hotkeys)
 
     def menu_set_action(self, action, target, *args):
+        """
+        Connects a given action's triggered signal to a target function with optional arguments.
+
+        Parameters:
+        action (QAction): The action whose triggered signal will be connected.
+        target (callable): The function to be called when the action is triggered.
+        *args: Additional arguments to be passed to the target function when called.
+        """
         action.triggered.connect(lambda: target(*args))
 
     ############
     #  TOGGLE  #
     ############
     def toggle_unit_hover(self):
+        """
+        Toggles the visibility of unit hover in the plot.
+
+        This method switches the state of `show_unit_hover` in the plot object (`plo`).
+        If `show_unit_hover` is enabled, it sets the corresponding action (`action_unit_hover`)
+        to checked; otherwise, it unchecks it. Finally, it triggers a redraw of the canvas.
+        """
         self.plo.show_unit_hover = not self.plo.show_unit_hover
         if self.plo.show_unit_hover:
             self.action_unit_hover.setChecked(True)
@@ -835,6 +1062,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.redraw_canvas()
 
     def toggle_overlay_polarisation(self):
+        """
+        Toggles the polarisation overlay on or off.
+
+        This method switches the state of the polarisation overlay by toggling
+        the `show_polarisation` attribute of the `plo` object. It also updates
+        the checked state of the `action_show_pol` action to reflect the new
+        state and triggers a redraw of the canvas.
+        """
         self.plo.show_polarisation = not self.plo.show_polarisation
         if self.plo.show_polarisation:
             self.action_show_pol.setChecked(True)
@@ -843,6 +1078,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.redraw_canvas()
 
     def toggle_overlay_solidangle(self):
+        """
+        Toggles the visibility of the solid angle overlay on the plot.
+
+        This method switches the state of the `show_solidangle` attribute of the `plo` object.
+        It also updates the checked state of the `action_show_ang` action accordingly and 
+        triggers a redraw of the canvas to reflect the changes.
+        """
         self.plo.show_solidangle = not self.plo.show_solidangle
         if self.plo.show_solidangle:
             self.action_show_ang.setChecked(True)
@@ -851,6 +1093,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.redraw_canvas()
 
     def toggle_overlay_highlight(self):
+        """
+        Toggles the overlay highlight warning state.
+
+        This method switches the state of the overlay highlight warning between
+        enabled and disabled. It updates the corresponding action's checked state
+        and triggers a canvas redraw to reflect the change.
+        """
         self.plo.overlay_toggle_warn = not self.plo.overlay_toggle_warn
         if self.plo.overlay_toggle_warn:
             self.action_overlay_warn.setChecked(True)
@@ -859,19 +1108,35 @@ class MainWindow(QtWidgets.QMainWindow):
         self.redraw_canvas()
 
     def toggle_fwhm(self):
-       if not self.action_funct_fwhm_show.isEnabled():
-           return
-       self.plo.show_fwhm = not self.plo.show_fwhm
-       if self.plo.show_fwhm:
-           self.action_funct_fwhm_show.setChecked(True)
-       else:
-           self.action_funct_fwhm_show.setChecked(False)
-       self.redraw_canvas()
+        """
+        Toggles the visibility of the Full Width at Half Maximum (FWHM) on the plot.
+
+        This method checks if the FWHM action is enabled. If it is, it toggles the 
+        `show_fwhm` attribute of the plot object (`plo`). It also updates the 
+        checked state of the FWHM action in the UI and triggers a redraw of the canvas.
+        """
+        if not self.action_funct_fwhm_show.isEnabled():
+            return
+        self.plo.show_fwhm = not self.plo.show_fwhm
+        if self.plo.show_fwhm:
+            self.action_funct_fwhm_show.setChecked(True)
+        else:
+            self.action_funct_fwhm_show.setChecked(False)
+        self.redraw_canvas()
 
     ############
     #   REDO   #
     ############
     def redraw_canvas(self):
+        """
+        Redraws the canvas by performing the following steps:
+        1. Initializes modifiable elements.
+        2. Clears the current screen.
+        3. Re-initializes the main screen.
+        4. Applies styles to the slider widget.
+        5. Initializes sliders in the slider widget.
+        6. Centers the slider frame.
+        """
         # save darkmode toggle
         #self.settings_save_to_file()
         self.modifiables_init()
@@ -885,6 +1150,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sliderWidget.center_frame()
 
     def reset_detector_db(self):
+        """
+        Resets the detector database and updates the current detector settings.
+
+        This method performs the following actions:
+        1. Resets the `detector_db` by calling `get_det_library` with `update=False` and `reset=True`.
+        2. Checks if the current detector type (`self.geo.det_type`) is in the updated `detector_db`.
+           - If not, sets `self.geo.det_type` to the first available detector type.
+        3. Checks if the current detector size (`self.geo.det_size`) is available for the current detector type.
+           - If not, sets `self.geo.det_size` to the first available size for the current detector type.
+        4. Calls `change_detector` to apply the changes.
+
+        """
         self.detector_db = self.get_det_library(update=False, reset=True)
         # if current detector is not in the available list of detectors
         # pick the first valid one to continue
@@ -895,21 +1172,338 @@ class MainWindow(QtWidgets.QMainWindow):
             self.geo.det_size = next(iter(self.detector_db[self.geo.det_type]['size'].keys()))
         self.change_detector()
 
+    #############
+    #  UPDATE   #
+    #############
+    def update_screen(self, val=None):
+        """
+        Updates the screen based on the provided value and the sender's object name.
+
+        Args:
+            val (float, optional): The new value to update. Defaults to None.
+
+        Updates:
+            - Updates the geometry attributes (`dist`, `rota`, `tilt`, `voff`, `hoff`, `ener`, `bsdx`)
+              based on the sender's object name.
+            - Adjusts the beamstop slider limits if the sender is 'dist' and the slider is enabled.
+            - Re-calculates and re-draws cones and contours.
+            - Updates child windows.
+            - Draws reference contours if a reference is set.
+        """
+        if val is not None:
+            if self.sender().objectName() == 'dist':
+                self.geo.dist = float(val)
+                if self.plo.enable_slider_bsdx:
+                    # set beamstop max distance to current detector distance
+                    # or the maximum allowed value, whichever is smaller
+                    current_max = min(self.geo.dist, self.lmt.bsdx_max)
+                    self.sliderWidget.update_slider_limits(self.sliderWidget.sl_bsdx,
+                                                           self.lmt.bsdx_min,
+                                                           current_max)
+            elif self.sender().objectName() == 'rota':
+                self.geo.rota = float(val)
+            elif self.sender().objectName() == 'tilt':
+                self.geo.tilt = float(val)
+            elif self.sender().objectName() == 'voff':
+                self.geo.voff = float(val)
+            elif self.sender().objectName() == 'hoff':
+                self.geo.hoff = float(val)
+            elif self.sender().objectName() == 'ener':
+                self.geo.ener = float(val)
+            elif self.sender().objectName() == 'bsdx':
+                self.geo.bsdx = float(val)
+
+        # re-calculate cones and re-draw contours
+        self.draw_conics()
+        # update child windows
+        self.update_win_generic()
+        # draw reference contours
+        if self.geo.reference != 'None':
+            self.get_reference()
+            self.draw_reference()
+
+    def update_win_generic(self):
+        """
+        Updates the window with generic settings.
+
+        This method performs updates to the PXRD window and the FWHM window
+        by calling the respective update methods.
+        """
+        self.win_pxrd_update()
+        self.win_fwhm_update()
+
+    ##################
+    #  DRAW CONICS   #
+    ##################
+    def draw_conics(self):
+        """
+        Draws conic sections on the grid based on the current geometry and plotting settings.
+        This method calculates the offset of the contours resulting from vertical offset (voff) 
+        and rotation, shifts the grid to draw the cones, and ensures the contours are drawn 
+        within the visible area. It also handles the overlay of additional information such as 
+        polarisation, solid angle, unit hover, and full width at half maximum (FWHM).
+        The method performs the following steps:
+        1. Converts theta from degrees to radians.
+        2. Calculates the beam center shift.
+        3. Handles the overlay of additional information if required.
+        4. Updates the beam center and PONI (Point of Normal Incidence).
+        5. Hides the beamstop contour and label initially.
+        6. Checks if the beamstop is on screen and updates its visibility and position.
+        7. Calculates the maximum resolution for the given geometry.
+        8. Plots conic sections at given 2theta values.
+        The method uses several helper functions to calculate overlays, conic sections, 
+        label positions, and units.
+        Attributes:
+            self.geo: Geometry settings including tilt, rotation, vertical offset, distance, 
+                      horizontal offset, beamstop size, and beamstop distance.
+            self.plo: Plotting settings including overlay resolution, polarisation factor, 
+                      conic steps, conic label auto-placement, and conic line width.
+            self.patches: Dictionary of plot elements including overlay, beam center, PONI, 
+                          beamstop, and labels.
+            self.cont_geom_num: Array of 2theta values for plotting conic sections.
+            self.cont_cmap: Colormap for conic sections.
+        """
+        # calculate the offset of the contours resulting from voff and rotation
+        # shift the grid to draw the cones, to make sure the contours are drawn
+        # within the visible area
+
+        # convert theta in degrees to radians
+        # for some reason I defined it negative some time ago
+        # now there's no turning back!
+        _omega = -np.deg2rad(self.geo.tilt + self.geo.rota)
+        
+        # beamcenter shift
+        _comp_shift = -(self.geo.voff - self.geo.dist * np.tan(_omega) - np.deg2rad(self.geo.tilt) * self.geo.dist)
+
+        # overlay
+        if self.plo.show_polarisation or self.plo.show_solidangle or self.plo.show_unit_hover or self.plo.show_fwhm:
+            _grd, self._tth, self._polcor, self._solang, self._fwhm = self.calc_overlays(_omega, res=self.plo.overlay_resolution, pol=self.plo.polarisation_fac)
+            self.patches['overlay'].setImage(_grd * self._polcor * self._solang,
+                                             autoLevels=False,
+                                             levels=[0.0,1.0],
+                                             rect=(-self.xdim,
+                                                   -self.ydim,
+                                                    self.xdim * 2,
+                                                    self.ydim * 2))
+        else:
+            self._tth = None
+            self.patches['overlay'].setImage(None)
+            self.cor_label.hide()
+        
+        # update beam center
+        self.patches['beamcenter'].setData([self.geo.hoff],[_comp_shift])
+        # update beam center
+        self.patches['poni'].setData([self.geo.hoff],[-(self.geo.voff - np.deg2rad(self.geo.tilt)*self.geo.dist)])
+
+        # hide beamstop contour and label
+        self.patches['beamstop'].setVisible(False)
+        self.patches['bs_label'].setVisible(False)
+        # check if beamstop is on screen, change visibility
+        if self.geo.bssz and not (isinstance(self.geo.bssz, str) and self.geo.bssz.lower() == 'none'):
+            # make sure it is a float (might be a string from the export window!)
+            self.geo.bssz = float(self.geo.bssz)
+            # update beam stop
+            self.bs_theta = np.tan((self.geo.bssz/2) / self.geo.bsdx)
+
+            # calculate the conic section corresponding to the theta angle
+            # :returns False is conic is outside of visiblee area
+            x, y = self.calc_conic(_omega, self.bs_theta, steps=self.plo.conic_steps)
+            if x is not False:
+                # figure out the label positions
+                if self.plo.conic_label_auto:
+                    label_pos = self.label_conic_pos_auto(x, y)
+                else:
+                    label_pos = self.label_conic_pos_static(x, y, self.xdim, self.ydim, _omega, self.bs_theta)
+                
+                # continue if label can be placed
+                if label_pos is not False:
+                    # plot the conic section
+                    self.patches['beamstop'].setData(x, y, fillLevel=y.max())
+                    self.patches['beamstop'].setVisible(True)
+
+                    _unit = self.calc_unit(self.bs_theta)
+                    self.patches['bs_label'].setPos(*label_pos)
+                    self.patches['bs_label'].setText(f'{_unit:.2f}')
+                    self.patches['bs_label'].setVisible(True)
+        
+        # calculate the maximum resolution for the given geometry
+        if self.plo.conic_tth_auto:
+            theta_max = np.rad2deg(self.calc_max_resolution(m=0.90))
+            # make new array of 2theta values
+            self.cont_geom_num = np.linspace(theta_max/self.plo.conic_tth_num, theta_max, self.plo.conic_tth_num)
+        
+        # plot conics at given 2theta values
+        for _n, _ttd in enumerate(self.cont_geom_num):
+            self.patches['conic'][_n].setVisible(False)
+            self.patches['labels'][_n].setVisible(False)
+            # current fraction for colormap
+            _f = _n/len(self.cont_geom_num)
+
+            # convert theta in degrees to radians
+            theta = np.deg2rad(_ttd)
+
+            # calculate the conic section corresponding to the theta angle
+            # :returns False is conic is outside of visiblee area
+            x, y = self.calc_conic(_omega, theta, steps=self.plo.conic_steps)
+            if x is False or x.size == 0:
+                continue
+
+            # figure out the label positions
+            if self.plo.conic_label_auto:
+                label_pos = self.label_conic_pos_auto(x, y)
+            else:
+                label_pos = self.label_conic_pos_static(x, y, self.xdim, self.ydim, _omega, theta)
+            # continue if label can be placed
+            if label_pos is False:
+                continue
+
+            # plot the conic section
+            self.patches['conic'][_n].setData(x, y, pen=pg.mkPen(self.cont_cmap.map(_f, mode='qcolor'), width=self.plo.conic_linewidth))
+            self.patches['conic'][_n].setVisible(True)
+            
+            _unit = self.calc_unit(theta)
+            self.patches['labels'][_n].setPos(*label_pos)
+            self.patches['labels'][_n].setText(f'{_unit:.2f}', color=self.cont_cmap.map(_f, mode='qcolor'))
+            self.patches['labels'][_n].setVisible(True)
+
+    def draw_reference(self):
+        """
+        Draws reference contour lines on the plot.
+        This method plots standard contour lines based on the number of reference 
+        conic sections specified. It handles the visibility and data of each contour 
+        line, calculates the necessary angles and positions, and updates the plot 
+        accordingly.
+        The method performs the following steps:
+        1. Iterates over the number of reference conic sections.
+        2. Sets the visibility of each contour line to False initially.
+        3. Checks if the current index is within the range of available d-spacings.
+        4. Calculates the wavelength and theta angle for each d-spacing.
+        5. Converts theta from degrees to radians and adjusts for tilt and rotation.
+        6. Calculates the conic section corresponding to the theta angle.
+        7. Updates the contour line data and visibility if the conic section is within the visible area.
+        8. If available, updates the contour line with hkl values and intensity information.
+        9. Plots the conic section with the appropriate line width and color.
+        Notes:
+        - The method assumes that `self.geo.ener` is the energy value used for wavelength calculation.
+        - The method uses `np.arcsin` for angle calculation and `np.deg2rad` for degree to radian conversion.
+        - The method relies on `self.calc_conic` to compute the conic section coordinates.
+        - The method uses `pg.mkPen` for setting the pen properties of the contour lines.
+        Attributes:
+        - self.plo.conic_ref_num: Number of reference conic sections.
+        - self.cont_ref_dsp: List of d-spacings for the reference contours.
+        - self.geo.ener: Energy value for wavelength calculation.
+        - self.geo.tilt: Tilt angle for the geometry.
+        - self.geo.rota: Rotation angle for the geometry.
+        - self.plo.conic_steps: Number of steps for conic section calculation.
+        - self.cont_ref_hkl: List of hkl values and intensities for the reference contours.
+        - self.plo.conic_ref_cif_irel: Flag to show relative intensity.
+        - self.plo.conic_ref_cif_lw_mult: Line width multiplier for relative intensity.
+        - self.plo.conic_hkl_show_int: Flag to show intensity in the tooltip.
+        - self.plo.conic_ref_cif_lw_min: Minimum line width for the reference contours.
+        - self.plo.conic_ref_linewidth: Base line width for the reference contours.
+        - self.conic_ref_color: Color for the reference contour lines.
+        - self.patches['reference']: Dictionary to store the reference contour line patches.
+        """
+        # plot reference contour lines
+        # standard contour lines are to be drawn
+        for _n in range(self.plo.conic_ref_num):
+            self.patches['reference'][_n].setVisible(False)
+            # number of d-spacings might be lower than the maximum number of allowed contours
+            if _n < len(self.cont_ref_dsp):
+                _d = self.cont_ref_dsp[_n]
+                # None adds a list of zeros
+                # catch those here
+                if _d <= 0:
+                    continue
+                # lambda = 2 * d * sin(theta)
+                # 2-theta = 2 * (lambda / 2*d)
+                # lambda -> (12.398/geo_energy)
+                lambda_d = (12.398/self.geo.ener) / (2*_d)
+                if lambda_d > 1.0:
+                    continue
+                
+                # get theta
+                theta = 2 * np.arcsin(lambda_d)
+                
+                # convert theta in degrees to radians
+                # for some reason I defined it negative some time ago
+                # now there's no turning back!
+                _omega = -np.deg2rad(self.geo.tilt + self.geo.rota)
+                
+                # calculate the conic section corresponding to the theta angle
+                # :returns False is conic is outside of visiblee area
+                x, y = self.calc_conic(_omega, theta, steps=self.plo.conic_steps)
+                if x is False:
+                    continue
+
+                # if hkl are available
+                # put them in the proper container for the contour
+                # so indexing gets it right
+                width = 1.0
+                if self.cont_ref_hkl is not None:
+                    h, k, l, itot, irel = self.cont_ref_hkl[_n]
+                    if self.plo.conic_ref_cif_irel and irel > 0:
+                        width = irel * self.plo.conic_ref_cif_lw_mult
+                    if self.plo.conic_hkl_show_int:
+                        # alignment of the tooltip text is far from trivial
+                        # detour via QTextEdit -> setAlignment and toHtml
+                        # hence the <br> instead of \n
+                        # 
+                        # self.setStyleSheet('''QToolTip {... ) didn't work
+                        self.patches['reference'][_n].name = f'({h: 2.0f} {k: 2.0f} {l: 2.0f})<br>{round(itot, 0):,.0f}'
+                    else:
+                        self.patches['reference'][_n].name = f'({h: 2.0f} {k: 2.0f} {l: 2.0f})'
+                else:
+                    self.patches['reference'][_n].name = None
+                
+                # plot the conic section
+                self.patches['reference'][_n].setData(x, y, pen=pg.mkPen(self.conic_ref_color,
+                                                                         width=max(self.plo.conic_ref_cif_lw_min, 
+                                                                                   self.plo.conic_ref_linewidth * width)))
+                self.patches['reference'][_n].setVisible(True)
+    
     ############
     #  CHANGE  #
     ############
     def change_beamstop(self, size):
+        """
+        Change the size of the beamstop and redraw the canvas.
+
+        Parameters:
+        size (float): The new size of the beamstop.
+        """
         self.geo.bssz = size
         self.redraw_canvas()
 
     def change_cmap(self, cmap):
+        """
+        Change the colormap of the geo object and update the UI accordingly.
+
+        Parameters:
+        cmap (str): The name of the new colormap to be applied.
+
+        This method updates the colormap of the geo object, checks the corresponding
+        action in the menu, redraws the canvas, and updates the generic window.
+        """
         self.geo.colormap = cmap
         for action in self.menu_cmap.actions():
             if action.text() == self.geo.colormap:
                 action.setChecked(True)
         self.redraw_canvas()
+        self.update_win_generic()
 
     def change_detector(self, det_name=None, det_size=None):
+        """
+        Change the detector settings and update the display.
+
+        This method allows changing the detector type and size. It then updates
+        the detector parameters, clears the current display, re-initializes the 
+        main screen, centers the slider frame, and updates the window.
+
+        Args:
+            det_name (str, optional): The name/type of the detector. Defaults to None.
+            det_size (tuple, optional): The size of the detector. Defaults to None.
+        """
         if det_name is not None:
             self.geo.det_type = det_name
         if det_size is not None:
@@ -922,44 +1516,105 @@ class MainWindow(QtWidgets.QMainWindow):
         self.main_screen_init()
         # center the slider frame
         self.sliderWidget.center_frame()
+        self.update_win_generic()
 
     def change_units(self, unit_index):
+        """
+        Change the units of measurement for the geometry and update the UI accordingly.
+
+        Args:
+            unit_index (int): The index of the new unit to be set.
+
+        Updates:
+            - Sets the geometry unit to the specified unit index.
+            - Updates the unit label text to reflect the new unit.
+            - Checks the corresponding action in the unit menu.
+            - Redraws the conics.
+            - Updates the generic window elements.
+        """
         self.geo.unit = unit_index
         self.unit_label.setText(self.unit_names[unit_index])
         for num, action in enumerate(self.menu_unit.actions()):
             if num == self.geo.unit:
                 action.setChecked(True)
         self.draw_conics()
+        self.update_win_generic()
 
     def change_reference(self, ref_name):
+        """
+        Change the reference geometry to the specified reference name.
+
+        This method updates the reference geometry of the object to the given
+        reference name and subsequently calls methods to get, draw, and update
+        the reference.
+
+        Args:
+            ref_name (str): The name of the new reference geometry.
+        """
         self.geo.reference = ref_name
         self.get_reference()
         self.draw_reference()
+        self.update_win_generic()
 
     #############
     #    GET    #
     #############
     def get_reference(self):
+        """
+        Retrieves and sets the reference d-spacings and HKL values based on the provided reference type.
+        The method checks the type of reference (library, CIF, or cell) and retrieves the corresponding d-spacings 
+        and HKL values. If the reference is not found, it sets the d-spacings to zero. Additionally, it handles 
+        closing the PXRD window if the reference is not from a CIF file and updates the window title.
+        Attributes:
+            geo.reference (str): The reference identifier.
+            ref_library (dict): A dictionary containing reference data from the library.
+            ref_cif (dict): A dictionary containing reference data from CIF files.
+            ref_cell (dict): A dictionary containing reference data from cell files.
+            plo.conic_ref_num (int): The number of conic references.
+            cont_ref_dsp (np.array): The array of d-spacings for the reference.
+            cont_ref_hkl (list or None): The list of HKL values for the reference.
+            pxrd_win (object or None): The PXRD window object.
+        Raises:
+            KeyError: If the reference is not found in any of the reference dictionaries.
+        """
         if self.geo.reference in self.ref_library:
             # get the d spacings for the calibrtant from pyFAI
             self.cont_ref_dsp = np.array(calibrant.get_calibrant(self.geo.reference).get_dSpacing()[:self.plo.conic_ref_num])
             self.cont_ref_hkl = None
-        elif self.geo.reference in self.ref_custom:
-            # get custom d spacings
-            self.cont_ref_dsp = self.ref_custom[self.geo.reference]
-            self.cont_ref_hkl = self.ref_custom_hkl[self.geo.reference]
+        elif self.geo.reference in self.ref_cif:
+            if not self.ref_cif[self.geo.reference].has_hkl or not self.ref_cif[self.geo.reference].has_dsp:
+                self.calc_ref_from_cif(self.ref_cif[self.geo.reference].cif, open_pxrd=False)
+            else:
+                # get custom d spacings
+                self.cont_ref_dsp = self.ref_cif[self.geo.reference].dsp
+                self.cont_ref_hkl = self.ref_cif[self.geo.reference].hkl
+        elif self.geo.reference in self.ref_cell:
+                self.cont_ref_dsp = self.ref_cell[self.geo.reference].dsp
+                self.cont_ref_hkl = self.ref_cell[self.geo.reference].hkl
         else:
-            # set all d-spacings to -1
+            # set all d-spacings to 0
             self.cont_ref_dsp = np.zeros(self.plo.conic_ref_num)
             self.cont_ref_hkl = None
+        
+        # close pxrd window if reference is not from cif
+        if self.pxrd_win is not None and self.geo.reference not in self.ref_cif:
+            if self.pxrd_win.isVisible():
+                self.pxrd_win.close()
+        
         # update window title
         self.set_win_title()
 
     def get_defaults_geo(self):
+        """
+        Sets up and returns the default geometry configuration for the detector.
+
+        Returns:
+            Container: An object containing the default geometry settings
+        """
         ######################
         # Setup the geometry #
         ######################
-        geo = container()
+        geo = Container()
         geo.det_type = 'EIGER2'  # [str]  Pilatus3 / Eiger2
         geo.det_size = '4M'      # [str]  300K 1M 2M 6M / 1M 4M 9M 16M
         geo.ener = 25            # [keV]  Beam energy
@@ -993,10 +1648,27 @@ class MainWindow(QtWidgets.QMainWindow):
         return geo
 
     def get_defaults_plo(self):
+        """
+        Get default plot settings.
+
+        Returns:
+            Container: An object containing default plot settings.
+
+        Default Plot Settings:
+            - geometry contour section
+            - reference contour section
+            - module section
+            - general section
+            - pxrd plot
+            - extra functions
+            - slider section
+            - update/reset
+            - debug/testing
+        """
         ################
         # Plot Details #
         ################
-        plo = container()
+        plo = Container()
         # - geometry contour section - 
         plo.conic_tth_min = 5               # [int]    Minimum 2-theta contour line
         plo.conic_tth_max = 100             # [int]    Maximum 2-theta contour line
@@ -1035,6 +1707,9 @@ class MainWindow(QtWidgets.QMainWindow):
         plo.show_unit_hover = True          # [bool]   Show unit value on hover
         plo.overlay_resolution = 300        # [int]    Overlay resolution
         plo.overlay_toggle_warn = True      # [bool]   Overlay warn color threshold
+        # - pxrd plot -
+        plo.pxrd_marker_symbol = 'arrow_up' # [marker] Symbol to mark peaks
+        plo.pxrd_marker_offset = 0.02       # [float]  offset of marker from x-axis
         # - extra functions -
         plo.show_fwhm = False               # [bool]   Show delta_d/d function
         plo.sensor_thickness = 1000e-6      # [float]  Detector sensor thickness [m]
@@ -1074,10 +1749,28 @@ class MainWindow(QtWidgets.QMainWindow):
         return plo
     
     def get_defaults_thm(self):
+        """
+        Returns a Container object with default theme settings for both light and dark modes.
+
+        The theme settings include various color configurations for different UI elements such as:
+        - Global colors
+        - Contour labels
+        - Reference contours
+        - Beamstop colors and edges
+        - Detector module borders and backgrounds
+        - Plot backgrounds
+        - Label colors and fills
+        - Slider frame borders, backgrounds, and hover colors
+        - Slider frame label colors
+        - Map threshold colors
+
+        Returns:
+            Container: An object containing the default theme settings.
+        """
         #################
         # Theme Details #
         #################
-        thm = container()
+        thm = Container()
         thm.color_dark = '#404040'                    # [color]  Global dark color
         thm.color_light = '#EEEEEE'                   # [color]  Global light color
         # light mode
@@ -1114,10 +1807,15 @@ class MainWindow(QtWidgets.QMainWindow):
         return thm
     
     def get_defaults_lmt(self):
+        """
+        Get default limits for various parameters.
+        Returns:
+            Container: An object containing default limits
+        """
         ##########
         # Limits #
         ##########
-        lmt = container()
+        lmt = Container()
         lmt.ener_min =  5    # [int] Energy minimum [keV]
         lmt.ener_max =  100  # [int] Energy maximum [keV]
         lmt.ener_stp =  1    # [int] Energy step size [keV]
@@ -1149,10 +1847,21 @@ class MainWindow(QtWidgets.QMainWindow):
         return lmt
 
     def get_defaults_all(self):
+        """
+        Load and set all default configurations.
+
+        This method initializes the following default configurations:
+        - Geometry and detector specifications (`geo` and `_geo`)
+        - Plot details (`plo`)
+        - Theme details (`thm`)
+        - Geometry limits (`lmt`)
+
+        Each configuration is loaded using its respective `get_defaults_*` method.
+        """
         # load the defaults
         # geo: geometry and detector specs
         self.geo = self.get_defaults_geo()
-        self._geo = container()
+        self._geo = Container()
         # plo: plot details
         self.plo = self.get_defaults_plo()
         # thm: theme details
@@ -1161,6 +1870,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.lmt = self.get_defaults_lmt()
 
     def get_det_params(self):
+        """
+        Retrieves the detector parameters based on the detector type and size from the detector database.
+        This method checks if the detector type and size exist in the detector database. If either the type or size
+        is not found, it prints an error message and exits the program. If the type and size are found, it creates
+        a Container object and populates it with the corresponding detector parameters from the database.
+        Returns:
+            Container: An object containing the detector parameters.
+        Raises:
+            SystemExit: If the detector type or size is not found in the database, or if there is an error reading
+                the detector database.
+        """
         det_type = self.geo.det_type
         det_size = self.geo.det_size
         
@@ -1174,7 +1894,7 @@ class MainWindow(QtWidgets.QMainWindow):
             print(f'Current {det_type} databank sizes: {", ".join(self.detector_db[det_type]["size"].keys())}.')
             raise SystemExit
         try:
-            det = container()
+            det = Container()
             det.hmp = self.detector_db[det_type]['hmp']
             det.vmp = self.detector_db[det_type]['vmp']
             det.pxs = self.detector_db[det_type]['pxs']
@@ -1192,6 +1912,39 @@ class MainWindow(QtWidgets.QMainWindow):
         return det
 
     def get_det_library(self, update=True, reset=False):
+        """
+        Retrieves the detector specifications library.
+        This method constructs a dictionary containing specifications for various detectors.
+        It can either update the existing detector database file or reset it based on the parameters provided.
+        Parameters:
+        update (bool): If True, updates the detector database file with the current specifications.
+                       Default is True.
+        reset (bool): If True, resets the detector database file to the current specifications.
+                      Default is False.
+        Returns:
+        dict: A dictionary containing the specifications for various detectors.
+        Detector Specifications:
+        - PILATUS3
+        - PILATUS4
+        - EIGER2
+        - MPCCD
+        - RAYONIX
+        - PHOTON-II
+        - PHOTON-III
+        - Perkin-Elmer XRD
+        - VAREX XRpad2
+        - CITIUS
+        Each detector specification includes:
+        - pxs: Pixel size in mm
+        - hmp: Module size (horizontal) in pixels
+        - vmp: Module size (vertical) in pixels
+        - hgp: Module gap (horizontal) in pixels
+        - vgp: Module gap (vertical) in pixels
+        - cbh: Central beam hole in pixels
+        - size: Dictionary mapping detector model to its dimensions (rows, columns)
+        Raises:
+        SystemExit: If there is an error parsing the detector database file.
+        """
         ###########################
         # Detector Specifications #
         ###########################
@@ -1381,6 +2134,28 @@ class MainWindow(QtWidgets.QMainWindow):
         return detectors
 
     def get_tooltips(self):
+        """
+        Generate tooltips for various configuration parameters.
+
+        This method initializes a dictionary of tooltips for different categories
+        of configuration parameters, including 'geo', 'plo', 'thm', and 'lmt'.
+        Each category contains key-value pairs where the key is the parameter name
+        and the value is a string describing the parameter and its expected input.
+
+        Categories:
+        - 'geo': Geometric parameters related to the detector setup.
+        - 'plo': Plotting parameters for contour lines and markers.
+        - 'thm': Theme-related parameters for color settings.
+        - 'lmt': Limit parameters for various settings.
+
+        The method also includes a debug function to check if all keys have a tooltip.
+
+        Example:
+            self.get_tooltips()
+
+        Raises:
+            KeyError: If a parameter key is missing a tooltip in debug mode.
+        """
         self.tooltips = dict()
         self.tooltips['geo'] = {
             'det_type':'[str] e.g.\n{}'.format('\n'.join(self.get_det_library(update=False).keys())),
@@ -1530,6 +2305,38 @@ class MainWindow(QtWidgets.QMainWindow):
     #   BUILD   #
     #############
     def build_detector(self):
+        """
+        Builds the detector by placing modules in a grid pattern based on the detector's configuration.
+
+        The method calculates the positions of the detector modules in millimeters, taking into account
+        the pixel size, module gaps, and central beam hole size. It then creates and adds graphical 
+        rectangle items representing the modules to the scene.
+
+        The placement logic ensures that the beam position is either between the modules (for even 
+        numbers of modules) or at the center module (for odd numbers of modules). Additionally, it 
+        handles specific configurations for MPCCD detectors used at SACLA/SPring-8.
+
+        The graphical representation of each module is customized with specified colors, pen width, 
+        fill, and opacity.
+
+        Attributes:
+            self.det.hmp (float): Horizontal module size in pixels.
+            self.det.vmp (float): Vertical module size in pixels.
+            self.det.hgp (float): Horizontal gap between modules in pixels.
+            self.det.vgp (float): Vertical gap between modules in pixels.
+            self.det.cbh (float): Central beam hole size in pixels.
+            self.det.hmn (int): Number of horizontal modules.
+            self.det.vmn (int): Number of vertical modules.
+            self.det.pxs (float): Pixel size in millimeters.
+            self.det_module_color (QColor): Color of the module outline.
+            self.plo.det_module_width (int): Width of the module outline.
+            self.det_module_fill (QColor): Fill color of the module.
+            self.plo.det_module_alpha (float): Opacity of the module.
+            self.ax (QGraphicsScene): The scene to which the modules are added.
+
+        Returns:
+            None
+        """
         # build detector modules
         # pixel -> mm
         _hms = self.det.hmp * self.det.pxs
@@ -1564,282 +2371,28 @@ class MainWindow(QtWidgets.QMainWindow):
                 rect_item.setOpacity(self.plo.det_module_alpha)
                 self.ax.addItem(rect_item)
 
-    #############
-    #  CONICS   #
-    #############
-    def draw_conics(self):
-        # calculate the offset of the contours resulting from voff and rotation
-        # shift the grid to draw the cones, to make sure the contours are drawn
-        # within the visible area
+    ##################
+    #  HKL TOOLTIPS  #
+    ##################
+    def tooltip_hkl_show(self, widget, event):
+        """
+        Displays a tooltip with the hkl value at the position of the given widget and highlights the widget.
 
-        # convert theta in degrees to radians
-        # for some reason I defined it negative some time ago
-        # now there's no turning back!
-        _omega = -np.deg2rad(self.geo.tilt + self.geo.rota)
-        
-        # beamcenter shift
-        _comp_shift = -(self.geo.voff - self.geo.dist * np.tan(_omega) - np.deg2rad(self.geo.tilt) * self.geo.dist)
+        Parameters:
+        widget (QWidget): The widget for which the tooltip is to be shown. It should have a 'name' attribute and 'opts' dictionary.
+        event (QEvent): The event that triggered the tooltip display. It should have a 'screenPos' method.
 
-        # overlay
-        if self.plo.show_polarisation or self.plo.show_solidangle or self.plo.show_unit_hover or self.plo.show_fwhm:
-            _grd, self._tth, self._polcor, self._solang, self._fwhm = self.calc_overlays(_omega, res=self.plo.overlay_resolution, pol=self.plo.polarisation_fac)
-            self.patches['overlay'].setImage(_grd * self._polcor * self._solang,
-                                             autoLevels=False,
-                                             levels=[0.0,1.0],
-                                             rect=(-self.xdim,
-                                                   -self.ydim,
-                                                    self.xdim * 2,
-                                                    self.ydim * 2))
-        else:
-            self.patches['overlay'].setImage(None)
-            self.cor_label.hide()
-        
-        # update beam center
-        self.patches['beamcenter'].setData([self.geo.hoff],[_comp_shift])
-        # update beam center
-        self.patches['poni'].setData([self.geo.hoff],[-(self.geo.voff - np.deg2rad(self.geo.tilt)*self.geo.dist)])
+        Behavior:
+        - If the widget does not have a name or the contour reference hkl is not set, the event is ignored.
+        - Otherwise, a tooltip is shown at the event's screen position with the widget's name.
+        - The widget is highlighted by changing its pen width.
+        - A timer is started to remove the highlight after a specified timeout.
+        - The timer is added to a list to keep the reference alive until it times out.
 
-        # hide beamstop contour and label
-        self.patches['beamstop'].setVisible(False)
-        self.patches['bs_label'].setVisible(False)
-        # check if beamstop is on screen, change visibility
-        if self.geo.bssz and not (isinstance(self.geo.bssz, str) and self.geo.bssz.lower() == 'none'):
-            # make sure it is a float (might be a string from the export window!)
-            self.geo.bssz = float(self.geo.bssz)
-            # update beam stop
-            bs_theta = np.tan((self.geo.bssz/2) / self.geo.bsdx)
-
-            # calculate the conic section corresponding to the theta angle
-            # :returns False is conic is outside of visiblee area
-            x, y = self.calc_conic(_omega, bs_theta, steps=self.plo.conic_steps)
-            if x is not False:
-                # figure out the label positions
-                if self.plo.conic_label_auto:
-                    label_pos = self.label_conic_pos_auto(x, y)
-                else:
-                    label_pos = self.label_conic_pos_static(x, y, self.xdim, self.ydim, _omega, bs_theta)
-                
-                # continue if label can be placed
-                if label_pos is not False:
-                    # plot the conic section
-                    self.patches['beamstop'].setData(x, y, fillLevel=y.max())
-                    self.patches['beamstop'].setVisible(True)
-
-                    _unit = self.calc_unit(bs_theta)
-                    self.patches['bs_label'].setPos(*label_pos)
-                    self.patches['bs_label'].setText(f'{_unit:.2f}')
-                    self.patches['bs_label'].setVisible(True)
-        
-        # calculate the maximum resolution for the given geometry
-        if self.plo.conic_tth_auto:
-            theta_max = np.rad2deg(self.calc_max_resolution(m=0.90))
-            # make new array of 2theta values
-            self.cont_geom_num = np.linspace(theta_max/self.plo.conic_tth_num, theta_max, self.plo.conic_tth_num)
-        
-        # plot conics at given 2theta values
-        for _n, _ttd in enumerate(self.cont_geom_num):
-            self.patches['conic'][_n].setVisible(False)
-            self.patches['labels'][_n].setVisible(False)
-            # current fraction for colormap
-            _f = _n/len(self.cont_geom_num)
-
-            # convert theta in degrees to radians
-            theta = np.deg2rad(_ttd)
-
-            # calculate the conic section corresponding to the theta angle
-            # :returns False is conic is outside of visiblee area
-            x, y = self.calc_conic(_omega, theta, steps=self.plo.conic_steps)
-            if x is False or x.size == 0:
-                continue
-
-            # figure out the label positions
-            if self.plo.conic_label_auto:
-                label_pos = self.label_conic_pos_auto(x, y)
-            else:
-                label_pos = self.label_conic_pos_static(x, y, self.xdim, self.ydim, _omega, theta)
-            # continue if label can be placed
-            if label_pos is False:
-                continue
-
-            # plot the conic section
-            self.patches['conic'][_n].setData(x, y, pen=pg.mkPen(self.cont_cmap.map(_f, mode='qcolor'), width=self.plo.conic_linewidth))
-            self.patches['conic'][_n].setVisible(True)
-            
-            _unit = self.calc_unit(theta)
-            self.patches['labels'][_n].setPos(*label_pos)
-            self.patches['labels'][_n].setText(f'{_unit:.2f}', color=self.cont_cmap.map(_f, mode='qcolor'))
-            self.patches['labels'][_n].setVisible(True)
-
-    def draw_reference(self):
-        # plot reference contour lines
-        # standard contour lines are to be drawn
-        for _n in range(self.plo.conic_ref_num):
-            self.patches['reference'][_n].setVisible(False)
-            # number of d-spacings might be lower than the maximum number of allowed contours
-            if _n < len(self.cont_ref_dsp):
-                _d = self.cont_ref_dsp[_n]
-                # None adds a list of zeros
-                # catch those here
-                if _d <= 0:
-                    continue
-                # lambda = 2 * d * sin(theta)
-                # 2-theta = 2 * (lambda / 2*d)
-                # lambda -> (12.398/geo_energy)
-                lambda_d = (12.398/self.geo.ener) / (2*_d)
-                if lambda_d > 1.0:
-                    continue
-                
-                # get theta
-                theta = 2 * np.arcsin(lambda_d)
-                
-                # convert theta in degrees to radians
-                # for some reason I defined it negative some time ago
-                # now there's no turning back!
-                _omega = -np.deg2rad(self.geo.tilt + self.geo.rota)
-                
-                # calculate the conic section corresponding to the theta angle
-                # :returns False is conic is outside of visiblee area
-                x, y = self.calc_conic(_omega, theta, steps=self.plo.conic_steps)
-                if x is False:
-                    continue
-
-                # if hkl are available
-                # put them in the proper container for the contour
-                # so indexing gets it right
-                width = 1.0
-                if self.cont_ref_hkl:
-                    h, k, l, itot, irel = self.cont_ref_hkl[_n]
-                    if self.plo.conic_ref_cif_irel and irel > 0:
-                        width = irel * self.plo.conic_ref_cif_lw_mult
-                    if self.plo.conic_hkl_show_int:
-                        # alignment of the tooltip text is far from trivial
-                        # detour via QTextEdit -> setAlignment and toHtml
-                        # hence the <br> instead of \n
-                        # 
-                        # self.setStyleSheet('''QToolTip {... ) didn't work
-                        self.patches['reference'][_n].name = f'({h: 2.0f} {k: 2.0f} {l: 2.0f})<br>{round(itot, 0):,.0f}'
-                    else:
-                        self.patches['reference'][_n].name = f'({h: 2.0f} {k: 2.0f} {l: 2.0f})'
-                else:
-                    self.patches['reference'][_n].name = None
-                
-                # plot the conic section
-                self.patches['reference'][_n].setData(x, y, pen=pg.mkPen(self.conic_ref_color,
-                                                                         width=max(self.plo.conic_ref_cif_lw_min, 
-                                                                                   self.plo.conic_ref_linewidth * width)))
-                self.patches['reference'][_n].setVisible(True)
-    
-    def calc_conic(self, omega, theta, steps=100):
-        # Apart from textbooks on conic sections,
-        # https://math.stackexchange.com/questions/4079720/on-the-equation-of-the-ellipse-formed-by-intersecting-a-plane-and-cone
-        # here is a great discussion on how to get
-        # to the equation for the resulting ellipse
-        # formed by the intersection of a plane and
-        # a cone. We get the circle for free and just
-        # adapt for faster calculation.
-        # From there we need to work out the hyperbola
-        # and parabola and here only 3d-drawing the
-        # problem in geogebra made me understand what's
-        # going on: https://www.geogebra.org/
-        # 
-        # skip drawing smaller/larger +-90 deg contours
-        # reject overlap of the 'backscattering'
-        # -> limitation of the current implementation
-        if theta > np.pi/2 + abs(omega):
-            return False, False
-
-        # y axis offset of the cone center
-        dy_cone = self.geo.dist * np.tan(omega)
-        # change in 'r', the length of the cones primary axis
-        dz_cone = np.sqrt(self.geo.dist**2 + dy_cone**2)
-        # tilt is handled as a rotation but
-        # has its travel distance (y) reset.
-        comp_tilt = np.deg2rad(self.geo.tilt) * self.geo.dist
-        # eccentricity of the resulting conic section
-        ecc = np.round(np.cos(np.pi/2 - omega) / np.cos(theta), 10)
-        # y ('height') components/distances from central axis of the cone
-        # intersecting the detector plane and the distance to
-        # the y intersection of the conic section.
-        y1 = dz_cone * np.sin(theta) / np.cos(omega + theta)
-        y2 = dz_cone * np.sin(theta) / np.cos(omega - theta)
-
-        # add x/y offsets
-        # revert tilt rotation
-        y0 = dy_cone - self.geo.voff + comp_tilt 
-        x0 = self.geo.hoff
-
-        # add margin to slightly extend
-        # conics outside of visible area
-        _xdim = self.xdim * 1.05
-        #_ydim = self.ydim * 1.05
-        # evaluate the eccentricity and parameterise
-        # the resulting conic accordingly
-        if abs(ecc) == 0:
-            # circle
-            h = (y1+y2)/2
-            # check if the circle is visible
-            if h - np.sqrt(y0**2 + x0**2) > np.sqrt(self.ydim**2 + self.xdim**2):
-                return False, False
-            t = np.linspace(0, 2*np.pi, 2*steps)
-            x = x0 + h * np.sin(t)
-            y = y0 + (y1-y2)/2 + h * np.cos(t)
-        elif 0 < abs(ecc) < 1:
-            # ellipse
-            yd = (y1-y2)/2
-            h = (y1+y2)/2
-            w = dz_cone * np.sin(theta) * (y1+y2) / (2 * np.sqrt(y1*y2) * np.cos(theta))
-            # ellipses that expand ouside the visible area:
-            # add a margin to make sure the connecting line
-            # of segmented ellipses is outside the visible area
-            #
-            # I hope this is faster than generating and handing
-            # over a 'connect' array to the setData function
-            # of the plotItem
-            _xlim1 = (_xdim + x0) / w
-            _xlim2 = (_xdim - x0) / w
-            # check if the ellipse is visible
-            if _xlim1 < 0 and _xlim2 < 0:
-                return False, False
-            if _xlim1 < 1 and _xlim2 < 1:
-                l = -np.arcsin(_xlim1)
-                r =  np.arcsin(_xlim2)
-                t = np.hstack([np.linspace(l, r, steps), np.linspace(-r+np.pi, -l+np.pi, steps)])
-            else:
-                t = np.linspace(0, 2*np.pi, 2*steps)
-            x = x0 + w * np.sin(t)
-            y = y0 + yd + h * np.cos(t)
-        elif abs(ecc) == 1:
-            # parabola
-            yd = np.sign(ecc) * self.geo.dist * np.tan(abs(omega) - theta)
-            a = np.sign(ecc) * self.geo.dist * np.tan(theta)
-            l = -(_xdim + x0) / a
-            r =  (_xdim - x0) / a
-            t = np.linspace(l, r, steps)
-            x = x0 + a*t
-            y = y0 - dy_cone + yd + a/2 * t**2
-        elif 1 < abs(ecc) < 100:
-            # hyperbola
-            h = np.sign(omega) * (y1+y2)/2
-            if h == 0:
-                return False, False
-            w = h * np.sqrt(ecc**2-1)
-            l = -np.arcsinh((_xdim + x0) / w)
-            r =  np.arcsinh((_xdim - x0) / w)
-            t = np.linspace(l, r, steps)
-            x = x0 + w * np.sinh(t)
-            y = y0 + (y1-y2)/2 - h * np.cosh(t)
-        elif abs(ecc) >= 100:
-            # line
-            t = np.linspace(-_xdim, _xdim, steps)
-            x = t
-            y = y0 + np.ones(len(t)) * y1
-        
-        return x, y
-
-    ##############
-    #  TOOLTIPS  #
-    ##############
-    def tooltip_show(self, widget, event):
+        Note:
+        - The tooltip is displayed using QTextEdit to allow HTML formatting.
+        - The highlight is removed by the 'tooltip_hkl_rem_highlight' method.
+        """
         if not widget.name or not self.cont_ref_hkl:
             event.ignore()
         else:
@@ -1852,25 +2405,229 @@ class MainWindow(QtWidgets.QMainWindow):
             current_width = widget.opts['pen'].width()
             timer = QtCore.QTimer()
             timer.setSingleShot(True)
-            timer.timeout.connect(lambda: self.tooltip_rem_highlight(widget, current_width, timer))
+            timer.timeout.connect(lambda: self.tooltip_hkl_rem_highlight(widget, current_width, timer))
             widget.setPen(pg.mkPen(self.cont_cmap.map(0.0, mode='qcolor'), width=current_width))
             # add timer to self.list to keep pointers alive
-            # remove -> tooltip_rem_highlight
+            # remove -> tooltip_hkl_rem_highlight
             self.highlight_timers.append(timer)
             timer.start(self.plo.conic_ref_timeout)
     
-    def tooltip_rem_highlight(self, widget, width, timer):
+    def tooltip_hkl_rem_highlight(self, widget, width, timer):
+        """
+        Resets the contour color of the given widget and removes the specified timer from the highlight timers list.
+
+        Args:
+            widget (QGraphicsItem): The widget whose contour color needs to be reset.
+            width (int): The width of the pen to be used for resetting the contour color.
+            timer (QTimer): The timer to be removed from the highlight timers list.
+        """
         # reset contour color
         widget.setPen(pg.mkPen(self.conic_ref_color, width=width))
         # remove timer
         if timer in self.highlight_timers:
             self.highlight_timers.remove(timer)
 
+    #######
+    # CIF #
+    #######
+    def get_ref_db_from_file(self):
+        """
+        Reads a reference database from a file and updates the internal reference dictionary.
+
+        This method checks if the file specified by `self.path_cif_db` exists. If it does, it opens the file,
+        reads its contents as JSON, and iterates through the items. For each item, it creates a `Ref` object
+        and adds it to the internal reference dictionary `self.ref_cif`. Additionally, it updates the reference
+        menu with the new reference names.
+
+        Raises:
+            FileNotFoundError: If the file specified by `self.path_cif_db` does not exist.
+        """
+        if os.path.exists(self.path_cif_db):
+            with open(self.path_cif_db, 'r') as of:
+                temp = json.load(of)
+            for name, item in list(temp.items()):
+                self.ref_cif[name] = Ref(name=name, cif=item['cif'])
+                self.add_ref_to_menu(name)
+
+    def save_ref_db_to_file(self):
+        """
+        Saves the reference CIF database to a file.
+
+        This method iterates through the `ref_cif` dictionary, checks if each entry has a CIF file,
+        and if so, adds it to a temporary dictionary. The temporary dictionary is then written to
+        the file specified by `self.path_cif_db` in JSON format with an indentation of 4 spaces.
+
+        Attributes:
+            self.path_cif_db (str): The file path where the CIF database will be saved.
+            self.ref_cif (dict): A dictionary containing reference CIF entries.
+
+        Raises:
+            IOError: If there is an issue writing to the file.
+        """
+        temp = {}
+        with open(self.path_cif_db, 'w') as wf:
+            for k in self.ref_cif:
+                if self.ref_cif[k].has_cif:
+                    temp[k] = {}
+                    temp[k]['cif'] = self.ref_cif[k].cif
+            json.dump(temp, wf, indent=4)
+
+    def remove_ref_from_db(self, name):
+        """
+        Removes a reference from the database and updates the UI accordingly.
+        Args:
+            name (str): The name of the reference to be removed.
+        This method performs the following actions:
+        1. Removes the reference from the internal reference dictionary.
+        2. Saves the updated reference database to a file.
+        3. Closes the reference window if it is currently displayed.
+        4. Updates the geometry reference to 'None' if the removed reference was the current reference.
+        5. Changes the current reference in the UI.
+        6. Activates the main window to ensure the menu is updated correctly.
+        7. Clears and repopulates the reference menu with the remaining references.
+        """
+        self.ref_cif.pop(name)
+        self.save_ref_db_to_file()
+
+        # close window if currently displayed
+        if self.geo.reference == name:
+            if self.pxrd_win is not None:
+                if self.pxrd_win.isVisible():
+                    self.pxrd_win.close()
+            self.geo.reference = 'None'
+            self.change_reference(self.geo.reference)
+        
+        # focus main window to update the menu correctly
+        self.activateWindow()
+        # reset the menu
+        self.sub_menu_cif.clear()
+        # populate the menu
+        for name in self.ref_cif.keys():
+            self.add_ref_to_menu(name)
+
+    def add_ref_to_menu(self, name):
+        """
+        Adds a reference to the submenu if it does not already exist.
+        This method checks if a submenu with the given name already exists. If it does not,
+        it creates a new submenu with the specified name and adds actions to open and delete
+        the reference. The 'Open' action is checkable and is linked to the `change_reference`
+        method. The 'Delete' action is linked to the `remove_ref_from_db` method.
+        Args:
+            name (str): The name of the reference to be added to the submenu.
+        """
+        # add only if no menu with same name exists
+        if name in [item.text() for item in self.sub_menu_cif.actions()]:
+            return
+        
+        ref_menu = self.sub_menu_cif.addMenu(name)
+        cif = self.ref_cif[name].cif
+        if os.path.exists(cif):
+            ref_action_open = QtGui.QAction('Open', self, checkable=True)
+            self.menu_set_action(ref_action_open, self.change_reference, name)
+            ref_menu.addAction(ref_action_open)
+            self.group_ref.addAction(ref_action_open)
+            if self.geo.reference == name:
+                ref_action_open.setChecked(True)
+        ref_action_del = QtGui.QAction('Delete', self)
+        self.menu_set_action(ref_action_del, self.remove_ref_from_db, name)
+        ref_menu.addAction(ref_action_del)
+
+    def calc_ref_from_cif(self, fpath, open_pxrd=True):
+        """
+        Calculate reference data from a CIF (Crystallographic Information File).
+
+        This method processes a CIF file to extract crystallographic data and 
+        generate powder diffraction patterns. The results are stored in the 
+        object's attributes and can be optionally displayed in a plot.
+
+        Args:
+            fpath (str): The file path to the CIF file.
+            open_pxrd (bool, optional): If True, opens the powder X-ray diffraction 
+                plot. Defaults to True.
+
+        Returns:
+            None
+
+        Attributes:
+            cont_ref_dsp (numpy.ndarray): Array of d-spacing values for the strongest reflections.
+            cont_ref_hkl (list of tuples): List of tuples containing (h, k, l, intensity, relative intensity) 
+                for the strongest reflections.
+            geo.reference (str): The basename of the CIF file.
+            ref_cif (dict): Dictionary containing reference data with the CIF file basename as the key.
+        """
+        # called when a cif is dropped onto the window
+        xtl = dif.Crystal(fpath)
+        # :return xval: arrray : x-axis of powder scan (units)
+        # :return inten: array : intensity values at each point in x-axis
+        # :return reflections: (h, k, l, xval, intensity) array of reflection positions, grouped by min_overlap
+        xval, inten, reflections = xtl.Scatter.powder(scattering_type='xray', units='dspace', powder_average=True, min_overlap=0.02, energy_kev=self.plo.conic_ref_cif_kev)
+        # reject low intensities: based on median or mean?
+        # median is always around unity -> useless
+        # mean rejects many, add adjustable multiplicator?
+        used = reflections[reflections[:,4] > reflections[:,4].max() * self.plo.conic_ref_cif_int]
+        # sort by intensity -> ascending -> flip
+        ordered = used[used[:, 4].argsort()][::-1]
+        # pick the strongest
+        ordered = ordered[:self.plo.conic_ref_num]
+        # assign dspacing
+        self.cont_ref_dsp = ordered[:,3]
+        # hkl -> integer
+        # cast hkl array to list of tuples (for easy display)
+        irel = ordered[:,4]/ordered[:,4].max()
+        self.cont_ref_hkl = list(zip(ordered[:,0], ordered[:,1], ordered[:,2], ordered[:,4], irel))
+
+        self.geo.reference = os.path.basename(fpath)
+        # update entry, might be incomplete (load on startup only has cif path)
+        # and we already did the heavy lifting
+        self.ref_cif[self.geo.reference] = Ref(name=self.geo.reference, dsp=self.cont_ref_dsp, hkl=self.cont_ref_hkl, cif=fpath)
+        # add to menu
+        self.add_ref_to_menu(self.geo.reference)
+
+        # update window title
+        self.set_win_title()
+
+        if open_pxrd:
+            self.win_pxrd_plot(keep=True)
+
+        self.draw_reference()
+
+        self.save_ref_db_to_file()
+
     ###############
     #  UNIT CELL  #
     ###############
     def win_uc_show(self):
-        self.uc_window = QtWidgets.QDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
+        """
+        Displays a dialog for entering custom unit cell parameters.
+        This method creates and shows a QDialog with various input fields for 
+        entering unit cell parameters such as 'a', 'b', 'c', 'α', 'β', 'γ', 
+        centring, sampling, and name. The dialog includes QDoubleSpinBox, 
+        QLineEdit, and QComboBox widgets for input, and QCheckBox widgets for 
+        linking parameters. The dialog also has Apply and OK buttons for 
+        applying changes or accepting the dialog.
+        Attributes:
+            win_uc (QDialog): The dialog window for entering unit cell parameters.
+            uc_dict_change (dict): Dictionary to store the input widgets.
+            uc_check_boxes (dict): Dictionary to store the checkboxes for linking parameters.
+            linked_axes (bool): Flag to indicate if axes are linked.
+        Widgets:
+            QVBoxLayout: Main layout for the dialog.
+            QGroupBox: Group box containing the input fields.
+            QFrame: Frames for organizing input fields and buttons.
+            QHBoxLayout: Layouts for organizing input fields and buttons.
+            QLabel: Labels for input fields.
+            QLineEdit: Input field for custom name.
+            QComboBox: Dropdowns for centring and sampling.
+            QDoubleSpinBox: Spin boxes for numerical input with units.
+            QCheckBox: Checkboxes for linking parameters.
+            QDialogButtonBox: Button boxes for Apply and OK buttons.
+        Methods:
+            win_uc_set_link_sbox: Slot for handling value changes in spin boxes.
+            win_uc_set_link_cbox: Slot for handling state changes in checkboxes.
+            win_uc_apply: Slot for applying changes.
+            win_uc_accept: Slot for accepting the dialog.
+        """
+        self.win_uc = QtWidgets.QDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
 
         layout = QtWidgets.QVBoxLayout()
         layout.setSpacing(0)
@@ -1901,7 +2658,7 @@ class MainWindow(QtWidgets.QMainWindow):
             entry_label = QtWidgets.QLabel(label)
             entry_layout.addWidget(entry_label)
             if unit is None:
-                box_widget = QtWidgets.QLineEdit(text=f'Custom {len(self.ref_custom):>02}')
+                box_widget = QtWidgets.QLineEdit(text=f'Custom {len(self.ref_cell)+1:>02}')
                 entry_layout.addWidget(box_widget)
             elif unit is False:
                 box_widget = QtWidgets.QComboBox()
@@ -1957,18 +2714,31 @@ class MainWindow(QtWidgets.QMainWindow):
         button_box.setLayout(button_layout)
         layout.addWidget(button_box)
 
-        self.uc_window.setWindowIcon(self.icon)
-        self.uc_window.setWindowTitle('Add custom unit cell')
-        self.uc_window.setLayout(layout)
-        self.uc_window.setFixedSize(self.uc_window.sizeHint())
-        self.uc_window.accepted.connect(self.win_uc_accept)
-        self.uc_window.rejected.connect(self.win_uc_close)
-        self.uc_window.exec()
+        self.win_uc.setWindowIcon(self.icon)
+        self.win_uc.setWindowTitle('Add custom unit cell')
+        self.win_uc.setLayout(layout)
+        self.win_uc.setFixedSize(self.win_uc.sizeHint())
+        self.win_uc.accepted.connect(self.win_uc_accept)
+        self.win_uc.rejected.connect(self.win_uc.close)
+        self.win_uc.exec()
     
     def win_uc_apply(self, dict):
-        '''
-        catch window close event to store data
-        '''
+        """
+        Applies the unit cell parameters from the given dictionary to the current object.
+        Parameters:
+        dict (dict): A dictionary containing unit cell parameters and other settings. 
+                 Expected keys and their corresponding values:
+                 - 0 to 5: Objects with a `value()` method returning unit cell parameters.
+                 - 6: Object with a `currentText()` method returning the center.
+                 - 7: Object with a `currentText()` method returning the decimal precision.
+                 - 8: Object with a `text()` method returning the reference name.
+        This method performs the following actions:
+        1. Extracts unit cell parameters from the dictionary and stores them in `self.default_custom_cell`.
+        2. Calculates the hkl values and stores them in `self.cont_ref_dsp` and `self.cont_ref_hkl`.
+        3. Updates the reference name in `self.geo.reference`.
+        4. Creates a `Ref` object with the reference name, dsp values, and hkl values, and stores it in `self.ref_cell`.
+        5. Updates the window title and draws the reference.
+        """
         uc = []
         for i in range(6):
             uc.append(dict[i].value())
@@ -1982,26 +2752,53 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cont_ref_hkl = list(zip(hkld[:,0], hkld[:,1], hkld[:,2], _zeros, _zeros))
 
         self.geo.reference = dict[8].text()
-        self.ref_custom[self.geo.reference] = self.cont_ref_dsp
-        self.ref_custom_hkl[self.geo.reference] = self.cont_ref_hkl
+        reference = Ref(name=self.geo.reference, dsp=self.cont_ref_dsp, hkl=self.cont_ref_hkl)
+        self.ref_cell[self.geo.reference] = reference
         
         # update window title
         self.set_win_title()
         self.draw_reference()
 
     def win_uc_accept(self):
+        """
+        Applies changes to the unit cell, updates the reference, and manages the UI actions accordingly.
+
+        This method performs the following steps:
+        1. Applies changes to the unit cell dictionary.
+        2. Updates the reference geometry.
+        3. Creates a new QAction for the updated reference.
+        4. Adds the new QAction to the relevant menu and action group.
+        5. Sets the new QAction as checked.
+        6. Closes the unit cell window.
+        """
         self.win_uc_apply(self.uc_dict_change)
+        self.change_reference(self.geo.reference)
         ref_action = QtGui.QAction(self.geo.reference, self, checkable=True)
         self.menu_set_action(ref_action, self.change_reference, self.geo.reference)
-        self.sub_menu_custom.addAction(ref_action)
+        self.sub_menu_cell.addAction(ref_action)
         self.group_ref.addAction(ref_action)
         ref_action.setChecked(True)
-        self.uc_window.close()
-
-    def win_uc_close(self):
-        self.uc_window.close()
+        self.win_uc.close()
     
     def win_uc_set_link_sbox(self):
+        """
+        Handles the state change of a widget's 'linked' property and updates associated checkboxes and child widgets.
+
+        If the 'linked' property of the sender widget is True, it sets the property to False and unchecks the associated checkbox.
+        If the 'linked' property is a list, it iterates through the list, and for each index, if the corresponding checkbox is checked,
+        it updates the value of the associated child widget without emitting signals.
+
+        The sender widget is expected to have the following properties:
+        - 'linked': A boolean or a list of indices.
+        - 'index': An index to identify the associated checkbox.
+
+        The method interacts with the following attributes of the class:
+        - self.uc_check_boxes: A list of checkboxes.
+        - self.uc_dict_change: A dictionary of child widgets.
+
+        Returns:
+            None
+        """
         widget = self.sender()
         linked = widget.property('linked')
         if linked is True:
@@ -2017,129 +2814,41 @@ class MainWindow(QtWidgets.QMainWindow):
                     child.blockSignals(False)
     
     def win_uc_set_link_cbox(self):
+        """
+        Updates the 'linked' property of an item in the uc_dict_change dictionary based on the state of a checkbox.
+
+        This method retrieves the sender of the signal (assumed to be a checkbox), gets its 'index' property, and updates
+        the corresponding item in the uc_dict_change dictionary by setting its 'linked' property to the checked state of the checkbox.
+
+        Attributes:
+            self.uc_dict_change (dict): A dictionary where the keys are indices and the values are objects with a 'linked' property.
+        """
         check = self.sender()
         self.uc_dict_change[check.property('index')].setProperty('linked', check.isChecked())
-
-    #############
-    #  OVERLAY  #
-    #############
-    def calc_overlays(self, omega, res=150, pol=0.99):
-        # scale overlay to detector dimensions
-        _res_scale = self.ydim/self.xdim
-        _res_v = int(round(_res_scale * res, 0))
-        # neutral overlay grid
-        grd = np.ones((_res_v, res))
-
-        # make screen grid
-        size_h = np.linspace(-self.xdim, self.xdim, res, endpoint=False)
-        size_v = np.linspace(-self.ydim, self.ydim, _res_v, endpoint=False)
-        _gx, _gy = np.meshgrid(size_h, size_v, sparse=True)
-        # build vector -> 3 x n x m
-        _vec = np.full((3, _res_v, res), self.geo.dist)
-        _vec[0,:,:] = _gx - self.geo.hoff
-        # Compensate for vertical offset and PONI offset caused by the tilt (sdd*tilt)
-        _vec[1,:,:] = _gy + self.geo.voff - np.deg2rad(self.geo.tilt) * self.geo.dist
-
-        # omega is the combination of rotation and tilt, in radians
-        _rot = self.rot_100(omega)
-        # reshape to allow matrix multiplication
-        # _rot: 3 x 3 @ _norm: 3 x n*m -> _res: 3 x n x m
-        _res = np.reshape(_rot @ np.reshape(_vec, (3,-1)), _vec.shape)
-
-        # unit hover
-        tth = 1.0
-        if self.plo.show_unit_hover:
-            # Distance POBI - pixel on grid
-            R_a = np.sqrt(np.sum(_res[0:2]**2, axis=0)) * 1e-3 # m
-            # POBI distance
-            D_a = _res[2] * 1e-3 # m
-            # 2theta - Angle between pixel, sample, and POBI
-            tth = np.arctan2(R_a,D_a)
-            # remove very small values (tth < 0.057 deg) to avoid zero divide
-            tth[tth < 1e-3] = np.nan
-
-        # polarisation
-        pc = 1.0
-        if self.plo.show_polarisation:
-            _mag = np.sqrt(np.sum(_res**2, axis=0))
-            _norm = _res / _mag
-            # add pol fractions (-> 1.0)
-            # this notation is equivalent to cos(psi)**2,
-            # psi angle of polarization direction to the observer
-            # _res is direct cos(psi)
-            pc_hor = _norm[0,:,:]**2 * pol
-            pc_ver = _norm[1,:,:]**2 * (1-pol)
-            pc = 1.0 - (pc_hor + pc_ver)
-
-        # solid angle
-        sa = 1.0
-        if self.plo.show_solidangle:
-            _mag = np.sqrt(np.sum(_vec**2, axis=0))
-            sa = 1 / _mag**3
-            sa = sa / np.max(sa)
-        
-        # delta d / d
-        fwhm = 1.0
-        #fwhm_width = 0.0
-        if self.plo.show_fwhm:
-            c = self.plo.scattering_diameter
-            if len(self.att_lengths[self.plo.sensor_material]) > int(self.geo.ener):
-                t = min(self.plo.sensor_thickness, self.att_lengths[self.plo.sensor_material][int(self.geo.ener)])
-            else:
-                t = self.plo.sensor_thickness
-            p = self.det.pxs * 1e-3
-            phi = self.plo.beam_divergence
-            dE_E = self.plo.energy_resolution
-            
-            # use the "unrotated" vector coordinates to define
-            # R and D in the detector plane
-            # radial component of the unrotated detector
-            # i.e. radius away from the PONI
-            R_a = np.sqrt(np.sum(_vec[0:2]**2, axis=0)) * 1e-3 # m
-            # PONI distance
-            D_a = self.geo.dist * 1e-3 # m
-            # 2theta-alpha - Angle between pixel, sample, and PONI
-            _tth_a = np.arctan2(R_a,D_a)
-            # remove very small values (tth < 0.057 deg) to avoid zero divide
-            _tth_a[_tth_a < 1e-3] = np.nan
-            # estimate of the SDD spread (independent of rotation)
-            #dD = np.sqrt(1/4 * (c**2 + t**2))
-            # estimate of the pixel radial spread in the detector plane
-            #dR = np.sqrt(1/4*(c**2/(np.cos(_tth_a)**2)          \
-            #                + p**2 + t**2*np.tan(_tth_a)**2     \
-            #                + phi**2*D_a**2/(np.cos(_tth_a)**4) \
-            #                 )                                  \
-            #            )
-            
-            # delta d over d
-            # _dd = np.sqrt(1/4*np.tan(_tth_a/2)**(-2)                \
-            #               * np.sin(_tth_a)**2 * np.cos(_tth_a)**2   \
-            #               * ((dD/D_a)**2 + (dR/R_a)**2) + (dE_E)**2 \
-            #               )
-            # H2, FWHM
-            A = 2*np.log(2) / D_a**2 * (p**2-2*t**2-c**2)
-            B = 2*np.log(2) / D_a**2 * (2*t**2 + 2*c**2)
-            C = 2*np.log(2) * phi**2
-            M = (4*np.sqrt(2*np.log(2)) * dE_E)**2 * ((1-np.cos(_tth_a))/(1+np.cos(_tth_a)))
-            X = np.cos(_tth_a)
-            H2 = A*X**4 + B*X**2 + C + M
-            # _h2 = 32*np.log(2)*( np.cos(_tth_a)**4/(16*D_a**2) \
-            #             * ((np.tan(_tth_a)**2 \
-            #             * (c**2 + 2*t**2) \
-            #             + p**2 \
-            #             + c**2/np.cos(_tth_a)**2 \
-            #             + (D_a**2*phi**2)/np.cos(_tth_a)**4) ))
-            fwhm = np.sqrt(H2) * 180 / np.pi
-            #_ra = R_a[fwhm < self.plo.funct_fwhm_thresh]
-            #if any(_ra):
-            #    fwhm_width = np.nanmin(_ra) * 2 * 1e-3
-
-        return grd, tth, pc, sa, fwhm#, fwhm_width
 
     ##########
     #  FWHM  #
     ##########
     def win_fwhm_show(self):
+        """
+        Displays a window to enter instrument/beam details for calculating the instrumental broadening.
+        The window allows the user to input the following parameters:
+        - Sensor thickness: Estimated effective thickness of the detector absorption layer depending on sensor material and incident wavelength.
+        - Sensor material: Currently available options are Si and CdTe.
+        - Divergence: Estimated beam divergence.
+        - Energy resolution: Expected bandwidth of the incident X-ray beam.
+        - Scattering volume: Intersection of the sample size and the beam size as the diameter.
+        
+        The effective thickness is calculated from the attenuation length of the detector sensor material at the given energy and the sensor
+        thickness. The smaller value is used. Attenuation lengths are stored (up to 150 keV) and are retrieved by calling get_att_lengths().
+        
+        The window includes:
+        - Input fields for the parameters using QDoubleSpinBox for floats and QComboBox for sensor material.
+        - A preview plot showing the estimated Full Width at Half Maximum (FWHM) with the equation: FWHM = A×X⁴ + B×X² + C + M.
+        - A description label indicating the feature is in the test phase.
+        - Apply and Reset buttons to accept or reset the input values.
+        - A citation box with a reference to a relevant article.
+        """
         # window to enter instrument/beam details
         #
         # Sensor thickness : Estimated *effective thickness* of the detector absorption layer
@@ -2152,9 +2861,17 @@ class MainWindow(QtWidgets.QMainWindow):
         # - The effective thickness is calculated from the attenuation length of the detector sensor
         #   material at the given energy and the sensor thickness. The smaller value is used.
         # - Attenuation lengths are stored (up to 150 keV) and are retrieved by calling get_att_lengths()
-        param_window = QtWidgets.QDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
-        param_window.setWindowTitle('Setup calculation of the resolution function')
-        param_window.setStyleSheet('QGroupBox { font-weight: bold; }')
+        # show window if it already was created
+        if self.fwhm_win is not None:
+            if self.fwhm_win.isVisible():
+                self.fwhm_win.close()
+                return
+            self.fwhm_win.show()
+            return
+
+        self.fwhm_win = HotkeyDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
+        self.fwhm_win.setWindowTitle('Setup calculation of the instrumental broadening')
+        self.fwhm_win.setStyleSheet('QGroupBox { font-weight: bold; }')
         # dict: index: needed to identify the vars upon reassignment (win_fwhm_accept) and to link it to the tooltips
         #       name: Display string
         #       variable: the variable to use
@@ -2169,12 +2886,14 @@ class MainWindow(QtWidgets.QMainWindow):
                         'Sample':[(4, 'Scattering volume \u2300', self.plo.scattering_diameter, 1e-6, 0, 1, '\u00B5m')],}
                       #'Display':[(5, 'FWHM threshold', self.plo.funct_fwhm_thresh, 1e-3, 'FWHM [m\u00B0]')]}
         param_dict_change = {}
+
         # dict needed to update the preview plot in the setup window
         self.param_dict_tr = {'0':self.plo.sensor_thickness,
                               '1':self.plo.sensor_material,
                               '2':self.plo.beam_divergence,
                               '3':self.plo.energy_resolution,
                               '4':self.plo.scattering_diameter}
+
         # tooltip dictionary
         tooltips = {0:'Estimated effective thickness of the detector absorption layer depending on sensor material and incident wavelength.',
                     1:'Detector sensor layer material.',
@@ -2219,39 +2938,40 @@ class MainWindow(QtWidgets.QMainWindow):
             layout.addWidget(box)
 
         # preview plot
-        preview_box = QtWidgets.QGroupBox(f'Preview (distance: {self.geo.dist:.0f} mm)')
+        preview_box = QtWidgets.QGroupBox('Preview')
         preview_box_layout = QtWidgets.QVBoxLayout()
         preview_box_layout.setContentsMargins(6,6,6,6)
         preview_box.setLayout(preview_box_layout)
-        self.preview_curve = pg.PlotCurveItem()
-        self.preview_curve.setPen(pg.mkPen(color=self.palette().text().color(), width=3))
-        self.win_fwhm_update()
-        #self.preview_curve.setData(np.random.random(100), np.random.random(100))
-        preview_plot = pg.PlotWidget(background='transparent')
-        preview_plot.viewport().setAttribute(QtCore.Qt.WidgetAttribute.WA_AcceptTouchEvents, False)
-        preview_plot.setMenuEnabled(False)
-        preview_plot.setTitle('FWHM = A\u00D7X\u2074 + B\u00D7X\u00B2 + C + M', color=self.palette().text().color())
-        preview_plot.setLabel(axis='bottom', text='2\u03B8 [\u00B0]', color=self.palette().text().color())
-        preview_plot.setLabel(axis='left', text='FWHM [\u00B0]', color=self.palette().text().color())
-        #preview_plot.setAspectLocked(lock=True, ratio=2)
-        preview_plot.scale(sx=2, sy=3)
-        #preview_plot.setLimits(xMin=0, xMax=1, yMin=0, yMax=1)
-        #preview_plot.setXRange(0, 1, padding=0)
-        #preview_plot.setYRange(0, 1, padding=0)
-        preview_plot.addItem(self.preview_curve)
-        preview_box_layout.addWidget(preview_plot)
+        self.fwhm_curve = pg.PlotCurveItem()
+        self.fwhm_curve.setPen(pg.mkPen(color=self.palette().text().color(), width=3))
+        self.fwhm_plot = pg.PlotWidget(background=self.palette().base().color())
+        self.fwhm_plot.viewport().setAttribute(QtCore.Qt.WidgetAttribute.WA_AcceptTouchEvents, False)
+        self.fwhm_plot.setMenuEnabled(False)
+        self.fwhm_plot.setTitle('FWHM = A\u00D7X\u2074 + B\u00D7X\u00B2 + C + M', color=self.palette().text().color())
+        self.fwhm_plot.setLabel(axis='bottom', text='2\u03B8 [\u00B0]', color=self.palette().text().color())
+        self.fwhm_plot.setLabel(axis='left', text='FWHM [\u00B0]', color=self.palette().text().color())
+        self.fwhm_plot.scale(sx=2, sy=3)
+        self.fwhm_plot.addItem(self.fwhm_curve)
+        preview_box_layout.addWidget(self.fwhm_plot)
         layout.addWidget(preview_box)
         
         # add description
-        description = QtWidgets.QLabel(f'This feature is currently in <b>test phase</b>, feedback is very welcome!<br>\
-                                         The estimated FWHM (H, in degrees) is shown in the bottom right corner.')
+        description = QtWidgets.QLabel('This feature is currently in <b>test phase</b>, feedback is very welcome!<br>\
+                                        The estimated FWHM (H, in degrees) is shown in the bottom right corner.')
         description.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(description)
-        # Add the apply button
-        button_box = QtWidgets.QDialogButtonBox()
-        button_box.addButton(QtWidgets.QDialogButtonBox.StandardButton.Apply)
-        button_box.setCenterButtons(True)
-        button_box.clicked.connect(lambda: self.win_fwhm_accept(param_dict_change, param_window))
+        # Add the apply & reset buttons
+        button_box = QtWidgets.QGroupBox()
+        button_box_layout = QtWidgets.QHBoxLayout()
+        button_box.setLayout(button_box_layout)
+        button_reset = QtWidgets.QPushButton('Reset')
+        button_reset.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        button_reset.clicked.connect(self.win_fwhm_reset)
+        button_apply = QtWidgets.QPushButton('Apply')
+        button_apply.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        button_apply.clicked.connect(lambda: self.win_fwhm_accept(param_dict_change, self.fwhm_win))
+        button_box_layout.addWidget(button_reset)
+        button_box_layout.addWidget(button_apply)
         layout.addWidget(button_box)
         # Disclimer box info
         citation_box = QtWidgets.QGroupBox()
@@ -2259,7 +2979,7 @@ class MainWindow(QtWidgets.QMainWindow):
         citation_box_layout = QtWidgets.QVBoxLayout()
         citation_box_layout.setContentsMargins(6,6,6,6)
         citation_box.setLayout(citation_box_layout)
-        citation = QtWidgets.QLabel(f'The interested user is referred to the article:<br>\
+        citation = QtWidgets.QLabel('The interested user is referred to the article:<br>\
                                       <b>On the resolution function for powder diffraction with area detectors</b><br>\
                                       <a href="https://doi.org/10.1107/S2053273321007506">\
                                       D. Chernyshov <i> et al., Acta Cryst.</i> (2021). <b>A77</b>, 497-505</a>')
@@ -2268,12 +2988,39 @@ class MainWindow(QtWidgets.QMainWindow):
         citation_box_layout.addWidget(citation)
         layout.addWidget(citation_box)
 
-        param_window.setWindowIcon(self.icon)
-        param_window.setLayout(layout)
-        param_window.setFixedSize(param_window.sizeHint())
-        param_window.exec()
+        self.fwhm_win.setWindowIcon(self.icon)
+        self.fwhm_win.setLayout(layout)
+        self.fwhm_win.setFixedSize(self.fwhm_win.sizeHint())
+
+        self.win_fwhm_update()
+        self.fwhm_win.show()
     
     def win_fwhm_update(self, val=None):
+        """
+        Updates the Full Width at Half Maximum (FWHM) plot based on the current parameters and theme settings.
+
+        Parameters:
+        val (optional): A value to update the parameter dictionary. If provided, it should be a numerical value.
+
+        Description:
+        - Updates the pen color and background of the FWHM plot based on the current theme.
+        - If `val` is provided, updates the parameter dictionary `param_dict_tr` with the new value.
+        - Calculates the FWHM using the current parameters:
+            - Sensor thickness
+            - Sensor material
+            - Beam divergence
+            - Energy resolution
+            - Scattering diameter
+        - Updates the FWHM plot with the calculated values.
+        - Calls `win_pxrd_update` to refresh the plot with the updated parameters.
+        """
+        if self.fwhm_win is None:
+            return
+
+        # change color if theme was changed
+        self.fwhm_curve.setPen(pg.mkPen(color=self.palette().text().color(), width=3))
+        self.fwhm_plot.setBackground(self.palette().base().color())
+
         # Crude calculation of the FWHM
         # 
         # get updated values from param_dict_tr
@@ -2313,72 +3060,306 @@ class MainWindow(QtWidgets.QMainWindow):
         X = np.cos(tth)
         H2 = A*X**4 + B*X**2 + C + M
         fwhm = np.sqrt(H2) * 180 / np.pi
-        self.preview_curve.setData(np.rad2deg(tth), fwhm)
-        #return tth, fwhm
+        self.fwhm_curve.setData(np.rad2deg(tth), fwhm)
+        self.win_pxrd_update(update_dict=self.param_dict_tr)
 
-    def win_fwhm_accept(self, dict, window):
+    def win_fwhm_reset(self):
+        """
+        Resets the FWHM window by closing the current window, setting the window 
+        attribute to None, and then reopening the FWHM window.
+
+        This method ensures that the FWHM window is properly reset and displayed 
+        again.
+        """
+        self.fwhm_win.close()
+        self.fwhm_win = None
+        self.win_fwhm_show()
+
+    def win_fwhm_accept(self, udict, win):
+        """
+        Updates the properties of the `plo` object based on the values from the provided dictionary
+        and closes the given window.
+
+        Parameters:
+        udict (dict): A dictionary where each key corresponds to an index and each value is a list
+                      containing a widget and a divisor. The widget's value is used to update the 
+                      properties of the `plo` object after being multiplied by the divisor.
+        win (QWidget): The window that will be closed after updating the properties.
+
+        Updates:
+        - self.plo.sensor_thickness: Rounded value from udict[0].
+        - self.plo.sensor_material: Text from udict[1].
+        - self.plo.beam_divergence: Rounded value from udict[2].
+        - self.plo.energy_resolution: Rounded value from udict[3].
+        - self.plo.scattering_diameter: Rounded value from udict[4].
+
+        Additional Actions:
+        - Enables the action to show FWHM.
+        - Sets `self.plo.show_fwhm` to False.
+        - Calls `self.toggle_fwhm()` to toggle the FWHM display.
+        - Closes the provided window.
+        """
         # assign combo/spinbox values
         # Index:[combo/spinbox widget, divisor]
-        self.plo.sensor_thickness = round(dict[0][0].value() * dict[0][1], 6)
-        self.plo.sensor_material = str(dict[1][0].currentText())
-        self.plo.beam_divergence = round(dict[2][0].value() * dict[2][1], 6)
-        self.plo.energy_resolution = round(dict[3][0].value() * dict[3][1], 6)
-        self.plo.scattering_diameter = round(dict[4][0].value() * dict[4][1], 6)
-        #self.plo.funct_fwhm_thresh = round(dict[5][0].value() * dict[5][1], 6)
+        self.plo.sensor_thickness = round(udict[0][0].value() * udict[0][1], 6)
+        self.plo.sensor_material = str(udict[1][0].currentText())
+        self.plo.beam_divergence = round(udict[2][0].value() * udict[2][1], 6)
+        self.plo.energy_resolution = round(udict[3][0].value() * udict[3][1], 6)
+        self.plo.scattering_diameter = round(udict[4][0].value() * udict[4][1], 6)
+        #self.plo.funct_fwhm_thresh = round(udict[5][0].value() * udict[5][1], 6)
         self.action_funct_fwhm_show.setEnabled(True)
         self.plo.show_fwhm = False
         self.toggle_fwhm()
-        window.close()
+        win.close()
     
-    #############
-    #  UPDATE   #
-    #############
-    def update_screen(self, val=None):
-        if val is not None:
-            if self.sender().objectName() == 'dist':
-                self.geo.dist = float(val)
-                if self.plo.enable_slider_bsdx:
-                    # set beamstop max distance to current detector distance
-                    # or the maximum allowed value, whichever is smaller
-                    current_max = min(self.geo.dist, self.lmt.bsdx_max)
-                    self.sliderWidget.update_slider_limits(self.sliderWidget.sl_bsdx,
-                                                           self.lmt.bsdx_min,
-                                                           current_max)
-            elif self.sender().objectName() == 'rota':
-                self.geo.rota = float(val)
-            elif self.sender().objectName() == 'tilt':
-                self.geo.tilt = float(val)
-            elif self.sender().objectName() == 'voff':
-                self.geo.voff = float(val)
-            elif self.sender().objectName() == 'hoff':
-                self.geo.hoff = float(val)
-            elif self.sender().objectName() == 'ener':
-                self.geo.ener = float(val)
-            elif self.sender().objectName() == 'bsdx':
-                self.geo.bsdx = float(val)
+    ##########
+    #  PXRD  #
+    ##########
+    def win_pxrd_plot(self, keep=False):
+        """
+        Displays or updates the Powder X-ray Diffraction (PXRD) plot window.
+        If the PXRD window is already visible and `keep` is False, the window will be closed.
+        Otherwise, the window will be updated or created if it does not exist.
+        Parameters:
+        -----------
+        keep : bool, optional
+            If True, keeps the PXRD window open even if it is already visible. Default is False.
+        Notes:
+        ------
+        - The PXRD window includes a plot of the PXRD data, with options to interact with the plot.
+        - A disclaimer box is included in the window, indicating that the feature is in the test phase.
+        - A button to set up Full Width at Half Maximum (FWHM) is also included in the disclaimer box.
+        """
+        if self.pxrd_win is not None:
+            if self.pxrd_win.isVisible() and not keep:
+                self.pxrd_win.close()
+                return
+            self.win_pxrd_update()
+            self.pxrd_win.show()
+            return
+        
+        #self.pxrd_win = QtWidgets.QDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
+        self.pxrd_win = HotkeyDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
+        self.pxrd_win.setStyleSheet('QGroupBox { font-weight: bold; }')
+        
+        layout = QtWidgets.QVBoxLayout()
+        
+        powder_box = QtWidgets.QGroupBox('')
+        powder_box_layout = QtWidgets.QVBoxLayout()
+        powder_box_layout.setContentsMargins(6,6,6,6)
+        powder_box.setLayout(powder_box_layout)
+        
+        self.pxrd_curve = pg.PlotCurveItem()
+        self.pxrd_curve.setPen(pg.mkPen(color=self.palette().text().color()))
+        self.pxrd_scatt = pg.ScatterPlotItem(size=15)
+        self.pxrd_scatt.setPen(pg.mkPen(color=self.palette().highlight().color()))
+        self.pxrd_scatt.setSymbol(self.plo.pxrd_marker_symbol)
+        self.pxrd_scatt.sigClicked.connect(self.win_pxrd_show_hkl)
+        self.pxrd_regio = pg.LinearRegionItem(pen=pg.mkPen(None))
+        self.pxrd_regio.setMovable(False)
 
-        # re-calculate cones and re-draw contours
-        self.draw_conics()
-        # draw reference contours
-        if self.geo.reference != 'None':
-            self.get_reference()
-            self.draw_reference()
+        self.pxrd_plot = pg.PlotWidget(background=self.palette().base().color())
+        self.pxrd_plot.viewport().setAttribute(QtCore.Qt.WidgetAttribute.WA_AcceptTouchEvents, False)
+        self.pxrd_plot.setMenuEnabled(False)
+        self.pxrd_plot.setLabel(axis='left', text='Intensity [arb. units]', color=self.palette().text().color())
+        self.pxrd_plot.showGrid(x=True, y=True, alpha=0.5)
+        self.pxrd_plot.addItem(self.pxrd_curve)
+        self.pxrd_plot.addItem(self.pxrd_scatt)
+        self.pxrd_plot.addItem(self.pxrd_regio)
+        
+        powder_box_layout.addWidget(self.pxrd_plot)
+        layout.addWidget(powder_box)
+
+        # Disclimer box info
+        citation_box = QtWidgets.QGroupBox()
+        citation_box.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        citation_box_layout = QtWidgets.QHBoxLayout()
+        citation_box_layout.setContentsMargins(6,6,6,6)
+        citation_box.setLayout(citation_box_layout)
+        citation = QtWidgets.QLabel('This feature is currently in <b>test phase</b>, feedback is very welcome!')
+        citation.setOpenExternalLinks(True)
+        citation_box_layout.addWidget(citation, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
+        # Add the fwhm button
+        button_fwhm = QtWidgets.QPushButton('Setup FHWM')
+        button_fwhm.clicked.connect(self.win_fwhm_show)
+        citation_box_layout.addWidget(button_fwhm, alignment=QtCore.Qt.AlignmentFlag.AlignRight)
+        layout.addWidget(citation_box)
+        
+        self.win_pxrd_update()
+        self.pxrd_win.setWindowIcon(self.icon)
+        self.pxrd_win.setLayout(layout)
+        self.pxrd_win.show()
+
+    def win_pxrd_update(self, update_dict=None):
+        """
+        Updates the PXRD (Powder X-ray Diffraction) window with new data and settings.
+        Parameters:
+        update_dict (dict, optional): A dictionary containing updated parameters for the PXRD calculation. 
+                                      If None, default parameters from the object are used. The dictionary 
+                                      should have the following keys:
+                                      - '0': Sensor thickness
+                                      - '1': Sensor material
+                                      - '2': Beam divergence
+                                      - '3': Energy resolution
+                                      - '4': Scattering diameter
+        Returns:
+        None
+        """
+        if self.pxrd_win is None:
+            return
+        
+        # change color if theme changed
+        self.pxrd_curve.setPen(self.palette().text().color())
+        self.pxrd_plot.setBackground(self.palette().base().color())
+        self.pxrd_scatt.setPen(self.palette().highlight().color())
+        self.pxrd_scatt.setBrush(self.palette().highlight().color())
+
+        if self.geo.reference.lower() == 'none':
+            self.pxrd_win.setWindowTitle(f'Load a cif to show PXRD pattern')
+            self.pxrd_curve.setData(x=None, y=None, data=None)
+            self.pxrd_scatt.setData(x=None, y=None, data=None)
+            return
+        
+        if self.geo.reference in self.ref_cif and self.ref_cif[self.geo.reference].is_complete:
+            dsp = self.ref_cif[self.geo.reference].dsp # np.array
+            peak_ttr, idx = self.dsp2tth(dsp)
+            inten = np.array(self.ref_cif[self.geo.reference].hkl)[:,4][idx] # list[ (h k l I Irel) ]
+            hkl = list(map(tuple, np.array(self.ref_cif[self.geo.reference].hkl)[:,:3][idx].astype(int)))
+        else:
+            self.pxrd_win.setWindowTitle(f'Load a cif to show PXRD pattern')
+            self.pxrd_curve.setData(x=None, y=None, data=None)
+            self.pxrd_scatt.setData(x=None, y=None, data=None)
+            return
+        
+        if update_dict is None:
+            thk = self.plo.sensor_thickness
+            mat = self.plo.sensor_material
+            div = self.plo.beam_divergence
+            dEE = self.plo.energy_resolution
+            dia = self.plo.scattering_diameter
+        else:
+            thk = update_dict['0']
+            mat = update_dict['1']
+            div = update_dict['2']
+            dEE = update_dict['3']
+            dia = update_dict['4']
+
+        self.pxrd_win.setWindowTitle(f'PXRD pattern of {self.geo.reference}')
+        self.pxrd_plot.setTitle(f'Estimated diffration pattern for a <b>perpendicular\
+                                 & flat</b> detector geometry (F\u00B2 & d-spacing @\
+                                 {self.plo.conic_ref_cif_kev} keV).', color=self.palette().text().color())
+        
+        fwhm = self.calc_FWHM(dis=self.geo.dist * 1e-3,
+                              dia=dia,
+                              thk=thk,
+                              mat=mat,
+                              pxs=self.det.pxs * 1e-3,
+                              tth=peak_ttr,
+                              nrg=self.geo.ener,
+                              div=div,
+                              dEE=dEE,
+                              deg=False)
+        # calc visible extent
+        if self._tth is not None and not isinstance(self._tth, float):
+            max_res_r = np.nanmax(self._tth)
+            min_res_r = max(np.nanmin(self._tth), fwhm.mean()/10)
+        else:
+            max_res_r = self.calc_max_resolution()
+            min_res_r = fwhm.mean()/10
+
+        # add beamstop shadow
+        if self.geo.bssz and not (isinstance(self.geo.bssz, str) and self.geo.bssz.lower() == 'none'):
+            if min_res_r < self.bs_theta:
+                regio_min = self.calc_unit(min_res_r)
+                regio_max = self.calc_unit(self.bs_theta)
+                self.pxrd_regio.setRegion((regio_min, regio_max))
+                regio_color = self.beamstop_color
+                regio_color.setAlphaF(0.10)
+                self.pxrd_regio.setBrush(regio_color)
+                self.pxrd_regio.setVisible(True)
+        else:
+            self.pxrd_regio.setVisible(False)
+        
+        ttr = np.arange(min_res_r, max_res_r, fwhm.mean()/10)
+
+        gauss = np.sum(self.gaussian(ttr, np.atleast_2d(peak_ttr).T, np.atleast_2d(fwhm).T) * np.atleast_2d(inten).T, axis=0)
+        xval = self.calc_unit(ttr)
+        self.pxrd_curve.setData(x=xval, y=gauss)
+        
+        peak_xval = self.calc_unit(peak_ttr)
+        # remove peaks that are ouside of the detector screen
+        peak_idx = np.nonzero(peak_xval <= xval.max())[0]
+        offset = (gauss.max() - gauss.min())*self.plo.pxrd_marker_offset
+        self.pxrd_scatt.setData(x=peak_xval[peak_idx], y=np.zeros(len(peak_xval[peak_idx]))-offset, data=[hkl[i] for i in peak_idx])
+
+        self.pxrd_plot.setLabel(axis='bottom', text=self.unit_names[self.geo.unit], color=self.palette().text().color())
+        # flip axis for d-spacing
+        if self.geo.unit == 1:
+            self.pxrd_plot.getPlotItem().getViewBox().invertX(True)
+        else:
+            self.pxrd_plot.getPlotItem().getViewBox().invertX(False)
+
+    def win_pxrd_show_hkl(self, widget, points, event):
+        """
+        Displays the HKL (Miller indices) information in a tooltip when a point is clicked.
+
+        Parameters:
+        widget (QtWidgets.QWidget): The widget that triggered the event.
+        points (list): A list of points where the event occurred.
+        event (QtGui.QMouseEvent): The mouse event that triggered the display.
+
+        Returns:
+        None
+        """
+        if not widget.name:
+            return
+        elif len(points) > 0:
+            text = QtWidgets.QTextEdit(str(points[0].data()))
+            text.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            pos = QtCore.QPoint(*map(int, event.screenPos()))
+            QtWidgets.QToolTip.showText(pos, text.toHtml())
 
     #############
     #  EXPORT   #
     #############
     def win_export_show(self):
+        """
+        Displays a dialog window for exporting current settings to a file.
+        This method creates and configures a QDialog window with various widgets
+        for selecting detectors, beamstop sizes, and reviewing parameters. The 
+        window includes the following components:
+        - Detector bank tree widget: Allows selection of detector types and sizes.
+        - Beamstop bank list widget: Allows specification of available beamstop sizes.
+        - Parameter tree widget: Displays and allows editing of various parameters.
+        The dialog window also includes buttons for adding/removing beamstop sizes 
+        and exporting the settings to a file.
+        Components:
+        - QDialog: The main dialog window.
+        - QVBoxLayout: Main vertical layout for the dialog.
+        - QHBoxLayout: Horizontal layout for grouping widgets.
+        - QFrame: Frame to hold the horizontal layout.
+        - QGroupBox: Group boxes for organizing the detector bank, beamstop bank, and parameters.
+        - QTreeWidget: Tree widget for displaying detector types and sizes.
+        - QListWidget: List widget for displaying beamstop sizes.
+        - QTreeWidget: Tree widget for displaying and editing parameters.
+        - QToolButton: Buttons for adding/removing beamstop sizes and exporting settings.
+        Note:
+        - The method uses custom item delegates for editing float values in the 
+          beamstop list and various data types in the parameter tree.
+        - The method highlights the current detector type and size in the detector tree.
+        - The method connects various signals to appropriate slots for handling user interactions.
+        """
         # set flags=QtCore.Qt.WindowType.Tool for the window
         # to not loose focus when the FileDialog is closed
-        self.export_window = QtWidgets.QDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
-        self.export_window.setWindowTitle('Export current settings to file')
+        self.export_win = QtWidgets.QDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
+        self.export_win.setWindowTitle('Export current settings to file')
         layout_vbox = QtWidgets.QVBoxLayout()
         layout_hbox = QtWidgets.QHBoxLayout()
         layout_hbox.setContentsMargins(0,0,0,0)
         frame = QtWidgets.QFrame()
         frame.setLayout(layout_hbox)
 
-        self.export_window.setLayout(layout_vbox)
+        self.export_win.setLayout(layout_vbox)
 
         # Fonts
         font_header = QtGui.QFont()
@@ -2607,9 +3588,21 @@ class MainWindow(QtWidgets.QMainWindow):
         layout_qbox_par.addWidget(self.tree_par)
         layout_qbox_btn.addWidget(button_export)
 
-        self.export_window.show()
+        self.export_win.show()
 
     def win_export_ghost_select(self, item):
+        """
+        Handles the selection logic for a tree-like structure in a GUI.
+
+        Parameters:
+        item (QTreeWidgetItem): The item whose selection state has changed.
+
+        Behavior:
+        - If the item is a top-level item (i.e., it has no parent), selecting it will select all its children,
+          and deselecting it will deselect all its children.
+        - If the item is a child item (i.e., it has a parent), selecting any child will select the parent,
+          and deselecting all children will deselect the parent.
+        """
         parent = item.parent()
         # toplevel -> multiselect
         if parent == None:
@@ -2625,6 +3618,21 @@ class MainWindow(QtWidgets.QMainWindow):
                 parent.setSelected(False)
 
     def win_export_to(self):
+        """
+        Exports the current detector and beamstop settings to a JSON file.
+        This method performs the following steps:
+        1. Collects selected detector items from the tree widget and organizes them into a dictionary.
+        2. Retrieves beamstop values from a list widget and rounds them to 5 decimal places.
+        3. Constructs a settings dictionary from the tree widget, rounding float values to 5 decimal places.
+        4. Prompts the user to select a file location to save the settings as a JSON file.
+        5. Adds the detector bank and beamstop list to the settings dictionary.
+        6. Writes the settings dictionary to the selected JSON file.
+        7. Closes the export window if it is open.
+        8. Activates the newly exported settings file.
+        9. Adds the new settings file to the custom settings menu and checks it if it is not already in the list.
+        Returns:
+            None
+        """
         # make detector bank/dict from selection
         det_bank = {}
         for item in self.tree_det.selectedItems():
@@ -2661,8 +3669,8 @@ class MainWindow(QtWidgets.QMainWindow):
             json.dump(settings, wf, indent=4)
         
         # close the window
-        if self.export_window:
-            self.export_window.close()
+        if self.export_win:
+            self.export_win.close()
 
         # activate exported settings file
         basename = os.path.basename(target)
@@ -2686,19 +3694,39 @@ class MainWindow(QtWidgets.QMainWindow):
     # DETECTOR DB #
     ###############
     def win_detdb_show(self):
+        """
+        Displays the detector databank window.
+        This method creates and configures a QDialog window for editing the detector databank.
+        It sets up various UI components including list widgets, table widgets, and buttons 
+        for managing detector parameters and sizes. The window is designed to maintain focus 
+        when a FileDialog is closed.
+        UI Components:
+        - Detector bank list widget
+        - Detector size table widget
+        - Detector parameter table widget
+        - Detector dimensions display
+        - Add/Remove buttons for detector list and size list
+        - Save and Preview buttons
+        Signals:
+        - Connects various signals to their respective slots for handling user interactions.
+        Notes:
+        - The window uses custom item delegates for editing integer values in the table widget.
+        - The detector databank is copied to a local dictionary for manipulation.
+        - Tooltips are provided for various UI elements to guide the user.
+        """
         # set flags=QtCore.Qt.WindowType.Tool for the window
         # to not loose focus when the FileDialog is closed
-        self.detdb_window = QtWidgets.QDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
-        self.detdb_window.setWindowTitle('Edit detector databank')
-        self.detdb_window.finished.connect(self.win_detdb_on_close)
+        self.detdb_win = QtWidgets.QDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
+        self.detdb_win.setWindowTitle('Edit detector databank')
+        self.detdb_win.finished.connect(self.win_detdb_on_close)
         layout_vbox = QtWidgets.QVBoxLayout()
         layout_hbox = QtWidgets.QHBoxLayout()
         layout_hbox.setContentsMargins(0,0,0,0)
         frame = QtWidgets.QFrame()
         frame.setLayout(layout_hbox)
-        self.detdb_window.setLayout(layout_vbox)
+        self.detdb_win.setLayout(layout_vbox)
 
-        self.detdb_window.setStyleSheet('QGroupBox { font-weight: bold; } ')
+        self.detdb_win.setStyleSheet('QGroupBox { font-weight: bold; } ')
 
         # Fonts
         font_header = QtGui.QFont()
@@ -2946,9 +3974,22 @@ class MainWindow(QtWidgets.QMainWindow):
         # calculate detector size for given settings
         self.win_detdb_dim_update()
         self.list_db.setFocus()
-        self.detdb_window.show()
+        self.detdb_win.show()
     
     def win_detdb_dim_update(self):
+        """
+        Updates the detector database dimensions displayed in the UI.
+
+        This method retrieves the current detector and its dimensions from the UI elements,
+        calculates the dimensions in both millimeters and pixels, and updates the corresponding
+        UI text fields with these values.
+
+        The dimensions are calculated based on the horizontal and vertical multipliers and gaps,
+        as well as the pixel size from the detector database.
+
+        Raises:
+            ValueError: If the text from the table items cannot be converted to integers.
+        """
         det = self.list_db.currentItem().text()
         size_row = self.table_size.currentRow()
         hmn = int(self.table_size.item(size_row, 1).text())
@@ -2960,12 +4001,38 @@ class MainWindow(QtWidgets.QMainWindow):
         self._dim_px.setText(f'{xdim:.0f} \u00D7 {ydim:.0f} px')
     
     def win_detdb_par_change(self, val):
+        """
+        Updates the detector database parameter with the given value and refreshes the display.
+
+        This method retrieves the current detector from the list, identifies the parameter to be updated
+        based on the sender's object name, and updates the corresponding value in the internal database
+        dictionary. After updating the value, it calls the method to update the display dimensions.
+
+        Args:
+            val: The new value to set for the specified parameter.
+        """
         det = self.list_db.currentItem().text()
         par = self.sender().objectName()
         self._db_dict[det][par] = val
         self.win_detdb_dim_update()
 
     def win_detdb_size_update(self):
+        """
+        Updates the 'size' entry in the detector database dictionary based on the current items in the table.
+
+        This method retrieves the currently selected detector from the list and updates its 'size' entry in the 
+        internal database dictionary (`_db_dict`). The 'size' entry is replaced with a new dictionary where each 
+        key is a size name and each value is a tuple containing horizontal and vertical measurements.
+
+        The method also calls `win_detdb_dim_update` to update the dimensions.
+
+        Note:
+            The old 'size' entry is completely replaced, and any previous data is lost.
+
+        Raises:
+            AttributeError: If the current item in the list or any item in the table is None.
+            ValueError: If the horizontal or vertical measurements cannot be converted to integers.
+        """
         # The table is replacing the dict[det]['size'] entry on change
         # I don't know how to properly handle the renaming of a 'size'
         # the 'old' name, that is to be replaced be 'new', is lost
@@ -2979,11 +4046,43 @@ class MainWindow(QtWidgets.QMainWindow):
         self.win_detdb_dim_update()
 
     def win_detdb_dict_update(self, QListWidgetItem):
+        """
+        Updates the detector database dictionary with the selected detector.
+
+        Args:
+            QListWidgetItem (QListWidgetItem): The item selected from the QListWidget, representing a detector.
+
+        Updates:
+            - Moves the current detector entry to the new detector key in the database dictionary.
+            - Calls the method to update the detector dimensions in the window.
+        """
         det = QListWidgetItem.text()
         self._db_dict[det] = self._db_dict.pop(self.current_detector)
         self.win_detdb_dim_update()
 
     def win_detdb_par_update(self, item):
+        """
+        Updates the detector database parameters in the UI based on the selected item.
+
+        Args:
+            item (QTableWidgetItem): The selected item from the detector database table.
+
+        This method performs the following actions:
+        - Sets the current detector to the text of the selected item.
+        - Iterates through the parameters and values of the selected detector in the database.
+        - If the parameter is 'size', it updates the size table in the UI:
+            - Blocks signals from the size table to prevent unwanted signal emissions.
+            - Clears the contents of the size table.
+            - Sets the row count of the size table to 0.
+            - Iterates through the size values and populates the size table with the new values.
+            - Sets the current cell of the size table to the first cell of each row.
+            - Unblocks signals from the size table.
+        - For other parameters, it updates the corresponding UI elements:
+            - Blocks signals from the UI element to prevent unwanted signal emissions.
+            - Sets the value of the UI element to the parameter value.
+            - Unblocks signals from the UI element.
+        - Calls the `win_detdb_dim_update` method to update the dimensions in the UI.
+        """
         self.current_detector = item.text()
         for par, val in self._db_dict[item.text()].items():
             if par == 'size':
@@ -3008,10 +4107,38 @@ class MainWindow(QtWidgets.QMainWindow):
         self.win_detdb_dim_update()
     
     def win_detdb_on_close(self):
+        """
+        Handles the event when the detector database window is closed.
+
+        This method performs the following actions:
+        1. Copies the current state of the detector database to a backup dictionary.
+        2. Reinitializes the menu with a reset option.
+
+        Returns:
+            None
+        """
         self.detector_db = self._db_dict.copy()
         self.menu_init(reset=True)
 
     def win_detdb_preview(self):
+        """
+        Updates the detector database and changes the detector.
+
+        This method copies the current detector database to `self.detector_db`, 
+        retrieves the selected detector and its size from the UI, and then 
+        updates the detector configuration using the `change_detector` method.
+
+        Steps:
+        1. Copies the current detector database to `self.detector_db`.
+        2. Retrieves the selected detector from `self.list_db`.
+        3. Retrieves the size of the selected detector from `self.table_size`.
+        4. Calls `self.change_detector` with the selected detector and size.
+
+        Note:
+            This method assumes that `self.list_db` and `self.table_size` are 
+            properly initialized and populated with the relevant data.
+
+        """
         # add new detectors to
         # -> self.geo.det_bank
         # if it is not empty!
@@ -3021,18 +4148,57 @@ class MainWindow(QtWidgets.QMainWindow):
         self.change_detector(detector, size)
 
     def win_detdb_overwrite(self):
+        """
+        Overwrites the detector database file with the current detector database.
+
+        This method first previews the detector database changes by calling 
+        `win_detdb_preview`. Then, it writes the current state of `self.detector_db` 
+        to the file specified by `self.path_detdb` in JSON format with an indentation 
+        of 4 spaces. Finally, it closes the detector database window.
+
+        Returns:
+            None
+        """
         self.win_detdb_preview()
         with open(self.path_detdb, 'w') as wf:
             json.dump(self.detector_db, wf, indent=4)
-        self.detdb_window.close()
+        self.detdb_win.close()
 
     ##########
     #  HELP  #
     ##########
-    def show_about_window(self):
+    def show_about_win(self):
+        """
+        Displays the 'About' window for the application.
+        This method checks if the 'About' window is already open. If it is, it toggles its visibility.
+        If the window is not open, it creates a new instance of the 'About' window and populates it
+        with relevant information about the application, including the title, version, description,
+        authors, and links to external resources.
+        The window includes:
+        - Application title and version.
+        - Description of the application with a link to the GitHub repository.
+        - Publication information with a link to the published article.
+        - List of authors.
+        - Feedback email link.
+        - Link to the settings file location.
+        - Link to the old detector database backup file.
+        The window is set to be unresizable and is displayed once all components are added.
+        Attributes:
+            about_win (HotkeyDialog): The dialog window displaying the 'About' information.
+            path_settings (str): Path to the settings file.
+            path_home (str): Path to the home directory.
+            pixmap (QPixmap): The pixmap for the logo.
+            icon (QIcon): The icon for the window.
+        """
+        if self.about_win is not None:
+            if self.about_win.isVisible():
+                self.about_win.close()
+            else:
+                self.about_win.show()
+            return
         # Show popup window with short description,
         # version number and links to relevant information
-        msgBox = QtWidgets.QDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
+        self.about_win = HotkeyDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
         #msgBox.setWindowTitle('About')
         
         # title font
@@ -3074,14 +4240,32 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addWidget(icon)
         layout.addWidget(box)
         # finish the window and make it unresizable
-        msgBox.setWindowIcon(self.icon)
-        msgBox.setLayout(layout)
-        msgBox.setFixedSize(msgBox.sizeHint())
-        msgBox.exec()
+        self.about_win.setWindowIcon(self.icon)
+        self.about_win.setLayout(layout)
+        self.about_win.setFixedSize(self.about_win.sizeHint())
+        self.about_win.show()
 
-    def show_geometry_window(self):
-        msgBox = QtWidgets.QDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
-        msgBox.setWindowTitle('Geometry conventions')
+    def show_geometry_win(self):
+        """
+        Displays a window with information about geometry conventions used in the application.
+        If the geometry window is already visible, it will be closed. Otherwise, it will be shown.
+        If the geometry window does not exist, it will be created and displayed.
+        The window contains:
+        - A title "Geometry conventions" with a large font size.
+        - A detailed description of translations, rotations, and tilts related to the detector geometry.
+        - An image illustrating the geometry conventions.
+        - Links to a publication and a GitHub repository for more information.
+        The window is created as a `HotkeyDialog` with a `QtCore.Qt.WindowType.Tool` flag and is set to a fixed size based on its content.
+        """
+        if self.geometry_win is not None:
+            if self.geometry_win.isVisible():
+                self.geometry_win.close()
+            else:
+                self.geometry_win.show()
+            return
+        
+        self.geometry_win = HotkeyDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
+        self.geometry_win.setWindowTitle('Geometry conventions')
         
         font_title = QtGui.QFont()
         font_title.setPointSize(28)
@@ -3120,15 +4304,124 @@ class MainWindow(QtWidgets.QMainWindow):
         layout = QtWidgets.QVBoxLayout()
         layout.addWidget(box)
         
-        msgBox.setWindowIcon(self.icon)
-        msgBox.setLayout(layout)
-        msgBox.setFixedSize(msgBox.sizeHint())
-        msgBox.exec()
+        self.geometry_win.setWindowIcon(self.icon)
+        self.geometry_win.setLayout(layout)
+        self.geometry_win.setFixedSize(self.geometry_win.sizeHint())
+        self.geometry_win.show()
+
+    def show_hotkeys_win(self):
+        """
+        Displays a window with a list of hotkeys and their corresponding actions.
+        If the hotkeys window is already visible, it will be closed. Otherwise, it will be shown.
+        If the hotkeys window does not exist, it will be created and displayed.
+        The hotkeys window contains a table with two columns: 'Key' and 'Action'.
+        The table lists various hotkeys and their descriptions, including special sections
+        highlighted with bold text.
+        The hotkeys include:
+        - F1: Show about window
+        - F2: Show geometry window
+        - F3: Show hotkey window
+        - x: Show PXRD window
+        - t: 2-theta
+        - d: d-spacing
+        - q: Q-space
+        - s: sin(θ)/λ
+        - ↑: Top left
+        - ↓: Bottom left
+        - p: Show polarisation
+        - a: Show solid angle
+        - h: Highlight / Transparency
+        - u: Toggle unit hover display
+        - c: Next colormap
+        - ⇧ + c: Previous colormap
+        The window is styled with alternating row colors, no vertical header, no word wrap,
+        and no edit triggers. The columns are resized to fit their contents, and the window
+        is adjusted to its contents' size.
+        """
+        if self.hotkeys_win is not None:
+            if self.hotkeys_win.isVisible():
+                self.hotkeys_win.close()
+            else:
+                self.hotkeys_win.show()
+            return
+        
+        self.hotkeys_win = HotkeyDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
+        self.hotkeys_win.setWindowTitle('Hotkeys')
+
+        hotkeys = [('#','Windows'),
+                   ('F1','Show about window'),
+                   ('F2','Show geometry window'),
+                   ('F3','Show hotkey window'),
+                   ('x','Show PXRD window'),
+                   ('#','Display units'),
+                   ('t','2-theta'),
+                   ('d','d-spacing'),
+                   ('q','Q-space'),
+                   ('s ','sin(\u03B8)/\u03BB'),
+                   ('#','Unit label position'),
+                   ('\u2191','Top left'),
+                   ('\u2193','Bottom left'),
+                   ('#','Toggle overlay'),
+                   ('p','Show polarisation'),
+                   ('a','Show solid angle'),
+                   ('h','Highlight / Transparency'),
+                   ('u','Toggle unit hover display'),
+                   ('#','Cycle colormaps'),
+                   ('c','Next'),
+                   ('\u21E7 + c','Previous')]
+
+        table = QtWidgets.QTableWidget()
+        table.setColumnCount(2)
+        table.setSortingEnabled(False)
+        table.setHorizontalHeaderLabels(['Key','Action'])
+        table.setAlternatingRowColors(False)
+        table.verticalHeader().hide()
+        table.setWordWrap(False)
+        table.horizontalHeader().setStretchLastSection(True)
+        table.setEditTriggers(QtWidgets.QTableWidget.EditTrigger.NoEditTriggers)
+        table.setSelectionMode(QtWidgets.QTableWidget.SelectionMode.NoSelection)
+        table.setSizeAdjustPolicy(QtWidgets.QTableWidget.SizeAdjustPolicy.AdjustToContents)
+
+        font_bold = QtGui.QFont()
+        font_bold.setBold(True)
+        for i,(k,v) in enumerate(hotkeys):
+            table.insertRow(i)
+            if k == '#':
+                table.setItem(i, 0, QtWidgets.QTableWidgetItem(v))
+                table.setSpan(i, 0, 1, 2)
+                table.item(i, 0).setBackground(self.palette().alternateBase().color())
+                table.item(i, 0).setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+                table.item(i, 0).setFont(font_bold)
+            else:
+                table.setItem(i, 0, QtWidgets.QTableWidgetItem(k))
+                table.setItem(i, 1, QtWidgets.QTableWidgetItem(v))
+
+        table.resizeColumnsToContents()
+        layout = QtWidgets.QVBoxLayout()
+        layout.addWidget(table)
+
+        self.hotkeys_win.setWindowIcon(self.icon)
+        self.hotkeys_win.setLayout(layout)
+        self.hotkeys_win.resize(self.hotkeys_win.sizeHint())
+        self.hotkeys_win.show()
 
     #############
     #  UTILITY  #
     #############
-    def resize_window(self):
+    def resize_win(self):
+        """
+        Adjusts the dimensions of the plotting window and sets the appropriate ranges for the axes.
+        This method calculates the proper dimensions for the plot based on the detector's properties
+        and the plot's padding. It then limits the x and y axes ranges accordingly. If the plot size
+        is not set, it determines an appropriate size based on the screen's available height. Finally,
+        it sets the window's width and height, and if the plot size is fixed, it ensures the window
+        cannot be resized beyond these dimensions.
+        Attributes:
+            xdim (float): The calculated width dimension for the plot.
+            ydim (float): The calculated height dimension for the plot.
+            win_width (int): The final width of the window.
+            win_height (int): The final height of the window.
+        """
         # figure out proper plot dimensions
         # this adds a padding of hmn x vmn
         # to remove:  + self.det.hgp * (self.det.hmn -1)
@@ -3160,12 +4453,41 @@ class MainWindow(QtWidgets.QMainWindow):
         self.resize(self.win_width, self.win_height)
 
     def set_win_title(self):
+        """
+        Sets the window title based on the detector name, geometry reference, and active settings.
+
+        If the geometry reference is 'none' (case insensitive), the window title will be set to 
+        "<detector name> - <active settings>". Otherwise, it will be set to 
+        "<detector name> - <geometry reference> - <active settings>".
+
+        Attributes:
+            geo (object): An object containing the geometry reference.
+            det (object): An object containing the detector name.
+            active_settings (str): The current active settings.
+        """
         if self.geo.reference.lower() == 'none':
             self.setWindowTitle(f'{self.det.name} - {self.active_settings}')
         else:
             self.setWindowTitle(f'{self.det.name} - {self.geo.reference} - {self.active_settings}')
 
     def calc_unit(self, tth):
+        """
+        Calculate the unit based on the given 2-Theta value.
+
+        This function converts the given 2-Theta value (in radians) to various units
+        based on the geometry energy and the selected unit type.
+
+        Parameters:
+        tth (float): The 2-Theta value in radians.
+
+        Returns:
+        float: The calculated unit value based on the selected unit type.
+               The unit type is determined by `self.geo.unit`:
+               - 0: 2-Theta in degrees
+               - 1: d-spacing in Angstroms
+               - 2: sin(Theta)/lambda multiplied by 4π
+               - 3: sin(Theta)/lambda
+        """
         # calc_unit expects 2-Theta in radians
 
         # Conversion factor keV to Angstrom: 12.398
@@ -3259,10 +4581,16 @@ class MainWindow(QtWidgets.QMainWindow):
                                   1.12333211e-03, 1.14094222e-03]}
 
     def calc_max_resolution(self, m=1.0):
-        # calculate the maximum 2theta angle for the given geometry
-        #  - used to generate 2theta values to draw conics
-        #  - m is a multiplier used to shrink the 2theta angle
-        #    to keep the maximum resolution conic visible
+        """
+        Calculate the maximum 2theta angle for the given geometry
+         - used to generate 2theta values to draw conics
+         - m is a multiplier used to shrink the 2theta angle
+           to keep the maximum resolution conic visible
+        
+        Returns
+        -------
+        float, maximum 2-theta in radians
+        """
         # make screen grid
         size_h = np.array([-self.xdim, self.xdim])*m
         size_v = np.array([-self.ydim, self.ydim])*m
@@ -3287,6 +4615,16 @@ class MainWindow(QtWidgets.QMainWindow):
         return tth.max()
         
     def rot_100(self, a, cc=1):
+        """
+        Generate a rotation matrix for a rotation around the [100] axis.
+
+        Parameters:
+        a (float): The angle of rotation in radians.
+        cc (int, optional): Clockwise rotation if 1 (default), counterclockwise if 0.
+
+        Returns:
+        numpy.ndarray: A 3x3 rotation matrix.
+        """
         #Omega in radians
         ca = np.cos(a)
         sa = np.sin(a)
@@ -3295,59 +4633,162 @@ class MainWindow(QtWidgets.QMainWindow):
                          [0,  ca, sa],
                          [0, -sa, ca]])
 
-    def calc_ref_from_cif(self, fpath):
-        # called when a cif is dropped onto the window
-        xtl = dif.Crystal(fpath)
-        # :return xval: arrray : x-axis of powder scan (units)
-        # :return inten: array : intensity values at each point in x-axis
-        # :return reflections: (h, k, l, xval, intensity) array of reflection positions, grouped by min_overlap
-        xval, inten, reflections = xtl.Scatter.powder(scattering_type='xray', units='dspace', powder_average=True, min_overlap=0.02, energy_kev=self.plo.conic_ref_cif_kev)
-        # reject low intensities: based on median or mean?
-        # median is always around unity -> useless
-        # mean rejects many, add adjustable multiplicator?
-        used = reflections[reflections[:,4] > reflections[:,4].max() * self.plo.conic_ref_cif_int]
-        # sort by intensity -> ascending -> flip
-        ordered = used[used[:, 4].argsort()][::-1]
-        # pick the strongest
-        ordered = ordered[:self.plo.conic_ref_num]
-        # assign dspacing
-        self.cont_ref_dsp = ordered[:,3]
-        # hkl -> integer
-        # cast hkl array to list of tuples (for easy display)
-        irel = ordered[:,4]/ordered[:,4].max()
-        self.cont_ref_hkl = list(zip(ordered[:,0], ordered[:,1], ordered[:,2], ordered[:,4], irel))
+    def calc_conic(self, omega, theta, steps=100):
+        """
+        Calculate the conic section formed by the intersection of a plane and a cone.
+        This method computes the coordinates of the conic section (circle, ellipse, parabola, hyperbola, or line)
+        formed by the intersection of a plane and a cone based on the given parameters.
+        Parameters:
+        omega (float): The angle of the cone's axis relative to the plane.
+        theta (float): The angle of the intersecting plane.
+        steps (int, optional): The number of steps for parameterization of the conic section. Default is 100.
+        Returns:
+        tuple: A tuple containing two arrays (x, y) representing the coordinates of the conic section.
+               If the conic section is not visible, returns (False, False).
+        Notes:
+        - The method skips drawing smaller/larger ±90 degree contours and rejects overlap of the 'backscattering'.
+        - The eccentricity of the resulting conic section is evaluated to parameterize the conic accordingly.
+        - The method handles circles, ellipses, parabolas, hyperbolas, and lines based on the eccentricity value.
+        - For ellipses and hyperbolas, the method checks if the conic section is visible within the given dimensions.
+        References:
+        - https://math.stackexchange.com/questions/4079720/on-the-equation-of-the-ellipse-formed-by-intersecting-a-plane-and-cone
+        - https://www.geogebra.org/
+        """
+        # Apart from textbooks on conic sections,
+        # https://math.stackexchange.com/questions/4079720/on-the-equation-of-the-ellipse-formed-by-intersecting-a-plane-and-cone
+        # here is a great discussion on how to get
+        # to the equation for the resulting ellipse
+        # formed by the intersection of a plane and
+        # a cone. We get the circle for free and just
+        # adapt for faster calculation.
+        # From there we need to work out the hyperbola
+        # and parabola and here only 3d-drawing the
+        # problem in geogebra made me understand what's
+        # going on: https://www.geogebra.org/
+        # 
+        # skip drawing smaller/larger +-90 deg contours
+        # reject overlap of the 'backscattering'
+        # -> limitation of the current implementation
+        if theta > np.pi/2 + abs(omega):
+            return False, False
 
-        self.geo.reference = os.path.basename(fpath)
-        self.ref_custom[self.geo.reference] = self.cont_ref_dsp
-        self.ref_custom_hkl[self.geo.reference] = self.cont_ref_hkl
+        # y axis offset of the cone center
+        dy_cone = self.geo.dist * np.tan(omega)
+        # change in 'r', the length of the cones primary axis
+        dz_cone = np.sqrt(self.geo.dist**2 + dy_cone**2)
+        # tilt is handled as a rotation but
+        # has its travel distance (y) reset.
+        comp_tilt = np.deg2rad(self.geo.tilt) * self.geo.dist
+        # eccentricity of the resulting conic section
+        ecc = np.round(np.cos(np.pi/2 - omega) / np.cos(theta), 10)
+        # y ('height') components/distances from central axis of the cone
+        # intersecting the detector plane and the distance to
+        # the y intersection of the conic section.
+        y1 = dz_cone * np.sin(theta) / np.cos(omega + theta)
+        y2 = dz_cone * np.sin(theta) / np.cos(omega - theta)
 
-        ref_action = QtGui.QAction(self.geo.reference, self, checkable=True)
-        self.menu_set_action(ref_action, self.change_reference, self.geo.reference)
-        self.sub_menu_custom.addAction(ref_action)
-        self.group_ref.addAction(ref_action)
-        ref_action.setChecked(True)
+        # add x/y offsets
+        # revert tilt rotation
+        y0 = dy_cone - self.geo.voff + comp_tilt 
+        x0 = self.geo.hoff
+
+        # add margin to slightly extend
+        # conics outside of visible area
+        _xdim = self.xdim * 1.05
+        #_ydim = self.ydim * 1.05
+        # evaluate the eccentricity and parameterise
+        # the resulting conic accordingly
+        if abs(ecc) == 0:
+            # circle
+            h = (y1+y2)/2
+            # check if the circle is visible
+            if h - np.sqrt(y0**2 + x0**2) > np.sqrt(self.ydim**2 + self.xdim**2):
+                return False, False
+            t = np.linspace(0, 2*np.pi, 2*steps)
+            x = x0 + h * np.sin(t)
+            y = y0 + (y1-y2)/2 + h * np.cos(t)
+        elif 0 < abs(ecc) < 1:
+            # ellipse
+            yd = (y1-y2)/2
+            h = (y1+y2)/2
+            w = dz_cone * np.sin(theta) * (y1+y2) / (2 * np.sqrt(y1*y2) * np.cos(theta))
+            # ellipses that expand ouside the visible area:
+            # add a margin to make sure the connecting line
+            # of segmented ellipses is outside the visible area
+            #
+            # I hope this is faster than generating and handing
+            # over a 'connect' array to the setData function
+            # of the plotItem
+            _xlim1 = (_xdim + x0) / w
+            _xlim2 = (_xdim - x0) / w
+            # check if the ellipse is visible
+            if _xlim1 < 0 and _xlim2 < 0:
+                return False, False
+            if _xlim1 < 1 and _xlim2 < 1:
+                l = -np.arcsin(_xlim1)
+                r =  np.arcsin(_xlim2)
+                t = np.hstack([np.linspace(l, r, steps), np.linspace(-r+np.pi, -l+np.pi, steps)])
+            else:
+                t = np.linspace(0, 2*np.pi, 2*steps)
+            x = x0 + w * np.sin(t)
+            y = y0 + yd + h * np.cos(t)
+        elif abs(ecc) == 1:
+            # parabola
+            yd = np.sign(ecc) * self.geo.dist * np.tan(abs(omega) - theta)
+            a = np.sign(ecc) * self.geo.dist * np.tan(theta)
+            l = -(_xdim + x0) / a
+            r =  (_xdim - x0) / a
+            t = np.linspace(l, r, steps)
+            x = x0 + a*t
+            y = y0 - dy_cone + yd + a/2 * t**2
+        elif 1 < abs(ecc) < 100:
+            # hyperbola
+            h = np.sign(omega) * (y1+y2)/2
+            if h == 0:
+                return False, False
+            w = h * np.sqrt(ecc**2-1)
+            l = -np.arcsinh((_xdim + x0) / w)
+            r =  np.arcsinh((_xdim - x0) / w)
+            t = np.linspace(l, r, steps)
+            x = x0 + w * np.sinh(t)
+            y = y0 + (y1-y2)/2 - h * np.cosh(t)
+        elif abs(ecc) >= 100:
+            # line
+            t = np.linspace(-_xdim, _xdim, steps)
+            x = t
+            y = y0 + np.ones(len(t)) * y1
         
-        # update window title
-        self.set_win_title()
-
-        self.draw_reference()
+        return x, y
 
     def calc_hkld(self, ucp, res=0.2e-10, dec=4, cen='P'):
         """
         Generate hkls for unit cell parameters
         Calculate resolution in d-spacing (dsp)
         Round dsp to decimals, only use unique numbers
+
         :param ucp: Unit cell parameters, list, [a, b, c, alpha, beta, gamma]
         :param res: Maximum resolution
         :param dec: d-spacing sampling rate, remove multiplicity
         :param cen: Remove systematic absences according to centring
+        
         :return: array of [[h k l dsp]]
         """
         def cart_from_cell(cell):
             """
-            Calculate a,b,c vectors in cartesian system from lattice constants.
-            :param cell: a,b,c,alpha,beta,gamma lattice constants.
-            :return: a, b, c vector
+            Convert lattice constants to Cartesian coordinates.
+
+            Parameters:
+            cell (numpy.ndarray): A 1D array with 6 elements representing the lattice constants.
+                          The first three elements are the lengths of the cell edges (a, b, c)
+                          in angstroms, and the last three elements are the angles (alpha, beta, gamma)
+                          in degrees.
+
+            Returns:
+            tuple: A tuple containing three numpy arrays (av, bv, cv) representing the Cartesian coordinates
+                   of the cell vectors.
+
+            Raises:
+            ValueError: If the input array does not have exactly 6 elements.
             """
             if cell.shape != (6,):
                 raise ValueError('Lattice constants must be 1d array with 6 elements')
@@ -3366,11 +4807,19 @@ class MainWindow(QtWidgets.QMainWindow):
         
         def matrix_from_cell(cell):
             """
-            Calculate transform matrix from lattice constants.
-            :param cell: a,b,c,alpha,beta,gamma lattice constants in
-                                    angstrom and degree.
-            :param lattice_type: lattice type: P, A, B, C, H
-            :return: transform matrix A = [a*, b*, c*]
+            Generate a transformation matrix from a given cell.
+
+            Parameters:
+            cell (array-like): A 3x3 array representing the cell parameters.
+
+            Returns:
+            numpy.ndarray: A 3x3 transformation matrix rounded to 6 decimal places.
+
+            Notes:
+            - The function first converts the input cell to a numpy array.
+            - It then calculates the Cartesian vectors from the cell parameters.
+            - The reciprocal lattice vectors (a*, b*, c*) are computed using cross products and dot products.
+            - These vectors are assembled into a 3x3 transformation matrix.
             """
             cell = np.array(cell)
             av, bv, cv = cart_from_cell(cell)
@@ -3384,6 +4833,21 @@ class MainWindow(QtWidgets.QMainWindow):
             return np.round(A,6)
 
         def applyExtinctionRules(hkl, centering='P'):
+            """
+            Apply extinction rules based on the centering type to filter out certain Miller indices (hkl).
+            Parameters:
+            hkl (array-like): An array of Miller indices to be filtered.
+            centering (str, optional): The centering type of the crystal lattice. 
+                           Default is 'P'. Options are:
+                           - 'P': Primitive
+                           - 'I': Body-centered
+                           - 'A': A-face centered
+                           - 'B': B-face centered
+                           - 'C': C-face centered
+                           - 'F': Face-centered
+            Returns:
+            numpy.ndarray: Filtered array of Miller indices after applying the extinction rules.
+            """
             hkl = np.atleast_2d(hkl)
 
             if centering == 'P':
@@ -3448,10 +4912,203 @@ class MainWindow(QtWidgets.QMainWindow):
         out = np.hstack([hkl[idx], (dsp*10**(-dec)).reshape(-1,1)])[::-1]
         return out
     
+    def calc_overlays(self, omega, res=150, pol=0.99):
+        """
+        Calculate overlays for the detector grid.
+        Parameters:
+        -----------
+        omega : float
+            The combination of rotation and tilt, in radians.
+        res : int, optional
+            The resolution of the grid, default is 150.
+        pol : float, optional
+            The polarization factor, default is 0.99.
+        Returns:
+        --------
+        tuple
+            A tuple containing:
+            - grd : ndarray
+                The neutral overlay grid.
+            - tth : ndarray
+                The 2theta angle between pixel, sample, and POBI.
+            - pc : ndarray
+                The polarization correction factor.
+            - sa : ndarray
+                The solid angle correction factor.
+            - fwhm : ndarray
+                The full width at half maximum (FWHM) for the detector.
+        """
+        # scale overlay to detector dimensions
+        _res_scale = self.ydim/self.xdim
+        _res_v = int(round(_res_scale * res, 0))
+        # neutral overlay grid
+        grd = np.ones((_res_v, res))
+
+        # make screen grid
+        size_h = np.linspace(-self.xdim, self.xdim, res, endpoint=False)
+        size_v = np.linspace(-self.ydim, self.ydim, _res_v, endpoint=False)
+        _gx, _gy = np.meshgrid(size_h, size_v, sparse=True)
+        # build vector -> 3 x n x m
+        _vec = np.full((3, _res_v, res), self.geo.dist)
+        _vec[0,:,:] = _gx - self.geo.hoff
+        # Compensate for vertical offset and PONI offset caused by the tilt (sdd*tilt)
+        _vec[1,:,:] = _gy + self.geo.voff - np.deg2rad(self.geo.tilt) * self.geo.dist
+
+        # omega is the combination of rotation and tilt, in radians
+        _rot = self.rot_100(omega)
+        # reshape to allow matrix multiplication
+        # _rot: 3 x 3 @ _norm: 3 x n*m -> _res: 3 x n x m
+        _res = np.reshape(_rot @ np.reshape(_vec, (3,-1)), _vec.shape)
+
+        # unit hover
+        tth = 1.0
+        if self.plo.show_unit_hover:
+            # Distance POBI - pixel on grid
+            R_a = np.sqrt(np.sum(_res[0:2]**2, axis=0)) * 1e-3 # m
+            # POBI distance
+            D_a = _res[2] * 1e-3 # m
+            # 2theta - Angle between pixel, sample, and POBI
+            tth = np.arctan2(R_a, D_a)
+            # remove very small values (tth < 0.057 deg) to avoid zero divide
+            tth[tth < 1e-3] = np.nan
+
+        # polarisation
+        pc = 1.0
+        if self.plo.show_polarisation:
+            _mag = np.sqrt(np.sum(_res**2, axis=0))
+            _norm = _res / _mag
+            # add pol fractions (-> 1.0)
+            # this notation is equivalent to cos(psi)**2,
+            # psi angle of polarization direction to the observer
+            # _res is direct cos(psi)
+            pc_hor = _norm[0,:,:]**2 * pol
+            pc_ver = _norm[1,:,:]**2 * (1-pol)
+            pc = 1.0 - (pc_hor + pc_ver)
+
+        # solid angle
+        sa = 1.0
+        if self.plo.show_solidangle:
+            _mag = np.sqrt(np.sum(_vec**2, axis=0))
+            sa = 1 / _mag**3
+            sa = sa / np.max(sa)
+        
+        # delta d / d
+        fwhm = 1.0
+        #fwhm_width = 0.0
+        if self.plo.show_fwhm:
+            # dia: sample scattering diameter
+            dia = self.plo.scattering_diameter
+            # thk: detector sensor thickness
+            thk = self.plo.sensor_thickness
+            # mat: detector sensor material
+            mat = self.plo.sensor_material
+            # nrg: X-ray energy
+            nrg = self.geo.ener
+            # pxs: detector pixel size
+            pxs = self.det.pxs * 1e-3
+            # div: X-ray beam divergence
+            div = self.plo.beam_divergence
+            # dEE: X-ray energy resolution
+            dEE = self.plo.energy_resolution
+            # use the "unrotated" vector coordinates to define
+            # R and D in the detector plane
+            # radial component of the unrotated detector
+            # i.e. radius away from the PONI
+            r = np.sqrt(np.sum(_vec[0:2]**2, axis=0)) * 1e-3 # m
+            # dis: PONI distance
+            dis = self.geo.dist * 1e-3 # m
+            # 2theta-alpha - Angle between pixel, sample, and PONI
+            tth_a = np.arctan2(r, dis)
+            # remove very small values (tth < 0.057 deg) to avoid zero divide
+            tth_a[tth_a < 1e-3] = np.nan
+            # H2, FWHM
+            fwhm = self.calc_FWHM(dis, dia, thk, mat, pxs, tth_a, nrg, div, dEE)
+
+        return grd, tth, pc, sa, fwhm
+
+    def calc_FWHM(self, dis, dia, thk, mat, pxs, tth, nrg, div, dEE, deg=True):
+            """
+            Calculate FWHM
+
+            Parameters
+            ----------
+            dis: poni distance
+            dia: sample scattering diameter
+            thk: detector sensor thickness
+            mat: detector sensor material
+            pix: detector pixel size
+            tth: 2-theta angle
+            nrg: X-ray energy
+            div: X-ray beam divergence
+            dEE: X-ray energy resolution
+            thk: detector sensor thickness
+            deg: return degrees (True) or radians (False)
+            
+            Returns
+            -------
+            array: fwhm
+            """
+            if len(self.att_lengths[mat]) > int(nrg):
+                thk = min(thk, self.att_lengths[mat][int(nrg)])
+            A = 2*np.log(2) / dis**2 * (pxs**2-2*thk**2-dia**2)
+            B = 2*np.log(2) / dis**2 * (2*thk**2 + 2*dia**2)
+            C = 2*np.log(2) * div**2
+            M = (4*np.sqrt(2*np.log(2)) * dEE)**2 * ((1-np.cos(tth))/(1+np.cos(tth)))
+            X = np.cos(tth)
+            H2 = A*X**4 + B*X**2 + C + M
+            fwhm = np.sqrt(H2)
+            if deg is True:
+                return fwhm * 180 / np.pi
+            else:
+                return fwhm
+
+    def dsp2tth(self, dsp):
+        """
+        Converts d-spacing to 2-theta
+         uses arcsin -> restricted to
+         the interval -pi/2 - pi/2
+        
+        Returns
+        -------
+          np.arr, np.arr: tth values, valid indices
+        """
+        lambda_2d = (12.398/self.geo.ener) / (2*dsp)
+        idx = np.nonzero(lambda_2d < 1)
+        tth = 2 * np.arcsin(lambda_2d[idx])
+        return tth, idx
+
+    def gaussian(self, x, m, s):
+        """
+        Calculate the value of a Gaussian function.
+
+        Parameters:
+        x (float or array-like): The input value(s) where the Gaussian function is evaluated.
+        m (float): The mean (center) of the Gaussian distribution.
+        s (float): The standard deviation (spread or width) of the Gaussian distribution.
+
+        Returns:
+        float or array-like: The value(s) of the Gaussian function at the given input value(s).
+        """
+        return 1/(np.sqrt(2*np.pi)*s)*np.exp(-np.square((x - m)/s)/2)
+
     #############
     # SETTINGS  #
     #############
     def settings_get_active(self):
+        """
+        Retrieves the active settings file name.
+
+        This method checks if a settings token file exists. If it does, it reads the
+        token file to get the name of the active settings file and verifies its existence.
+        If the active settings file is found, its name is returned.
+
+        If the settings token file does not exist or the active settings file is not found,
+        the method resets to default settings, saves the default settings to a file, and
+        returns the name of the default settings file.
+
+        Returns:
+            str: The name of the active settings file or the default settings file.
+        """
         # settings token file exists
         # get settings file
         if os.path.exists(self.path_settings_token):
@@ -3470,16 +5127,47 @@ class MainWindow(QtWidgets.QMainWindow):
         return self.active_settings
     
     def settings_del_active(self):
+        """
+        Deletes the settings token file if it exists.
+
+        This method checks if the settings token file, specified by the 
+        attribute `self.path_settings_token`, exists. If the file exists, 
+        it removes the file from the filesystem.
+
+        Returns:
+            None
+        """
         if os.path.exists(self.path_settings_token):
             os.remove(self.path_settings_token)
 
     def settings_set_active(self):
+        """
+        Sets the active settings by creating the necessary directories and writing the active settings to a token file.
+
+        This method performs the following steps:
+        1. Checks if the directory specified by `self.path_settings` exists. If not, it creates the directory.
+        2. Opens the file specified by `self.path_settings_token` in write mode.
+        3. Writes the active settings (stored in `self.active_settings`) to the file.
+
+        Raises:
+            OSError: If there is an issue creating the directory or writing to the file.
+        """
         if not os.path.exists(self.path_settings):
             os.makedirs(self.path_settings)
         with open(self.path_settings_token, 'w') as wf:
             wf.write(self.active_settings)
 
     def settings_delete_file(self):
+        """
+        Opens a file dialog to select and delete settings files.
+
+        This method changes the file dialog button from 'open' to 'delete' and allows the user to select
+        multiple settings files (with a .json extension) to delete. If files are selected, they are removed
+        from the filesystem and corresponding actions are removed from the custom settings menu.
+
+        Returns:
+            None
+        """
         # todo change button from 'open' to 'delete'
         fnames, filter = QtWidgets.QFileDialog.getOpenFileNames(self, 'Delete settings files', self.path_settings_current, "Settings files (*.json)")
         if fnames:
@@ -3490,6 +5178,15 @@ class MainWindow(QtWidgets.QMainWindow):
                         self.menu_custom_settings.removeAction(action)
 
     def settings_save_current(self):
+        """
+        Save the current geometry settings.
+
+        This method updates the initial geometry settings (`_geo`) with the 
+        current geometry settings (`geo`). It is typically used when the 
+        current settings need to be saved as the new startup values. After 
+        updating `_geo`, the settings are saved to a file by calling 
+        `settings_save_to_file`.
+        """
         # self.geo is edited with the sliders
         # self._geo holds the initial values
         # usually I do not want to overwrite 
@@ -3500,6 +5197,23 @@ class MainWindow(QtWidgets.QMainWindow):
         self.settings_save_to_file()
 
     def settings_save_to_file(self, target=None):
+        """
+        Save the current settings to a file.
+
+        If no target file is specified, the settings will be saved to the default location.
+
+        Args:
+            target (str, optional): The file path where the settings should be saved. 
+                        If None, the settings will be saved to the default location.
+
+        Returns:
+            None
+
+        Notes:
+            - If the target directory does not exist, it will be created.
+            - If the target file is not writable, the function will return without saving.
+            - The settings are saved in JSON format, including 'geo', 'plo', 'thm', and 'lmt' attributes.
+        """
         if target == None:
             target = os.path.join(self.path_settings, self.active_settings)
         target_base = os.path.dirname(target)
@@ -3515,6 +5229,36 @@ class MainWindow(QtWidgets.QMainWindow):
             json.dump({'geo':self._geo.__dict__, 'plo':self.plo.__dict__, 'thm':self.thm.__dict__, 'lmt':self.lmt.__dict__}, wf, indent=4)
 
     def settings_load_from_file(self, skip=[]):
+        """
+        Load settings from a JSON file and apply them to the object's attributes.
+
+        This method reads a JSON file specified by `self.path_settings_current` and updates
+        the object's attributes based on the contents of the file. It performs checks to ensure
+        that certain parameters are within specified ranges and enforces specific values for
+        some parameters.
+
+        Parameters:
+        -----------
+        skip : list, optional
+            A list of keys to skip when loading settings. Default is an empty list.
+
+        Raises:
+        -------
+        SystemExit
+            If there is an error parsing the settings file.
+
+        Notes:
+        ------
+        - The method uses two dictionaries, `_warn` and `_force`, to manage parameter constraints:
+            - `_warn` contains parameters with their allowed minimum, maximum, and default values.
+            - `_force` contains parameters that should be set to specific values regardless of the file content.
+        - If a parameter value is outside the allowed range specified in `_warn`, it is set to the default value,
+          and a warning message is printed.
+        - If a parameter is in `_force`, it is set to the enforced value.
+        - The method updates the attributes of `self.geo`, `self.plo`, `self.thm`, and `self.lmt` based on the
+          contents of the JSON file.
+        - If 'geo' is not in the `skip` list, the initial values of `self.geo` are stored in `self._geo`.
+        """
         # Some parameters need to be protected to save
         # the user some waiting time
         #
@@ -3569,17 +5313,56 @@ class MainWindow(QtWidgets.QMainWindow):
             self._geo.__dict__.update(self.geo.__dict__)
 
     def settings_edit_file(self, command):
+        """
+        Executes a system command to edit the current settings file.
+
+        Args:
+            command (str): The command to execute, typically an editor command.
+        """
         os.system(f'{command} {self.path_settings_current}')
 
     def settings_get_files(self):
+        """
+        Retrieve a sorted list of JSON filenames from the settings directory.
+
+        This method searches the directory specified by `self.path_settings` for 
+        files with a `.json` extension, extracts their base names, and returns 
+        them in a sorted list.
+
+        Returns:
+            list: A sorted list of JSON filenames found in the settings directory.
+        """
         return sorted(map(os.path.basename, glob.glob(os.path.join(self.path_settings, '*.json'))))
 
     def settings_change_file(self, name):
+        """
+        Change the active settings file and reload settings.
+
+        This method updates the active settings file to the specified name,
+        constructs the full path to the new settings file, and reloads the settings.
+
+        Args:
+            name (str): The name of the new settings file to activate.
+        """
         self.active_settings = name
         self.path_settings_current = os.path.join(self.path_settings, name)
         self.settings_reload()
     
     def settings_import_win(self):
+        """
+        Opens a file dialog to import a settings file in JSON format. If a file is selected,
+        it copies the file to the settings folder, adds it to the custom settings menu, 
+        and changes the current settings to the newly imported file.
+
+        Steps:
+        1. Opens a file dialog to select a JSON settings file.
+        2. Copies the selected file to the settings folder.
+        3. Adds the file to the custom settings menu as a checkable action.
+        4. Changes the current settings to the newly imported file and reloads the settings.
+
+        Returns:
+            None
+        """
         fname, filter = QtWidgets.QFileDialog.getOpenFileName(self, 'Import settings file', '', "Settings files (*.json)")
         if fname:
             # copy to settings folder
@@ -3595,6 +5378,19 @@ class MainWindow(QtWidgets.QMainWindow):
             self.settings_change_file(bname)
 
     def settings_reload(self):
+        """
+        Reloads the settings for the application.
+
+        This method performs the following actions:
+        1. Clears the `det_bank` to ensure backward compatibility with older parameter files 
+           that may not have the `det_bank` entry, allowing access to all detectors.
+        2. Loads settings from a file.
+        3. Saves the settings back to the file, adding any missing entries.
+        4. Redraws the canvas to reflect the updated settings.
+        5. Reinitializes the menu with a reset.
+
+        Note: The `update_menu_entries` method call is commented out.
+        """
         # load settings
         ###############################
         # clearing the det_bank makes #
@@ -3617,21 +5413,46 @@ class MainWindow(QtWidgets.QMainWindow):
     #   EVENT   #
     #############
     def dragEnterEvent(self, event):
-        # Drag-and-Drop cif-file
+        """
+        Handles the drag enter event for the widget.
+
+        This method is triggered when a drag-and-drop action enters the widget.
+        It checks if the dragged data contains URLs (e.g., files) and accepts
+        the event if it does. Otherwise, it ignores the event.
+
+        Args:
+            event (QDragEnterEvent): The drag enter event containing information
+                                     about the dragged data.
+        """
         if event.mimeData().hasUrls():
             event.accept()
         else:
             event.ignore()
 
     def dropEvent(self, event):
-        # Drag-and-Drop cif-file
-        #  dropEvent()
-        #  - check dropped file is a cif
+        """
+        Handle the drop event for a drag-and-drop operation.
+
+        This method processes the dropped file, checks if it is a CIF file,
+        and if so, calls the method to calculate reference data from the CIF file.
+
+        Args:
+            event (QDropEvent): The drop event containing the dropped file.
+
+        Returns:
+            None
+        """
         fpath = event.mimeData().urls()[0].toLocalFile()
         if os.path.splitext(fpath)[1] == '.cif':
-            self.calc_ref_from_cif(fpath)
+            self.calc_ref_from_cif(fpath, open_pxrd=True)
 
     def keyPressEvent(self, event):
+        """
+        Handles key press events and triggers corresponding actions.
+
+        Parameters:
+        event (QKeyEvent): The key event that triggered this method.
+        """
         k = event.key()
         # bind 'c' to cycle colormaps
         if k == QtCore.Qt.Key.Key_C:
@@ -3662,7 +5483,11 @@ class MainWindow(QtWidgets.QMainWindow):
         elif k == QtCore.Qt.Key.Key_U:
             self.toggle_unit_hover()
         elif k == QtCore.Qt.Key.Key_F1:
-            self.show_about_window()
+            self.show_about_win()
+        elif k == QtCore.Qt.Key.Key_F2:
+            self.show_geometry_win()
+        elif k == QtCore.Qt.Key.Key_F3:
+            self.show_hotkeys_win()
         elif k == QtCore.Qt.Key.Key_R:
             self.toggle_fwhm()
         elif k == QtCore.Qt.Key.Key_Up:
@@ -3671,20 +5496,45 @@ class MainWindow(QtWidgets.QMainWindow):
         elif k == QtCore.Qt.Key.Key_Down:
             self.unit_label.setPos(-self.xdim, -self.ydim)
             self.unit_label.setAnchor((0.0, 1.0))
+        elif k == QtCore.Qt.Key.Key_X:
+            self.win_pxrd_plot()
+        elif k == QtCore.Qt.Key.Key_F:
+            self.win_fwhm_show()
 
     def closeEvent(self, event):
-        # Save current settings file for
-        # auto load on next startup.
-        # If the program crashes no
-        # sctive_settings token exists
-        # and the defaul is loaded.
+        """
+        Handles the close event for the application window.
+
+        This method is called when the application window is closed. It saves the 
+        current settings to ensure they are automatically loaded on the next startup. 
+        If the program crashes, no active settings token exists, and the default 
+        settings are loaded.
+
+        Args:
+            event (QCloseEvent): The close event triggered when the window is closed.
+        """
         self.settings_set_active()
         event.accept()
 
     def hoverEvent(self, event):
-        """Hover event linked to cormap
-        and should only be active while
-        either or both maps are displayed """
+        """
+        Handles hover events linked to the cormap and updates labels accordingly.
+        This method is triggered when a hover event occurs and updates the 
+        `cor_label` and `unit_label` based on the event's position and the 
+        current state of the map overlays.
+        Parameters:
+        event (QHoverEvent): The hover event containing information about the 
+                             cursor's position and state.
+        Behavior:
+        - Hides `cor_label` and updates `unit_label` when the cursor exits the area.
+        - Shows `cor_label` when the cursor enters the area and any of the map 
+          overlays are active.
+        - Updates `unit_label` with the calculated unit value if `_tth` is not a float.
+        - Updates `cor_label` with the correction values from `_polcor`, `_solang`, 
+          and `_fwhm` if they are not floats.
+        """
+        # Hover event linked to cormap and should only be active while
+        # either or both maps are displayed
         if event.isExit():
             self.cor_label.hide()
             self.unit_label.setText(f'{self.unit_names[self.geo.unit]}')
@@ -3718,11 +5568,37 @@ class MainWindow(QtWidgets.QMainWindow):
             #_text.append(f'H: {self.calc_unit(self._fwhm[x,y]):.4f}')
         self.cor_label.setText('\n'.join(_text))
 
-class container(object):
+class Container(object):
+    """
+    A class used to represent a Container.
+    """
     pass
 
 class SliderWidget(QtWidgets.QFrame):
+    """
+    SliderWidget is a custom Qt widget that provides a frame with a set of vertical sliders,
+    each with a label and value display. The widget can be toggled to show or hide the sliders
+    and can be dragged within its parent window.
+    """
     def __init__(self, parent):
+        """
+        Initializes the custom widget with the given parent.
+
+        Args:
+            parent (QWidget): The parent widget.
+
+        Attributes:
+            layout (QVBoxLayout): The main layout for the widget.
+            leaveEvent (function): Event handler for when the mouse leaves the widget.
+            enterEvent (function): Event handler for when the mouse enters the widget.
+            frame (QFrame): A frame widget used within the layout.
+            box (QFrame): A frame widget that can be toggled to show or hide.
+            box_toggle (bool): A flag indicating the toggle state of the box.
+            box_height_show (int): The height of the box when shown.
+            box_height_hide (int): The height of the box when hidden.
+            startPos (QPoint or None): The starting position for preventing window movement.
+            grid (QGridLayout): The grid layout for the box frame.
+        """
         super().__init__(parent)
         self.layout = QtWidgets.QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
@@ -3755,6 +5631,24 @@ class SliderWidget(QtWidgets.QFrame):
         self.center_frame()
 
     def apply_style(self):
+        """
+        Applies the style to the box and frame widgets using the parent's style properties.
+
+        This method sets the style sheets for the `self.box` and `self.frame` widgets based on the
+        parent's properties such as `slider_border_width`, `slider_border_color`, `slider_border_radius`,
+        `slider_bg_color`, and `slider_bg_hover`.
+
+        The style includes:
+        - Border width and color
+        - Border radius
+        - Background color
+        - Hover background color for the box
+
+        The styles are applied using the `setStyleSheet` method with formatted strings.
+
+        Raises:
+            AttributeError: If any of the required parent properties are missing.
+        """
         self.box.setStyleSheet(f'''
             QFrame {{
                 border: {self.parent().plo.slider_border_width}px solid {self.parent().slider_border_color.name(format=QtGui.QColor.NameFormat.HexArgb)};
@@ -3774,6 +5668,28 @@ class SliderWidget(QtWidgets.QFrame):
         ''')
 
     def init_sliders(self):
+        """
+        Initializes and updates the sliders in the UI grid layout.
+        This method performs the following steps:
+        1. Removes all existing sliders and labels from the grid layout.
+        2. Adds new sliders based on the enabled slider options in the parent object.
+        3. Updates the dynamic width of the box based on the number of sliders added.
+        4. Sets the maximum limit for the beamstop distance slider to the detector distance.
+        Sliders are added for the following parameters if enabled:
+        - Energy ('ener')
+        - Distance ('dist')
+        - Vertical offset ('voff')
+        - Horizontal offset ('hoff')
+        - Tilt ('tilt')
+        - Rotation ('rota')
+        - Beamstop distance ('bsdx')
+        The method also updates the slider limits for the beamstop distance slider.
+        Attributes:
+        - self.grid: The grid layout where sliders are added.
+        - self.box_width_dynamic: The dynamic width of the box based on the number of sliders.
+        - self.box_height_hide: The height of the box when sliders are hidden.
+        - self.parent(): The parent object containing slider configurations and limits.
+        """
         # remove sliders and labels
         for i in reversed(range(self.grid.count())): 
             self.grid.itemAt(i).widget().deleteLater()
@@ -3849,15 +5765,57 @@ class SliderWidget(QtWidgets.QFrame):
         self.resize(self.box_width_dynamic, self.box_height_hide)
 
     def center_frame(self):
+        """
+        Centers the frame within its parent window.
+
+        This method calculates the horizontal position required to center the frame
+        within its parent window and moves the frame to that position. The vertical
+        position is set to the parent's offset for Win32 systems.
+
+        Returns:
+            None
+        """
         self.move(int((self.parent().size().width()-self.box_width_dynamic)/2), self.parent().offset_win32)
 
     def update_slider_label(self, label, value):
+        """
+        Updates the text of a given label to reflect the provided slider value.
+
+        Args:
+            label (QLabel): The label whose text needs to be updated.
+            value (float): The value from the slider to set as the label's text.
+
+        Returns:
+            None
+        """
         label.setText(str(int(value)))
 
     def update_slider_limits(self, slider, lmin, lmax):
+        """
+        Update the limits of a given slider.
+
+        Parameters:
+        slider (QSlider): The slider object whose limits are to be updated.
+        lmin (float): The minimum limit to set for the slider.
+        lmax (float): The maximum limit to set for the slider.
+        """
         slider.setRange(int(lmin), int(lmax))
 
     def add_slider(self, layout, label, token, idx, lval, lmin, lmax, lstp):
+        """
+        Adds a vertical slider with a label and value display to the specified layout.
+        Args:
+            layout (QtWidgets.QGridLayout): The layout to which the slider and labels will be added.
+            label (str): The text for the slider's label.
+            token (str): The object name for the slider.
+            idx (int): The column index in the layout where the slider and labels will be placed.
+            lval (float): The initial value of the slider.
+            lmin (float): The minimum value of the slider.
+            lmax (float): The maximum value of the slider.
+            lstp (float): The step size for the slider.
+        Returns:
+            QtWidgets.QSlider: The created slider widget.
+        """
         font = QtGui.QFont()
         font.setPixelSize(self.parent().plo.slider_label_size)
 
@@ -3899,6 +5857,21 @@ class SliderWidget(QtWidgets.QFrame):
         return slider#(slider, label_name, label_value)
 
     def toggle_panel(self, event):
+        """
+        Toggles the visibility of a panel based on the type of event received.
+
+        Args:
+            event (QEvent): The event that triggers the toggle. If the event is of type
+                            QtGui.QEnterEvent, the panel will be shown. If the event is of type
+                            QtCore.QEvent and the panel is not already toggled, the panel will be hidden.
+
+        Behavior:
+            - If the event is a QtGui.QEnterEvent, the panel is shown and resized to `self.box_width_dynamic` 
+              and `self.box_height_show`.
+            - If the event is a QtCore.QEvent and `self.box_toggle` is False, the panel is hidden and resized 
+              to `self.box_width_dynamic` and `self.box_height_hide`.
+            - For other events, no action is taken.
+        """
         if isinstance(event, QtGui.QEnterEvent):
             #self.box.setHidden(not self.box.isHidden())
             self.box.setHidden(False)
@@ -3910,12 +5883,39 @@ class SliderWidget(QtWidgets.QFrame):
             pass
 
     def mousePressEvent(self, event):
+        """
+        Handles the mouse press event.
+
+        This method is called when a mouse button is pressed. It first calls the 
+        parent class's mousePressEvent method to ensure any default behavior is 
+        executed. If the left mouse button is pressed, it records the position of 
+        the mouse press and toggles the state of the box_toggle attribute.
+
+        Args:
+            event (QMouseEvent): The event object containing details about the 
+                                 mouse press event.
+        """
         super().mousePressEvent(event)
         if event.button() == QtCore.Qt.MouseButton.LeftButton:
             self.startPos = event.pos()
             self.box_toggle = not self.box_toggle
 
     def mouseMoveEvent(self, event):
+        """
+        Handles the mouse move event for the widget.
+
+        This method is called when the mouse is moved over the widget. It processes
+        the event to enable dragging of the widget when the left mouse button is held
+        down. The widget's position is updated based on the mouse movement, while
+        ensuring it stays within the bounds of its parent widget.
+
+        Args:
+            event (QtGui.QMouseEvent): The mouse event containing information about
+                                       the mouse movement.
+
+        Returns:
+            None
+        """
         super().mouseMoveEvent(event)
         if event.buttons() == QtCore.Qt.MouseButton.LeftButton:
             if not self.startPos:
@@ -3946,5 +5946,175 @@ class SliderWidget(QtWidgets.QFrame):
             self.box_toggle = True
 
     def mouseReleaseEvent(self, event):
+        """
+        Handles the mouse release event.
+
+        This method is called when the mouse button is released. It calls the
+        parent class's mouseReleaseEvent method and then resets the startPos
+        attribute to None.
+
+        Args:
+            event (QMouseEvent): The mouse event that triggered this method.
+        """
         super().mouseReleaseEvent(event)
         self.startPos = None
+
+class HotkeyDialog(QtWidgets.QDialog):
+    """
+    HotkeyDialog is a custom dialog class that extends QtWidgets.QDialog to handle
+    key press events, specifically the Escape key to close the dialog.
+
+    Methods:
+        __init__(self, parent, *args, **kwargs):
+
+        keyPressEvent(self, event):
+            Handles key press events for the widget. Calls the parent's keyPressEvent
+            method and checks if the pressed key is the Escape key. If the Escape key
+            is pressed, the widget will be closed.
+    """
+    def __init__(self, parent, *args, **kwargs):
+        """
+        Initialize a new instance of the class.
+
+        Args:
+            parent: The parent object.
+            *args: Variable length argument list.
+            **kwargs: Arbitrary keyword arguments.
+        """
+        super().__init__(parent, *args, **kwargs)
+
+    def keyPressEvent(self, event):
+        """
+        Handles key press events for the widget.
+
+        Parameters:
+        event (QKeyEvent): The key event that triggered this method.
+
+        This method calls the parent's keyPressEvent method and checks if the
+        pressed key is the Escape key. If the Escape key is pressed, the widget
+        will be closed.
+        """
+        self.parent().keyPressEvent(event)
+        k = event.key()
+        if k == QtCore.Qt.Key.Key_Escape:
+            self.close()
+
+class Ref(object):
+    """
+    Ref is a class that represents a reference object with attributes for name, dsp, hkl, and cif.
+    """
+    def __init__(self, name, dsp=None, hkl=None, cif=None):
+        """
+        Initialize a new instance of the class.
+
+        Parameters:
+        name (str): The name of the instance.
+        dsp (optional): The dsp value. Default is None.
+        hkl (optional): The hkl value. Default is None.
+        cif (optional): The cif value. Default is None.
+        """
+        self.name = name
+        self.dsp = dsp
+        self.hkl = hkl
+        self.cif = cif
+        self.has_dsp = False
+        self.has_hkl = False
+        self.has_cif = False
+        # set falgs
+        if dsp is not None:
+            self.has_dsp = True
+        if hkl is not None:
+            self.has_hkl = True
+        if cif is not None:
+            self.has_cif = True
+        
+    def add_cif(self, cif):
+        """
+        Adds a CIF (Crystallographic Information File) to the instance.
+
+        Parameters:
+        cif (str): The CIF data to be added.
+
+        Sets the instance's `cif` attribute to the provided CIF data and 
+        marks `has_cif` as True.
+        """
+        self.cif = cif
+        self.has_cif = True
+
+    def add_dsp(self, dsp):
+        """
+        Adds a DSP (Digital Signal Processor) to the instance.
+
+        Parameters:
+        dsp (object): The DSP object to be added.
+
+        Sets:
+        self.dsp: The provided DSP object.
+        self.has_dsp (bool): Flag indicating that a DSP has been added, set to True.
+        """
+        self.dsp = dsp
+        self.has_dsp = True
+
+    def add_hkl(self, hkl):
+        """
+        Adds the Miller indices (hkl) to the instance and sets the has_hkl flag to True.
+
+        Parameters:
+        hkl (tuple): A tuple representing the Miller indices (h, k, l).
+        """
+        self.hkl = hkl
+        self.has_hkl = True
+    
+    def rem_cif(self):
+        """
+        Remove the CIF (Crystallographic Information File) from the object.
+
+        This method sets the `cif` attribute to None and the `has_cif` attribute to False,
+        indicating that the object no longer has an associated CIF file.
+        """
+        self.cif = None
+        self.has_cif = False
+
+    def rem_hkl(self):
+        """
+        Remove the Miller indices (hkl) from the object.
+
+        This method sets the `hkl` attribute to None and the `has_hkl` attribute to False,
+        indicating that the object no longer has Miller indices assigned.
+        """
+        self.hkl = None
+        self.has_hkl = False
+
+    def rem_dsp(self):
+        """
+        Remove the dsp attribute from the instance.
+
+        This method sets the `dsp` attribute to None and the `has_dsp` attribute to False.
+        """
+        self.dsp = None
+        self.has_dsp = False
+    
+    def validate_cif(self):
+        """
+        Validates the existence of the CIF (Crystallographic Information File).
+
+        This method checks if the CIF file specified by the `self.cif` attribute exists.
+        If the file does not exist, it calls the `rem_cif` method to handle the missing file.
+
+        Raises:
+            FileNotFoundError: If the CIF file does not exist.
+        """
+        if not os.path.exists(self.cif):
+            self.rem_cif()
+    
+    def is_complete(self):
+        """
+        Check if the object is complete.
+
+        This method checks if all required attributes (`has_cif`, `has_dsp`, `has_hkl`) 
+        are present and returns True if they are all present, otherwise False.
+
+        Returns:
+            bool: True if all required attributes are present, False otherwise.
+        """
+        return np.all([self.has_cif, self.has_dsp, self.has_hkl])
