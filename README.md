@@ -99,6 +99,7 @@ where $SDD$ is the sample to detector distance.
 ## Latest updates:
   - 2024-10-28 Update: Added a PXRD plot window for cif files to show the diffraction pattern (gaussian peak shape) including intrumental line broadening (setup FWHM).
   - 2024-10-28 Update: cif files (name and a link to file) are stored now.
+  - 2024-10-28 Update: Added somewhat useful doc-strings to all functions (Thanks Github Copilot).
   - 2024-10-01 Bugfix: Fixed an error crashing the detector db editor on python < 3.12 (Thanks Lise).
   - 2024-09-23 Update: Added a [detector db editor](#detector-db-editor) to define and add whatever detector you collect your data with, now more easily.
   - 2024-09-23 Update: Changed the detector module definition from mm to px (pre 2.0.0 custom detectors won't work!).
