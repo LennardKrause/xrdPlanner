@@ -97,6 +97,8 @@ where $SDD$ is the sample to detector distance.
 > - A new parameter was added to allow for detector screen padding (plo.plot_padding), default is 0.
 
 ## Latest updates:
+  - 2024-10-28 Update: Added a PXRD plot window for cif files to show the diffraction pattern (gaussian peak shape) including intrumental line broadening (setup FWHM).
+  - 2024-10-28 Update: cif files (name and a link to file) are stored now.
   - 2024-10-01 Bugfix: Fixed an error crashing the detector db editor on python < 3.12 (Thanks Lise).
   - 2024-09-23 Update: Added a [detector db editor](#detector-db-editor) to define and add whatever detector you collect your data with, now more easily.
   - 2024-09-23 Update: Changed the detector module definition from mm to px (pre 2.0.0 custom detectors won't work!).
@@ -108,11 +110,11 @@ where $SDD$ is the sample to detector distance.
   - 2024-05-02 Update: Added the option to calculate the [resolution function](https://doi.org/10.1107/S2053273321007506) (as FWHM, H) for powder diffraction with area detectors (Thanks Stefano).
   - 2024-05-02 Update: Automatic label placement (conic_label_auto, default=True).
   - 2024-05-02 Update: Dynamic cones try to keep the number of visible conics constant (conic_tth_auto, default=True).
-  - 2024-05-02 Update: Current colors are displayed in the export window and a colorpicker is used.
 
 <details>
 <summary>Older updates</summary>
   
+  - 2024-05-02 Update: Current colors are displayed in the export window and a colorpicker is used.
   - 2024-02-17 Bugfix: Fixed crash on importing settings files (Thanks Andy).
   - 2024-02-16 Update: Added a unit value at mouse position (hover) to the overlay.
   - 2024-02-09 Update: Updated the About window with links to github and the publication.
