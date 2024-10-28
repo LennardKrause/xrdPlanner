@@ -88,7 +88,7 @@ S_{ij} = \left(\frac{|\vec{v}_{ij}|}{SDD}\right)^{-3}
 where $SDD$ is the sample to detector distance.
 
 >[!NOTE]
->## Update to Version 2.0.0 (released 23.09.2024)
+>## Update to Version 2.0.0 and later (released 23.09.2024)
 > - The definition of detector modules was changed from mm to px to be more accurate and consistent.
 > - Consequently, custom detectors added to the detector_db file pre 2.0.0 are no longer working.
 > - A new [detector db editor](#detector-db-editor) was added (_Settings_ > _Detector db editor_) to make the addition of custom detectors more feasible.
@@ -99,7 +99,7 @@ where $SDD$ is the sample to detector distance.
 
 ## Latest updates:
   - 2024-10-28 Update: Added a [PXRD plot window](#pxrd-pattern-plot) for cif files to show the diffraction pattern (gaussian peak shape) including [intrumental peak broadening](#instrumental-broadening) (setup FWHM).
-  - 2024-10-28 Update: cif files (name and a link to file) are stored now.
+  - 2024-10-28 Update: cif files are stored now (name and link-to-file).
   - 2024-10-28 Update: Added somewhat useful doc-strings to all functions (Thanks Github Copilot).
   - 2024-10-01 Bugfix: Fixed an error crashing the detector db editor on python < 3.12 (Thanks Lise).
   - 2024-09-23 Update: Added a [detector db editor](#detector-db-editor) to define and add whatever detector you collect your data with, now more easily.
@@ -190,7 +190,7 @@ where $SDD$ is the sample to detector distance.
 <img src="https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_4_detector_db_editor.png" width="50%">
 
 #### PXRD pattern plot
-##### Shows a 1D PXRD pattern plot of the calculated cif-file intensities, gaussian peak shapes and estimated peak broadening (FWHM)
+##### Look at a 1D PXRD pattern plot of the calculated intensities (cif-file), displayed using gaussian peak shapes and the estimated peak broadening (FWHM).
 <img src="https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_5_PXRD.png" width="50%">
 
 #### Instrumental broadening
@@ -204,7 +204,6 @@ where $SDD$ is the sample to detector distance.
 > **The interested user is referred to the article:<br>**
 >  <i>On the resolution function for powder diffraction with area detectors</i><br>
 >  [D. Chernyshov <i> et al., Acta Cryst.</i> (2021). <b>A77</b>, 497-505](https://doi.org/10.1107/S2053273321007506)
-
 <img src="https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_6_FWHM.png" width="50%">
 
 ## Hotkeys
@@ -215,6 +214,7 @@ where $SDD$ is the sample to detector distance.
 | F2         | Show Geometry conventions |
 | F3         | Show Hotkeys              |
 | x          | Show PXRD pattern         |
+| f          | Show FWHM window          |
 | #          | *Display units*           |
 | t          | 2-Theta                   |
 | d          | d-spacing                 |
