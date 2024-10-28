@@ -5,7 +5,8 @@
  - Is able to project diffraction cones for standard samples or directly from cif files.
  - Can turn out valuable when planning beamtimes at synchrotron facilities (e.g. [DanMAX](https://www.maxiv.lu.se/beamlines-accelerators/beamlines/danmax/)).
  - Helps in deciding on the geometry of an experiment.
- - Meant to run standalone but is readily [insertable](#example-code-for-adding-xrdplanner-as-a-widget-into-an-existing-gui) as a widget into an existing PyQt6 GUI.
+ - Has a 1D [PXRD plot window](#pxrd-pattern-plot) for cif files to show the diffraction pattern and [intrumental peak broadening](#instrumental-broadening).
+ - Meant to run standalone but is readily [insertable](#example-code) as a widget into an existing PyQt6 GUI.
  - The math used is not meant to bring people to the moon but to provide a quick and simple preview.
  - This is not meant to accurately simulate a diffraction experiment, the step sizes are integer values in mm or degrees.
  - The module building code is designed for [Dectris](https://www.dectris.com) [PILATUS3](https://www.dectris.com/detectors/x-ray-detectors/pilatus3/) / [EIGER2](https://www.dectris.com/detectors/x-ray-detectors/eiger2/) or [SACLA](https://sacla.xfel.jp/?lang=en) MPCCD Detectors (central hole geometry) but one-module systems like the [Bruker](https://www.bruker.com/en.html) [Photon II](https://www.bruker.com/en/products-and-solutions/diffractometers-and-scattering-systems/single-crystal-x-ray-diffractometers/sc-xrd-components/detectors.html) and [Rayonix](https://www.rayonix.com/) [MX-HS](https://www.rayonix.com/rayonix-mx-hs-series/) are possible as well.
@@ -97,7 +98,7 @@ where $SDD$ is the sample to detector distance.
 > - A new parameter was added to allow for detector screen padding (plo.plot_padding), default is 0.
 
 ## Latest updates:
-  - 2024-10-28 Update: Added a PXRD plot window for cif files to show the diffraction pattern (gaussian peak shape) including intrumental line broadening (setup FWHM).
+  - 2024-10-28 Update: Added a [PXRD plot window](#pxrd-pattern-plot) for cif files to show the diffraction pattern (gaussian peak shape) including [intrumental peak broadening](#instrumental-broadening) (setup FWHM).
   - 2024-10-28 Update: cif files (name and a link to file) are stored now.
   - 2024-10-28 Update: Added somewhat useful doc-strings to all functions (Thanks Github Copilot).
   - 2024-10-01 Bugfix: Fixed an error crashing the detector db editor on python < 3.12 (Thanks Lise).
@@ -175,24 +176,45 @@ where $SDD$ is the sample to detector distance.
 
 ## Examples
 #### A PILATUS3 300K detector and a Rubrene sample.
-![Preview](https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_2_example_light.png)
+<img src="https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_2_example_light.png" width="50%">
 
 #### A rotated EIGER2 9M detector and a Rubrene sample (darkmode).
-![Preview](https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_1_example_dark.png)
+<img src="https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_1_example_dark.png" width="50%">
 
 #### Export window
 ##### Use the export window to select and build up the available detector / beamstop bank and review/change parameters.
-![Preview](https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_3_export_window.png)
+<img src="https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_3_export_window.png" width="50%">
 
 #### Detector db editor
 ##### Define and add the detector you collect your data with.
-![Preview](https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_4_detector_db_editor.png)
+<img src="https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_4_detector_db_editor.png" width="50%">
+
+#### PXRD pattern plot
+##### Shows a 1D PXRD pattern plot of the calculated cif-file intensities, gaussian peak shapes and estimated peak broadening (FWHM)
+<img src="https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_5_PXRD.png" width="50%">
+
+#### Instrumental broadening
+##### Estimate FWHM (H, in degrees) using the following parameters:
+ - Estimated effective thickness of the detector absorption layer depending on sensor material and incident wavelength
+ - Detector sensor layer material
+ - Estimated beam divergence
+ - Expected bandwidth of the incident X-ray beam
+ - Intersection of the sample size and the beam size as the diameter
+
+> **The interested user is referred to the article:<br>**
+>  <i>On the resolution function for powder diffraction with area detectors</i><br>
+>  [D. Chernyshov <i> et al., Acta Cryst.</i> (2021). <b>A77</b>, 497-505](https://doi.org/10.1107/S2053273321007506)
+
+<img src="https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_6_FWHM.png" width="50%">
 
 ## Hotkeys
 
 | Key        | Action                    |
 | ---------- | ------------------------- |
 | F1         | Show About window         |
+| F2         | Show Geometry conventions |
+| F3         | Show Hotkeys              |
+| x          | Show PXRD pattern         |
 | #          | *Display units*           |
 | t          | 2-Theta                   |
 | d          | d-spacing                 |
@@ -433,7 +455,7 @@ The size Entry is a dictionary {key:value,}
 
 </details>
 
-## Example code 
+## Example code
 <details>
 <summary>Example code for adding xrdPlanner as a widget into an existing GUI</summary>
  
