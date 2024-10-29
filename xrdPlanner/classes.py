@@ -868,6 +868,15 @@ class MainWindow(QtWidgets.QMainWindow):
             if invert == self.geo.darkmode:
                 theme_action.setChecked(True)
 
+        # invert cone colors
+        self.action_invert_cone_colors = QtGui.QAction('Invert cone colors', self, checkable=True)
+        self.menu_set_action(self.action_invert_cone_colors, self.toggle_invert_cone_colors)
+        if self.plo.invert_cone_colors:
+            self.action_invert_cone_colors.setChecked(True)
+        else:
+            self.action_invert_cone_colors.setChecked(False)
+        menu_view.addAction(self.action_invert_cone_colors)
+
         ###################
         # VIEW - COLORMAP #
         ###################
@@ -1124,6 +1133,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_funct_fwhm_show.setChecked(False)
         self.redraw_canvas()
 
+    def toggle_invert_cone_colors(self):
+        self.plo.invert_cone_colors = not self.plo.invert_cone_colors
+        if self.plo.invert_cone_colors:
+            self.action_invert_cone_colors.setChecked(True)
+        else:
+            self.action_invert_cone_colors.setChecked(False)
+        self.redraw_canvas()
+
     ############
     #   REDO   #
     ############
@@ -1358,12 +1375,18 @@ class MainWindow(QtWidgets.QMainWindow):
                 continue
 
             # plot the conic section
-            self.patches['conic'][_n].setData(x, y, pen=pg.mkPen(self.cont_cmap.map(_f, mode='qcolor'), width=self.plo.conic_linewidth))
+            if self.plo.invert_cone_colors:
+                self.patches['conic'][_n].setData(x, y, pen=pg.mkPen(self.conic_ref_color, width=self.plo.conic_linewidth))
+            else:
+                self.patches['conic'][_n].setData(x, y, pen=pg.mkPen(self.cont_cmap.map(_f, mode='qcolor'), width=self.plo.conic_linewidth))
             self.patches['conic'][_n].setVisible(True)
             
             _unit = self.calc_unit(theta)
             self.patches['labels'][_n].setPos(*label_pos)
-            self.patches['labels'][_n].setText(f'{_unit:.2f}', color=self.cont_cmap.map(_f, mode='qcolor'))
+            if self.plo.invert_cone_colors:
+                self.patches['labels'][_n].setText(f'{_unit:.2f}', color=self.conic_ref_color)
+            else:
+                self.patches['labels'][_n].setText(f'{_unit:.2f}', color=self.cont_cmap.map(_f, mode='qcolor'))
             self.patches['labels'][_n].setVisible(True)
 
     def draw_reference(self):
@@ -1456,10 +1479,18 @@ class MainWindow(QtWidgets.QMainWindow):
                 else:
                     self.patches['reference'][_n].name = None
                 
-                # plot the conic section
-                self.patches['reference'][_n].setData(x, y, pen=pg.mkPen(self.conic_ref_color,
-                                                                         width=max(self.plo.conic_ref_cif_lw_min, 
-                                                                                   self.plo.conic_ref_linewidth * width)))
+                # current fraction for colormap
+                if self.plo.invert_cone_colors:
+                    # current fraction for colormap
+                    _f = _n/len(self.cont_ref_dsp)
+                    # plot the conic section
+                    self.patches['reference'][_n].setData(x, y, pen=pg.mkPen(self.cont_cmap.map(_f, mode='qcolor'),
+                                                                             width=max(self.plo.conic_ref_cif_lw_min, 
+                                                                                       self.plo.conic_ref_linewidth * width)))
+                else:
+                    self.patches['reference'][_n].setData(x, y, pen=pg.mkPen(self.conic_ref_color,
+                                                                             width=max(self.plo.conic_ref_cif_lw_min, 
+                                                                                       self.plo.conic_ref_linewidth * width)))
                 self.patches['reference'][_n].setVisible(True)
     
     ############
@@ -1681,6 +1712,7 @@ class MainWindow(QtWidgets.QMainWindow):
         plo.conic_linewidth = 2.0           # [float]  Contour linewidth (lw)
         plo.conic_label_size = 14           # [int]    Contour labelsize
         plo.conic_label_auto = True         # [bool]   Dynamic label positions
+        plo.invert_cone_colors = False      # [bool]   Invert cone colors
         # - reference contour section - 
         plo.conic_ref_linewidth = 2.0       # [float]  Reference contour linewidth
         plo.conic_ref_timeout = 500         # [int]    highlight contour on click (msec)
@@ -3521,8 +3553,9 @@ class MainWindow(QtWidgets.QMainWindow):
             
             def setModelData(self, editor, model, index):
                 if isinstance(editor, QtWidgets.QColorDialog):
-                    model.setData(index, editor.selectedColor().name(format=QtGui.QColor.NameFormat.HexArgb))
-                    model.setData(index.siblingAtColumn(2), QtGui.QBrush(editor.selectedColor()), QtCore.Qt.ItemDataRole.BackgroundRole)
+                    if editor.result():
+                        model.setData(index, editor.selectedColor().name(format=QtGui.QColor.NameFormat.HexArgb))
+                        model.setData(index.siblingAtColumn(2), QtGui.QBrush(editor.selectedColor()), QtCore.Qt.ItemDataRole.BackgroundRole)
                 else:
                     return super(genericItemDelegate, self).setModelData(editor, model, index)
 
@@ -3534,6 +3567,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tree_par.setHeaderHidden(True)
         self.tree_par.setAlternatingRowColors(True)
         self.tree_par.setItemDelegate(genericItemDelegate())
+
         # det_bank and bs_list need some special treatment
         # to facilitate their editing
         dont_show = ['det_bank', 'bs_list']
@@ -4381,6 +4415,7 @@ class MainWindow(QtWidgets.QMainWindow):
         table.setEditTriggers(QtWidgets.QTableWidget.EditTrigger.NoEditTriggers)
         table.setSelectionMode(QtWidgets.QTableWidget.SelectionMode.NoSelection)
         table.setSizeAdjustPolicy(QtWidgets.QTableWidget.SizeAdjustPolicy.AdjustToContents)
+        table.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
 
         font_bold = QtGui.QFont()
         font_bold.setBold(True)
@@ -4389,7 +4424,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if k == '#':
                 table.setItem(i, 0, QtWidgets.QTableWidgetItem(v))
                 table.setSpan(i, 0, 1, 2)
-                table.item(i, 0).setBackground(self.palette().alternateBase().color())
+                #table.item(i, 0).setBackground(self.palette().highlight().color())
                 table.item(i, 0).setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
                 table.item(i, 0).setFont(font_bold)
             else:
