@@ -425,9 +425,23 @@ class MainWindow(QtWidgets.QMainWindow):
         # add label for corrections
         self.label_corr_init()
 
+        # add empty lines for azimuthal grid
+        self.polar_grid_init()
+
         # create cones and draw contour lines
         self.update_screen()
         self.set_win_title()
+
+
+    def polar_grid_init(self):
+        """initialize a polar grid that can be easily hidden or shown"""
+        self.patches['polar_grid'] = []
+        # lines for azimuthal grid
+        for i in range(self.plo.azimuth_num):
+            line = pg.PlotCurveItem(useCache=True,
+                                    pen=pg.mkPen(self.grid_color, width=1))
+            self.ax.addItem(line)
+            self.patches['polar_grid'].append(line)
 
     ############
     #  LABELS  #
@@ -627,6 +641,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.unit_label_color = QtGui.QColor(self.thm.dark_unit_label_color)
             self.unit_label_fill = QtGui.QColor(self.thm.dark_unit_label_fill)
             self.overlay_threshold_color = QtGui.QColor(self.thm.dark_overlay_threshold_color)
+            self.grid_color = QtGui.QColor(self.thm.dark_grid_color)
             # slider
             self.slider_border_color = QtGui.QColor(self.thm.dark_slider_border_color)
             self.slider_bg_color = QtGui.QColor(self.thm.dark_slider_bg_color)
@@ -663,6 +678,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.unit_label_color = QtGui.QColor(self.thm.light_unit_label_color)
             self.unit_label_fill = QtGui.QColor(self.thm.light_unit_label_fill)
             self.overlay_threshold_color = QtGui.QColor(self.thm.light_overlay_threshold_color)
+            self.grid_color = QtGui.QColor(self.thm.light_grid_color)
             # slider
             self.slider_border_color = QtGui.QColor(self.thm.light_slider_border_color)
             self.slider_bg_color = QtGui.QColor(self.thm.light_slider_bg_color)
@@ -1141,6 +1157,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_invert_cone_colors.setChecked(False)
         self.redraw_canvas()
 
+    def toggle_grid(self):
+        self.plo.show_azimuth = not self.plo.show_azimuth
+        self.redraw_canvas()
+
     ############
     #   REDO   #
     ############
@@ -1294,7 +1314,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # overlay
         if self.plo.show_polarisation or self.plo.show_solidangle or self.plo.show_unit_hover or self.plo.show_fwhm:
-            _grd, self._tth, self._polcor, self._solang, self._fwhm = self.calc_overlays(_omega, res=self.plo.overlay_resolution, pol=self.plo.polarisation_fac)
+            _grd, self._tth, self._azi, self._polcor, self._solang, self._fwhm = self.calc_overlays(_omega, res=self.plo.overlay_resolution, pol=self.plo.polarisation_fac)
             self.patches['overlay'].setImage(_grd * self._polcor * self._solang,
                                              autoLevels=False,
                                              levels=[0.0,1.0],
@@ -1304,6 +1324,7 @@ class MainWindow(QtWidgets.QMainWindow):
                                                     self.ydim * 2))
         else:
             self._tth = None
+            self._azi = None
             self.patches['overlay'].setImage(None)
             self.cor_label.hide()
         
@@ -1388,6 +1409,22 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 self.patches['labels'][_n].setText(f'{_unit:.2f}', color=self.cont_cmap.map(_f, mode='qcolor'))
             self.patches['labels'][_n].setVisible(True)
+
+            ## plot azimuthal grid lines
+            if self.plo.show_azimuth:
+                # calculate the azimuthal grid points
+                grid_vectors = self.calc_azi_grid(_omega)
+                for i,[a, v] in enumerate(grid_vectors.items()):
+                    # plot the azimuthal grid point
+                    # Currently the angle a is not used
+                    # but might be useful for future reference
+                    self.patches['polar_grid'][i].setData(v[:,0],
+                                                        v[:,1],)
+                    self.patches['polar_grid'][i].setVisible(True)
+            else:
+                for i in range(self.plo.azimuth_num):
+                    self.patches['polar_grid'][i].setVisible(False)
+
 
     def draw_reference(self):
         """
@@ -1737,6 +1774,8 @@ class MainWindow(QtWidgets.QMainWindow):
         plo.show_polarisation = True        # [bool]   Show polarisation overlay
         plo.show_solidangle = False         # [bool]   Show solid angle overlay
         plo.show_unit_hover = True          # [bool]   Show unit value on hover
+        plo.show_azimuth = False            # [bool]   Show azimuthal grid
+        plo.azimuth_num = 13                # [int]    Number of azimuthal grid lines
         plo.overlay_resolution = 300        # [int]    Overlay resolution
         plo.overlay_toggle_warn = True      # [bool]   Overlay warn color threshold
         # - pxrd plot -
@@ -1820,6 +1859,7 @@ class MainWindow(QtWidgets.QMainWindow):
         thm.light_slider_bg_hover = '#C0C0C0'         # [color]  Slider frame hover color
         thm.light_slider_label_color = '#000000'      # [color]  Slider frame label color
         thm.light_overlay_threshold_color = '#FF0000' # [color]  Map threshold color
+        thm.light_grid_color = '#AAAAAA'              # [color]  Grid color
         # dark mode
         thm.dark_conic_label_fill = '#000000'         # [color]  Contour label fill color
         thm.dark_conic_ref_color = '#303030'          # [color]  Reference contour color
@@ -1835,6 +1875,7 @@ class MainWindow(QtWidgets.QMainWindow):
         thm.dark_slider_bg_hover = '#303030'          # [color]  Slider frame hover color
         thm.dark_slider_label_color = '#C0C0C0'       # [color]  Slider frame label color
         thm.dark_overlay_threshold_color = '#FF0000'  # [color]  Map threshold color
+        thm.dark_grid_color = '#606060'               # [color]  Grid color
 
         return thm
     
@@ -4400,6 +4441,7 @@ class MainWindow(QtWidgets.QMainWindow):
                    ('a','Show solid angle'),
                    ('h','Highlight / Transparency'),
                    ('u','Toggle unit hover display'),
+                   ('g','Toggle azimuthal grid'),
                    ('#','Cycle colormaps'),
                    ('c','Next'),
                    ('\u21E7 + c','Previous')]
@@ -5006,6 +5048,11 @@ class MainWindow(QtWidgets.QMainWindow):
             tth = np.arctan2(R_a, D_a)
             # remove very small values (tth < 0.057 deg) to avoid zero divide
             tth[tth < 1e-3] = np.nan
+            if self.plo.show_azimuth:
+                # calculate the azimuthal angle eta
+                azi = -np.arctan2(_res[0], _res[1])
+            else:
+                azi = None
 
         # polarisation
         pc = 1.0
@@ -5059,7 +5106,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # H2, FWHM
             fwhm = self.calc_FWHM(dis, dia, thk, mat, pxs, tth_a, nrg, div, dEE)
 
-        return grd, tth, pc, sa, fwhm
+        return grd, tth, azi, pc, sa, fwhm
 
     def calc_FWHM(self, dis, dia, thk, mat, pxs, tth, nrg, div, dEE, deg=True):
             """
@@ -5096,6 +5143,58 @@ class MainWindow(QtWidgets.QMainWindow):
                 return fwhm * 180 / np.pi
             else:
                 return fwhm
+
+
+    def calc_azi_grid(self, omega):
+        """calculate the azimuthal grid points and return a dictionary with the vectors"""
+
+        # First define vectors from the sample to the azimuthal
+        # grid points for a vertical detector geometry. Then rotate
+        # the vectors by the detector tilt angle. The azimuthal grid
+        # points are then defined by the intersection of the rotated
+        # vectors with the detector plane.
+
+        _comp_shift = -(self.geo.voff - self.geo.dist * np.tan(omega) - np.deg2rad(self.geo.tilt) * self.geo.dist)
+        # calculate the azimuthal grid points
+        _azi = np.linspace(-np.pi, np.pi, self.plo.azimuth_num) # radians
+        # calculate unit vectors to tth=5 deg
+        _azi_vec = np.array([-np.sin(np.pi/36)*np.sin(_azi), # x
+                                np.sin(np.pi/36)*np.cos(_azi), # y
+                                np.cos(np.pi/36)*np.ones(_azi.shape[0]), # z
+                                ]) 
+        
+        # scale the vectors such that z = sdd for all azimuthal grid points
+        _azi_vec *=  self.geo.dist/_azi_vec[2,:]
+        
+        # rotate the vectors by the detector tilt+rotation angle
+        _rot = self.rot_100(omega)
+        _azi_vec = np.dot(_rot.T, _azi_vec)
+        
+        # rescale the vectors such that z = sdd for all azimuthal grid points
+        # to make the points intersect the detector plane
+        _azi_vec *=  self.geo.dist/np.abs(_azi_vec[2,:])
+        # make sure the vectors are pointing in the right direction
+        _azi_vec[2] = np.abs(_azi_vec[2])
+
+        # account for the horizontal offset and the beam center shift
+        _azi_vec[0] += self.geo.hoff
+        _azi_vec[1] -= self.geo.voff
+
+        grid_vectors = {}
+        v0 = np.array([self.geo.hoff, _comp_shift])
+        for i,a in enumerate(_azi):
+            # find the vector in the detector plane from the beam center
+            # to the azimuthal grid point
+            v = np.array([_azi_vec[0,i], _azi_vec[1,i]])-np.array([self.geo.hoff, -(self.geo.voff - self.geo.dist * np.tan(omega))])
+            # extend the vector to the edge of the detector including offsets
+            scale = np.sqrt(self.xdim**2+self.ydim**2)+np.sqrt(self.geo.hoff**2+_comp_shift**2)
+            v = v/np.linalg.norm(v)*scale
+            # add the beam center shift
+            v = np.array([self.geo.hoff, _comp_shift]) + v
+            # store the vector
+            grid_vectors[np.round(a*180/np.pi, 2)] = np.stack([v0, v])
+        return grid_vectors
+
 
     def dsp2tth(self, dsp):
         """
@@ -5535,6 +5634,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.win_pxrd_plot()
         elif k == QtCore.Qt.Key.Key_F:
             self.win_fwhm_show()
+        elif k == QtCore.Qt.Key.Key_G:
+            self.toggle_grid()
 
     def closeEvent(self, event):
         """
@@ -5589,7 +5690,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # unit label value
         if not isinstance(self._tth, float):
             unit = self.calc_unit(self._tth[x,y])
-            self.unit_label.setText(f'{self.unit_names[self.geo.unit]} {unit:.2f}')
+            if self.plo.show_azimuth:
+                self.unit_label.setText(f'{self.unit_names[self.geo.unit]} {unit:.2f}\nazi [\u00B0] {self._azi[x,y]*180/np.pi:.0f}')
+            else:
+                self.unit_label.setText(f'{self.unit_names[self.geo.unit]} {unit:.2f}')
         
         _text = []
         # calc_overlays returns either a np.array (if active)
