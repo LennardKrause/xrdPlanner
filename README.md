@@ -229,6 +229,7 @@ where $SDD$ is the sample to detector distance.
 | a          | Show solid angle          |
 | h          | Highlight / Transparency  |
 | u          | Toggle unit hover display |
+| g          | Toggle azimuthal grid     |
 | #          | *Cycle colormaps*         |
 | c          | Next                      |
 | Shift + c  | Previous                  |
@@ -302,6 +303,8 @@ where $SDD$ is the sample to detector distance.
     polarisation_fac = 0.99         # [float]  Horizontal polarisation factor
     show_polarisation = False       # [bool]   Show polarisation overlay
     show_solidangle = False         # [bool]   Show solid angle overlay
+    show_azimuth: False             # [bool]   Show azimuthal grid
+    azimuth_num: 13                 # [int]    Number of azimuthal grid lines
     overlay_resolution = 300        # [int]    Overlay resolution
     overlay_toggle_warn = True      # [bool]   Overlay warn color threshold
     
@@ -359,6 +362,7 @@ where $SDD$ is the sample to detector distance.
     light_slider_bg_color = '#AAC0C0C0'   # [color]  Slider frame background color
     light_slider_bg_hover = '#C0C0C0'     # [color]  Slider frame hover color
     light_slider_label_color = '#000000'  # [color]  Slider frame label color
+    light_grid_color = '#AAAAAA'          # [color]  Azimuthal grid color
     
     # dark mode
     dark_conic_label_fill = '#000000'     # [color]  Contour label fill color
@@ -374,6 +378,7 @@ where $SDD$ is the sample to detector distance.
     dark_slider_bg_color = '#AA303030'    # [color]  Slider frame background color
     dark_slider_bg_hover = '#303030'      # [color]  Slider frame hover color
     dark_slider_label_color = '#C0C0C0'   # [color]  Slider frame label color
+    dark_grid_color = '#AAAAAA'           # [color]  Azimuthal grid color
 
 </details>
 
