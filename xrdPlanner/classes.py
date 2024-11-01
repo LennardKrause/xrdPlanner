@@ -812,10 +812,13 @@ class MainWindow(QtWidgets.QMainWindow):
         # menu Reference: add cif
         self.sub_menu_cif = QtWidgets.QMenu('From cif', self)
         menu_ref.addMenu(self.sub_menu_cif)
+        self.sub_menu_cif.setDisabled(True)
 
         # menu Reference: add cell
         self.sub_menu_cell = QtWidgets.QMenu('From cell', self)
         menu_ref.addMenu(self.sub_menu_cell)
+        # disable the cell menu until a QAction is added
+        self.sub_menu_cell.setDisabled(True)
 
         menu_ref.addSeparator()
         # menu Reference: add None
@@ -885,7 +888,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 theme_action.setChecked(True)
 
         # invert cone colors
-        self.action_invert_cone_colors = QtGui.QAction('Invert cone colors', self, checkable=True)
+        self.action_invert_cone_colors = QtGui.QAction('&Invert cone colors', self, checkable=True)
         self.menu_set_action(self.action_invert_cone_colors, self.toggle_invert_cone_colors)
         if self.plo.invert_cone_colors:
             self.action_invert_cone_colors.setChecked(True)
@@ -896,7 +899,8 @@ class MainWindow(QtWidgets.QMainWindow):
         ###################
         # VIEW - COLORMAP #
         ###################
-        self.menu_cmap = menu_view.addMenu('Colormap')
+        # indicate the hot key by underlining the letter with '&'
+        self.menu_cmap = menu_view.addMenu('&Colormap')
         group_cmap = QtGui.QActionGroup(self)
         group_cmap.setExclusive(True)
         for cmap_name in self.colormaps: # PyQtGraph.colormap.listMaps(): Experimental, subject to change.
@@ -912,16 +916,25 @@ class MainWindow(QtWidgets.QMainWindow):
         ##################
         menu_overlays = menu_view.addMenu('Overlay')
         # unit value hover toggle
-        self.action_unit_hover = QtGui.QAction('Unit hover', self, checkable=True)
+        self.action_unit_hover = QtGui.QAction('&Unit hover', self, checkable=True)
         self.menu_set_action(self.action_unit_hover, self.toggle_unit_hover)
         if self.plo.show_unit_hover:
             self.action_unit_hover.setChecked(True)
         else:
             self.action_unit_hover.setChecked(False)
         menu_overlays.addAction(self.action_unit_hover)
+        # azimuthal grid toggle
+        self.action_grid = QtGui.QAction('&Grid', self, checkable=True)
+        self.menu_set_action(self.action_grid, self.toggle_grid)
+        if self.plo.show_grid:
+            self.action_grid.setChecked(True)
+        else:
+            self.action_grid.setChecked(False)
+        menu_overlays.addAction(self.action_grid)
+        # separator
         menu_overlays.addSeparator()
         # polarisation map toggle
-        self.action_show_pol = QtGui.QAction('Polarisation', self, checkable=True)
+        self.action_show_pol = QtGui.QAction('&Polarisation', self, checkable=True)
         self.menu_set_action(self.action_show_pol, self.toggle_overlay_polarisation)
         if self.plo.show_polarisation:
             self.action_show_pol.setChecked(True)
@@ -929,7 +942,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_show_pol.setChecked(False)
         menu_overlays.addAction(self.action_show_pol)
         # Solidangle map toggle
-        self.action_show_ang = QtGui.QAction('Solid angle', self, checkable=True)
+        self.action_show_ang = QtGui.QAction('Solid &angle', self, checkable=True)
         self.menu_set_action(self.action_show_ang, self.toggle_overlay_solidangle)
         if self.plo.show_solidangle:
             self.action_show_ang.setChecked(True)
@@ -938,7 +951,7 @@ class MainWindow(QtWidgets.QMainWindow):
         menu_overlays.addAction(self.action_show_ang)
         # Overlay warn color toggle
         menu_overlays.addSeparator()
-        self.action_overlay_warn = QtGui.QAction('Highlight', self, checkable=True)
+        self.action_overlay_warn = QtGui.QAction('&Highlight', self, checkable=True)
         self.menu_set_action(self.action_overlay_warn, self.toggle_overlay_highlight)
         if self.plo.overlay_toggle_warn:
             self.action_overlay_warn.setChecked(True)
@@ -951,7 +964,7 @@ class MainWindow(QtWidgets.QMainWindow):
         ####################
         menu_functions = menu_view.addMenu('Functions')
         #set fwhm parameters toggle
-        self.action_funct_fwhm_set = QtGui.QAction('Setup FWHM', self)
+        self.action_funct_fwhm_set = QtGui.QAction('Setup &FWHM', self)
         self.menu_set_action(self.action_funct_fwhm_set, self.win_fwhm_show)
         menu_functions.addAction(self.action_funct_fwhm_set)
         #show fwhm toggle
@@ -964,7 +977,7 @@ class MainWindow(QtWidgets.QMainWindow):
         menu_functions.addAction(self.action_funct_fwhm_show)
 
         # PXRD pattern
-        self.action_pxrd_pattern = QtGui.QAction('PXRD pattern', self)
+        self.action_pxrd_pattern = QtGui.QAction('P&XRD pattern', self)
         self.menu_set_action(self.action_pxrd_pattern, self.win_pxrd_plot)
         menu_view.addAction(self.action_pxrd_pattern)
 
@@ -1158,7 +1171,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.redraw_canvas()
 
     def toggle_grid(self):
-        self.plo.show_azimuth = not self.plo.show_azimuth
+        self.plo.show_grid = not self.plo.show_grid
         self.redraw_canvas()
 
     ############
@@ -1411,7 +1424,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.patches['labels'][_n].setVisible(True)
 
             ## plot azimuthal grid lines
-            if self.plo.show_azimuth:
+            if self.plo.show_grid:
                 # calculate the azimuthal grid points
                 grid_vectors = self.calc_azi_grid(_omega)
                 for i,[a, v] in enumerate(grid_vectors.items()):
@@ -1774,7 +1787,7 @@ class MainWindow(QtWidgets.QMainWindow):
         plo.show_polarisation = True        # [bool]   Show polarisation overlay
         plo.show_solidangle = False         # [bool]   Show solid angle overlay
         plo.show_unit_hover = True          # [bool]   Show unit value on hover
-        plo.show_azimuth = False            # [bool]   Show azimuthal grid
+        plo.show_grid = False            # [bool]   Show azimuthal grid
         plo.azimuth_num = 13                # [int]    Number of azimuthal grid lines
         plo.overlay_resolution = 300        # [int]    Overlay resolution
         plo.overlay_toggle_warn = True      # [bool]   Overlay warn color threshold
@@ -2588,10 +2601,12 @@ class MainWindow(QtWidgets.QMainWindow):
         Args:
             name (str): The name of the reference to be added to the submenu.
         """
+
         # add only if no menu with same name exists
         if name in [item.text() for item in self.sub_menu_cif.actions()]:
             return
-        
+        # make sure the menu is enabled
+        self.sub_menu_cif.setEnabled(True)
         ref_menu = self.sub_menu_cif.addMenu(name)
         cif = self.ref_cif[name].cif
         if os.path.exists(cif):
@@ -2701,10 +2716,8 @@ class MainWindow(QtWidgets.QMainWindow):
             win_uc_accept: Slot for accepting the dialog.
         """
         self.win_uc = QtWidgets.QDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
-
         layout = QtWidgets.QVBoxLayout()
         layout.setSpacing(0)
-
         box = QtWidgets.QGroupBox(title='Enter unit cell parameters')
         box.setStyleSheet('QGroupBox { font-weight: bold; }')
         box_layout = QtWidgets.QVBoxLayout()
@@ -2844,14 +2857,17 @@ class MainWindow(QtWidgets.QMainWindow):
         5. Sets the new QAction as checked.
         6. Closes the unit cell window.
         """
+        self.win_uc.close()
         self.win_uc_apply(self.uc_dict_change)
         self.change_reference(self.geo.reference)
         ref_action = QtGui.QAction(self.geo.reference, self, checkable=True)
         self.menu_set_action(ref_action, self.change_reference, self.geo.reference)
         self.sub_menu_cell.addAction(ref_action)
+        # enable the menu
+        self.sub_menu_cell.setEnabled(True)
         self.group_ref.addAction(ref_action)
         ref_action.setChecked(True)
-        self.win_uc.close()
+        
     
     def win_uc_set_link_sbox(self):
         """
@@ -5039,6 +5055,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # unit hover
         tth = 1.0
+        azi = None
         if self.plo.show_unit_hover:
             # Distance POBI - pixel on grid
             R_a = np.sqrt(np.sum(_res[0:2]**2, axis=0)) * 1e-3 # m
@@ -5048,11 +5065,9 @@ class MainWindow(QtWidgets.QMainWindow):
             tth = np.arctan2(R_a, D_a)
             # remove very small values (tth < 0.057 deg) to avoid zero divide
             tth[tth < 1e-3] = np.nan
-            if self.plo.show_azimuth:
+            if self.plo.show_grid:
                 # calculate the azimuthal angle eta
                 azi = -np.arctan2(_res[0], _res[1])
-            else:
-                azi = None
 
         # polarisation
         pc = 1.0
@@ -5636,6 +5651,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.win_fwhm_show()
         elif k == QtCore.Qt.Key.Key_G:
             self.toggle_grid()
+        elif k == QtCore.Qt.Key.Key_I:
+            self.toggle_invert_cone_colors()
 
     def closeEvent(self, event):
         """
@@ -5690,7 +5707,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # unit label value
         if not isinstance(self._tth, float):
             unit = self.calc_unit(self._tth[x,y])
-            if self.plo.show_azimuth:
+            if self.plo.show_grid:
                 self.unit_label.setText(f'{self.unit_names[self.geo.unit]} {unit:.2f}\nazi [\u00B0] {self._azi[x,y]*180/np.pi:.0f}')
             else:
                 self.unit_label.setText(f'{self.unit_names[self.geo.unit]} {unit:.2f}')
