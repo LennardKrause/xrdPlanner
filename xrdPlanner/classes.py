@@ -5593,7 +5593,16 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         fpath = event.mimeData().urls()[0].toLocalFile()
         if os.path.splitext(fpath)[1] == '.cif':
-            self.calc_ref_from_cif(fpath, open_pxrd=True)
+            # check that the cif file is valid
+            if check_cif(fpath):
+                self.calc_ref_from_cif(fpath, open_pxrd=True)
+                return
+        # if the file is not a valid cif file open a warning dialog
+        QtWidgets.QMessageBox().warning(self,
+                                        "Invalid CIF file", 
+                                        f"The dropped file is not a valid CIF file!\n{fpath}"
+                                        )
+
 
     def keyPressEvent(self, event):
         """
@@ -6263,6 +6272,8 @@ class Ref(object):
         if not os.path.exists(self.cif):
             self.rem_cif()
     
+    
+
     def is_complete(self):
         """
         Check if the object is complete.
@@ -6274,3 +6285,8 @@ class Ref(object):
             bool: True if all required attributes are present, False otherwise.
         """
         return np.all([self.has_cif, self.has_dsp, self.has_hkl])
+    
+def check_cif(fpath):
+    """Check that the required values exist in the cif file. Return Boolean."""
+    cifval = dif.functions_crystallography.readcif(fpath)
+    return dif.functions_crystallography.cif_check(cifval)
