@@ -98,6 +98,8 @@ where $SDD$ is the sample to detector distance.
 > - A new parameter was added to allow for detector screen padding (plo.plot_padding), default is 0.
 
 ## Latest updates:
+  - 2024-11-08 Update: Added a visual indicators for azimuthal bins (View > Overlay > Grid or hotkey G).
+  - 2024-11-08 Bugfix: Fixed invisible menus on windows os.
   - 2024-10-29 Update: Added a menu action to invert the coloring of the resolution and reference conics (_View_ > _Invert cone colors_) to increase visibility, when needed.
   - 2024-10-28 Update: Added a [PXRD plot window](#pxrd-pattern-plot) for cif files to show the diffraction pattern (gaussian peak shape) including [intrumental peak broadening](#instrumental-broadening) (setup FWHM).
   - 2024-10-28 Update: cif files are stored now (name and link-to-file).
