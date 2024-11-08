@@ -2429,70 +2429,100 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def get_hotkeys(self):
         """
-        Initializes and sets up the hotkeys and their corresponding actions for the application.
-        Attributes:
-        -----------
-        hotkey_desc : list of tuples
-            A list containing tuples where each tuple represents a hotkey and its description.
-            Example: [('#', 'Windows'), ('F1', 'Show about window'), ...]
-        hotkey_dict : dict
-            A dictionary mapping key combinations to their corresponding methods.
-            Example: {(QtCore.Qt.Key.Key_C, QtCore.Qt.KeyboardModifier.ShiftModifier): self.change_cmap(-1), ...}
-        Note:
-        -----
-        The hotkeys are defined using Qt key codes and modifiers.
+        Initializes a dictionary mapping hotkeys to their respective functions and descriptions.
+        The dictionary structure is as follows:
+        - Keys are tuples of the form ('key', 'modifier'), where 'key' is a valid QtKey string
+          and 'modifier' is an optional key modifier (e.g., 'SHIFT', 'CTRL', 'ALT').
+        - Values are dictionaries with the following keys:
+          - 'fn': A tuple containing the function to be executed and its argument.
+          - 'dc': A string description of the hotkey's function.
+        The dictionary is divided into sections, each indicated by a key with a value of None.
+        Available sections and their hotkeys:
+        - 'Windows':
+          - ('F1', None): Show about window
+          - ('F2', None): Show geometry window
+          - ('F3', None): Show hotkey window
+          - ('X', None): Show PXRD window
+          - ('F', None): Show FWHM window
+        - 'Unit':
+          - ('T', None): Change to 2-theta
+          - ('D', None): Change to d-spacing
+          - ('Q', None): Change to Q-space
+          - ('S', None): Change to sin(θ)/λ
+        - 'Label position':
+          - ('Up', None): Top left
+          - ('Down', None): Bottom left
+        - 'Toggles':
+          - ('P', None): Toggle polarisation overlay
+          - ('A', None): Toggle solid angle overlay
+          - ('H', None): Toggle highlight / transparency
+          - ('U', None): Toggle unit hover display
+          - ('G', None): Toggle azimuthal grid
+        - 'Colormaps':
+          - ('C', None): Next colormap
+          - ('C', 'SHIFT'): Previous colormap
+          - ('R', None): Toggle colored reference
+        Returns:
+            None
         """
-        # '#' indicates a title / new section
-        # used  in the hotkey window
-        self.hotkey_desc = [('#','Windows'),
-                            ('F1','Show about window'),
-                            ('F2','Show geometry window'),
-                            ('F3','Show hotkey window'),
-                            ('x','Show PXRD window'),
-                            ('f','Show FWHM window'),
-                            ('#','Display units'),
-                            ('t','2-theta'),
-                            ('d','d-spacing'),
-                            ('q','Q-space'),
-                            ('s ','sin(\u03B8)/\u03BB'),
-                            ('#','Unit label position'),
-                            ('\u2191','Top left'),
-                            ('\u2193','Bottom left'),
-                            ('#','Toggle overlay'),
-                            ('p','Show polarisation'),
-                            ('a','Show solid angle'),
-                            ('h','Highlight / Transparency'),
-                            ('u','Toggle unit hover display'),
-                            ('g','Toggle azimuthal grid'),
-                            ('#','Colormaps'),
-                            ('c','Next'),
-                            ('\u21E7 + c','Previous'),
-                            ('r','Colored reference')]
-        # used in the keyPressEvent method
-        self.hotkey_dict = {# windows
-                            (QtCore.Qt.Key.Key_F1, QtCore.Qt.KeyboardModifier.NoModifier):(self.show_about_win, None),
-                            (QtCore.Qt.Key.Key_F2, QtCore.Qt.KeyboardModifier.NoModifier):(self.show_geometry_win, None),
-                            (QtCore.Qt.Key.Key_F3, QtCore.Qt.KeyboardModifier.NoModifier):(self.show_hotkeys_win, None),
-                            (QtCore.Qt.Key.Key_X, QtCore.Qt.KeyboardModifier.NoModifier):(self.win_pxrd_plot, None),
-                            (QtCore.Qt.Key.Key_F, QtCore.Qt.KeyboardModifier.NoModifier):(self.win_fwhm_show, None),
-                            # display units
-                            (QtCore.Qt.Key.Key_T, QtCore.Qt.KeyboardModifier.NoModifier):(self.change_units, 0),
-                            (QtCore.Qt.Key.Key_D, QtCore.Qt.KeyboardModifier.NoModifier):(self.change_units, 1),
-                            (QtCore.Qt.Key.Key_Q, QtCore.Qt.KeyboardModifier.NoModifier):(self.change_units, 2),
-                            (QtCore.Qt.Key.Key_S, QtCore.Qt.KeyboardModifier.NoModifier):(self.change_units, 3),
-                            # unit label position
-                            (QtCore.Qt.Key.Key_Up, QtCore.Qt.KeyboardModifier.NoModifier):(self.label_set_position, 'top'),
-                            (QtCore.Qt.Key.Key_Down, QtCore.Qt.KeyboardModifier.NoModifier):(self.label_set_position, 'bottom'),
-                            # toggle overlay
-                            (QtCore.Qt.Key.Key_P, QtCore.Qt.KeyboardModifier.NoModifier):(self.toggle_overlay_polarisation, None),
-                            (QtCore.Qt.Key.Key_A, QtCore.Qt.KeyboardModifier.NoModifier):(self.toggle_overlay_solidangle, None),
-                            (QtCore.Qt.Key.Key_H, QtCore.Qt.KeyboardModifier.NoModifier):(self.toggle_overlay_highlight, None),
-                            (QtCore.Qt.Key.Key_U, QtCore.Qt.KeyboardModifier.NoModifier):(self.toggle_unit_hover, None),
-                            (QtCore.Qt.Key.Key_G, QtCore.Qt.KeyboardModifier.NoModifier):(self.toggle_grid, None),
-                            # cycle colormaps
-                            (QtCore.Qt.Key.Key_C, QtCore.Qt.KeyboardModifier.ShiftModifier):(self.change_cmap, -1),
-                            (QtCore.Qt.Key.Key_C, QtCore.Qt.KeyboardModifier.NoModifier):(self.change_cmap, 1),
-                            (QtCore.Qt.Key.Key_R, QtCore.Qt.KeyboardModifier.NoModifier):(self.toggle_colored_reference, None),
+        # (str):None indicated a new section / tile using str
+        # and tuple('key', 'modifier'):{'fn':(function, arg), 'dc':'description'}
+        # to map hotkeys to functions and descriptions
+        #
+        # 'key' is the key to be pressed, must be a valid QtKey string and mappable
+        # to the QtGui.QKeySequence(key).toString() function used in the keypressevent
+        #
+        # the following keymodifier mappings are available:
+        # QtCore.Qt.KeyboardModifier.AltModifier:'ALT'
+        # QtCore.Qt.KeyboardModifier.ShiftModifier:'SHIFT'
+        # QtCore.Qt.KeyboardModifier.ControlModifier:'CTRL'
+        self.hotkey_dict = {('Windows'):None,
+                            ('F1', None):  {'fn':(self.show_about_win, None),
+                                            'dc':'Show about window'},
+                            ('F2', None):  {'fn':(self.show_geometry_win, None),
+                                            'dc':'Show geometry window'},
+                            ('F3', None):  {'fn':(self.show_hotkeys_win, None),
+                                            'dc':'Show hotkey window'},
+                            ('X', None):   {'fn':(self.win_pxrd_plot, None),
+                                            'dc':'Show PXRD window'},
+                            ('F', None):   {'fn':(self.win_fwhm_show, None),
+                                            'dc':'Show FWHM window'},
+                            
+                            ('Unit'):None,
+                            ('T', None):   {'fn':(self.change_units, 0),
+                                            'dc':'Change to 2-theta'},
+                            ('D', None):   {'fn':(self.change_units, 1),
+                                            'dc':'Change to d-spacing'},
+                            ('Q', None):   {'fn':(self.change_units, 2),
+                                            'dc':'Change to Q-space'},
+                            ('S', None):   {'fn':(self.change_units, 3),
+                                            'dc':'Change to sin(\u03B8)/\u03BB'},
+                            
+                            ('Label position'):None,
+                            ('Up', None):  {'fn':(self.label_set_position, 'top'),
+                                            'dc':'Top left'},
+                            ('Down', None):{'fn':(self.label_set_position, 'bottom'),
+                                            'dc':'Bottom left'},
+                            
+                            ('Toggles'):None,
+                            ('P', None):   {'fn':(self.toggle_overlay_polarisation, None),
+                                            'dc':'Toggle polarisation overlay'},
+                            ('A', None):   {'fn':(self.toggle_overlay_solidangle, None),
+                                            'dc':'Toggle solid angle overlay'},
+                            ('H', None):   {'fn':(self.toggle_overlay_highlight, None),
+                                            'dc':'Toggle highlight / transparency'},
+                            ('U', None):   {'fn':(self.toggle_unit_hover, None),
+                                            'dc':'Toggle unit hover display'},
+                            ('G', None):   {'fn':(self.toggle_grid, None),
+                                            'dc':'Toggle azimuthal grid'},
+                            
+                            ('Colormaps'):None,
+                            ('C', None):   {'fn':(self.change_cmap, 1),
+                                            'dc':'Next colormap'},
+                            ('C', 'SHIFT'):{'fn':(self.change_cmap, -1),
+                                            'dc':'Previous colormap'},
+                            ('R', None):   {'fn':(self.toggle_colored_reference, None),
+                                            'dc':'Toggle colored reference'},
                             }
 
     #############
@@ -4561,17 +4591,38 @@ class MainWindow(QtWidgets.QMainWindow):
 
         font_bold = QtGui.QFont()
         font_bold.setBold(True)
-        for i,(k,v) in enumerate(self.hotkey_desc):
+
+        for i,(entry, value) in enumerate(self.hotkey_dict.items()):
             table.insertRow(i)
-            if k == '#':
-                table.setItem(i, 0, QtWidgets.QTableWidgetItem(v))
+            # handle title / sections
+            if isinstance(entry, str) and not value:
+                table.setItem(i, 0, QtWidgets.QTableWidgetItem(entry))
                 table.setSpan(i, 0, 1, 2)
                 #table.item(i, 0).setBackground(self.palette().highlight().color())
                 table.item(i, 0).setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
                 table.item(i, 0).setFont(font_bold)
             else:
-                table.setItem(i, 0, QtWidgets.QTableWidgetItem(k))
-                table.setItem(i, 1, QtWidgets.QTableWidgetItem(v))
+                key, mod = entry
+                desc = value['dc']
+                # handle special keys
+                if key.lower() == 'left':
+                    key = '\u2190'
+                elif key.lower() == 'up':
+                    key = '\u2191'
+                elif key.lower() == 'right':
+                    key = '\u2192'
+                elif key.lower() == 'down':
+                    key = '\u2193'
+                else:
+                    key = QtGui.QKeySequence(key).toString()
+                # add modification keys
+                if mod:
+                    if mod == 'SHIFT':
+                        mod = '\u21E7'
+                    key = f'{mod}+{key}'
+                # add to table
+                table.setItem(i, 0, QtWidgets.QTableWidgetItem(key))
+                table.setItem(i, 1, QtWidgets.QTableWidgetItem(desc))
 
         table.resizeColumnsToContents()
         layout = QtWidgets.QVBoxLayout()
@@ -5678,19 +5729,37 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def keyPressEvent(self, event):
         """
-        Handles key press events and triggers corresponding functions based on the key and modifier combination.
-
+        Handles key press events and executes corresponding functions based on 
+        key and modifier combinations defined in the hotkey_dict.
         Args:
-            event (QKeyEvent): The key event object containing information about the key press.
-
-        The method checks if the key and modifier combination exists in the `hotkey_dict` dictionary.
-        If a match is found, it retrieves the corresponding function and argument.
-        If an argument is provided, it calls the function with the argument; otherwise, it calls the function without arguments.
+            event (QKeyEvent): The key event that triggered this method.
+        The method checks the key and modifier combination of the event and 
+        looks it up in the hotkey_dict. If a matching combination is found, 
+        the associated function is executed with or without arguments as defined 
+        in the hotkey_dict.
+        The modifiers are mapped as follows:
+            - NoModifier or KeypadModifier: None
+            - AltModifier: 'ALT'
+            - ShiftModifier: 'SHIFT'
+            - ControlModifier: 'CTRL'
         """
         k = event.key()
         m = event.modifiers()
+        
+        # set m to None if no modifier or only keypad modifier is pressed
+        if m == QtCore.Qt.KeyboardModifier.NoModifier or m == QtCore.Qt.KeyboardModifier.KeypadModifier:
+            m = None
+        elif m == QtCore.Qt.KeyboardModifier.AltModifier:
+            m = 'ALT'
+        elif m == QtCore.Qt.KeyboardModifier.ShiftModifier:
+            m = 'SHIFT'
+        elif m == QtCore.Qt.KeyboardModifier.ControlModifier:
+            m = 'CTRL'
+        
+        # check if key and modifier combination exists in hotkey_dict
+        k = QtGui.QKeySequence(k).toString()
         if (k,m) in self.hotkey_dict:
-            fn, arg = self.hotkey_dict[(k,m)]
+            fn, arg = self.hotkey_dict.get((k,m))['fn']
             if arg is not None:
                 fn(arg)
             else:
