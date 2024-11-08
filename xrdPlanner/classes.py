@@ -63,6 +63,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.geometry_win = None
         # initialize hotkey window
         self.hotkeys_win = None
+        # dicts to store custom reference data
+        self.ref_cif = {}
+        self.ref_cell = {}
+        # What standards should be available as reference
+        # The d spacings will be imported from pyFAI
+        self.ref_pyfai = calibrant.names()
 
         # move settings file from old location
         _old_settings_file = os.path.join(self.path_home, 'settings.json')
@@ -88,15 +94,23 @@ class MainWindow(QtWidgets.QMainWindow):
         # to their description
         self.get_tooltips()
 
+        # get the hotkeys
+        # self.hotkey_desc: list of tuples [(hotkey, description)]
+        # self.hotkey_dict: dictionary of hotkeys (key, modifier): function
+        self.get_hotkeys()
+
         # get X-ray attenuation lengths
         # for the FWHM / detector sensor
         # thickness calculation
         self.get_att_lengths()
+        
+        # set to False to 'test' windows os behaviour
+        self.menuBar().setNativeMenuBar(self.plo.use_native_menubar)
 
         # menubar is displayed within the main window on Windows
         # so we need to make space for it
         # no idea about other OS, if there are issues fix them here
-        if sys.platform in ['win32', 'linux', 'linux2']:
+        if sys.platform in ['win32', 'linux', 'linux2'] or not self.menuBar().isNativeMenuBar():
             self.offset_win32 = self.menuBar().height() - int(round(self.plo.slider_margin/2, 0))
         else:
             self.offset_win32 = 0
@@ -135,16 +149,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # to the settings file -> settings_reload()
         self.modifiables_init()
         
-        # What standards should be available as reference
-        # The d spacings will be imported from pyFAI
-        self.ref_library = calibrant.names()
-
         # populate the menus with detectors, references and units
         self.menu_init()
         
-        # dict to store custom reference data
-        self.ref_cif = {}
-        self.ref_cell = {}
         # load stored cif file links
         self.get_ref_db_from_file()
 
@@ -233,7 +240,10 @@ class MainWindow(QtWidgets.QMainWindow):
                     for size in list(self.detector_db[det]['size'].keys()):
                         if size not in self.geo.det_bank[det]:
                             self.detector_db[det]['size'].pop(size)
-        
+        if self.ref_cif:
+            for name in self.ref_cif.keys():
+                self.add_cif_to_menu(name)
+
         self.update_win_generic()
 
         # init the hkl tooltip
@@ -340,7 +350,8 @@ class MainWindow(QtWidgets.QMainWindow):
                         'bs_label':None,
                         'conic':[],
                         'reference':[],
-                        'labels':[]}
+                        'labels':[],
+                        'polar_grid':[]}
 
         # add beam stop scatter plot
         # pxMode=False
@@ -425,9 +436,21 @@ class MainWindow(QtWidgets.QMainWindow):
         # add label for corrections
         self.label_corr_init()
 
+        # add empty lines for azimuthal grid
+        self.polar_grid_init()
+
         # create cones and draw contour lines
         self.update_screen()
         self.set_win_title()
+
+    def polar_grid_init(self):
+        """initialize a polar grid that can be easily hidden or shown"""
+        # lines for azimuthal grid
+        for i in range(self.plo.azimuth_num):
+            line = pg.PlotCurveItem(useCache=True,
+                                    pen=pg.mkPen(self.grid_color, width=1))
+            self.ax.addItem(line)
+            self.patches['polar_grid'].append(line)
 
     ############
     #  LABELS  #
@@ -580,6 +603,16 @@ class MainWindow(QtWidgets.QMainWindow):
             label_pos = [self.geo.hoff, min(y)] if theta < np.pi/2 else [self.geo.hoff, max(y)]
         return label_pos
 
+    def label_set_position(self, pos):
+        if pos.lower() in ['u', 'up', 'upper', 't', 'top']:
+            self.unit_label.setPos(-self.xdim, self.ydim)
+            self.unit_label.setAnchor((0.0, 0.0))
+        elif pos.lower() in ['d', 'down', 'b', 'bottom']:
+            self.unit_label.setPos(-self.xdim, -self.ydim)
+            self.unit_label.setAnchor((0.0, 1.0))
+        else:
+            return
+
     ###########
     #  THEME  #
     ###########
@@ -627,6 +660,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.unit_label_color = QtGui.QColor(self.thm.dark_unit_label_color)
             self.unit_label_fill = QtGui.QColor(self.thm.dark_unit_label_fill)
             self.overlay_threshold_color = QtGui.QColor(self.thm.dark_overlay_threshold_color)
+            self.grid_color = QtGui.QColor(self.thm.dark_grid_color)
             # slider
             self.slider_border_color = QtGui.QColor(self.thm.dark_slider_border_color)
             self.slider_bg_color = QtGui.QColor(self.thm.dark_slider_bg_color)
@@ -663,6 +697,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.unit_label_color = QtGui.QColor(self.thm.light_unit_label_color)
             self.unit_label_fill = QtGui.QColor(self.thm.light_unit_label_fill)
             self.overlay_threshold_color = QtGui.QColor(self.thm.light_overlay_threshold_color)
+            self.grid_color = QtGui.QColor(self.thm.light_grid_color)
             # slider
             self.slider_border_color = QtGui.QColor(self.thm.light_slider_border_color)
             self.slider_bg_color = QtGui.QColor(self.thm.light_slider_bg_color)
@@ -740,7 +775,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.menu_bar = self.parent().menuBar()
         else:
             self.menu_bar = self.menuBar()
-
+        
         # append 'menu' and 'value' (string!) as tuple to this list
         # update_menu_entries() will then reset the
         # checkmark to the active entry after reload of
@@ -785,7 +820,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # menu Reference: add pyFAI library
         sub_menu_pyFAI = QtWidgets.QMenu('From pyFAI', self)
         menu_ref.addMenu(sub_menu_pyFAI)
-        for ref_name in sorted(self.ref_library):
+        for ref_name in sorted(self.ref_pyfai):
             ref_action = QtGui.QAction(ref_name, self, checkable=True)
             self.menu_set_action(ref_action, self.change_reference, ref_name)
             sub_menu_pyFAI.addAction(ref_action)
@@ -796,10 +831,23 @@ class MainWindow(QtWidgets.QMainWindow):
         # menu Reference: add cif
         self.sub_menu_cif = QtWidgets.QMenu('From cif', self)
         menu_ref.addMenu(self.sub_menu_cif)
+        if self.ref_cif:
+            for name in self.ref_cif.keys():
+                self.add_cif_to_menu(name)
+        self.sub_menu_cif.setDisabled(self.sub_menu_cif.isEmpty())
 
         # menu Reference: add cell
         self.sub_menu_cell = QtWidgets.QMenu('From cell', self)
         menu_ref.addMenu(self.sub_menu_cell)
+        if self.ref_cell:
+            for name in self.ref_cell.keys():
+                ref_action = QtGui.QAction(name, self, checkable=True)
+                self.menu_set_action(ref_action, self.change_reference, name)
+                self.sub_menu_cell.addAction(ref_action)
+                self.group_ref.addAction(ref_action)
+                if name == self.geo.reference:
+                    ref_action.setChecked(True)
+        self.sub_menu_cell.setDisabled(self.sub_menu_cell.isEmpty())
 
         menu_ref.addSeparator()
         # menu Reference: add None
@@ -868,19 +916,20 @@ class MainWindow(QtWidgets.QMainWindow):
             if invert == self.geo.darkmode:
                 theme_action.setChecked(True)
 
-        # invert cone colors
-        self.action_invert_cone_colors = QtGui.QAction('Invert cone colors', self, checkable=True)
-        self.menu_set_action(self.action_invert_cone_colors, self.toggle_invert_cone_colors)
-        if self.plo.invert_cone_colors:
-            self.action_invert_cone_colors.setChecked(True)
+        # Colored reference
+        self.action_colored_reference = QtGui.QAction('Colored reference', self, checkable=True)
+        self.menu_set_action(self.action_colored_reference, self.toggle_colored_reference)
+        if self.plo.colored_reference:
+            self.action_colored_reference.setChecked(True)
         else:
-            self.action_invert_cone_colors.setChecked(False)
-        menu_view.addAction(self.action_invert_cone_colors)
+            self.action_colored_reference.setChecked(False)
+        menu_view.addAction(self.action_colored_reference)
 
         ###################
         # VIEW - COLORMAP #
         ###################
-        self.menu_cmap = menu_view.addMenu('Colormap')
+        # indicate the hot key by underlining the letter with '&'
+        self.menu_cmap = menu_view.addMenu('&Colormap')
         group_cmap = QtGui.QActionGroup(self)
         group_cmap.setExclusive(True)
         for cmap_name in self.colormaps: # PyQtGraph.colormap.listMaps(): Experimental, subject to change.
@@ -896,16 +945,25 @@ class MainWindow(QtWidgets.QMainWindow):
         ##################
         menu_overlays = menu_view.addMenu('Overlay')
         # unit value hover toggle
-        self.action_unit_hover = QtGui.QAction('Unit hover', self, checkable=True)
+        self.action_unit_hover = QtGui.QAction('&Unit hover', self, checkable=True)
         self.menu_set_action(self.action_unit_hover, self.toggle_unit_hover)
         if self.plo.show_unit_hover:
             self.action_unit_hover.setChecked(True)
         else:
             self.action_unit_hover.setChecked(False)
         menu_overlays.addAction(self.action_unit_hover)
+        # azimuthal grid toggle
+        self.action_grid = QtGui.QAction('&Grid', self, checkable=True)
+        self.menu_set_action(self.action_grid, self.toggle_grid)
+        if self.plo.show_grid:
+            self.action_grid.setChecked(True)
+        else:
+            self.action_grid.setChecked(False)
+        menu_overlays.addAction(self.action_grid)
+        # separator
         menu_overlays.addSeparator()
         # polarisation map toggle
-        self.action_show_pol = QtGui.QAction('Polarisation', self, checkable=True)
+        self.action_show_pol = QtGui.QAction('&Polarisation', self, checkable=True)
         self.menu_set_action(self.action_show_pol, self.toggle_overlay_polarisation)
         if self.plo.show_polarisation:
             self.action_show_pol.setChecked(True)
@@ -913,7 +971,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_show_pol.setChecked(False)
         menu_overlays.addAction(self.action_show_pol)
         # Solidangle map toggle
-        self.action_show_ang = QtGui.QAction('Solid angle', self, checkable=True)
+        self.action_show_ang = QtGui.QAction('Solid &angle', self, checkable=True)
         self.menu_set_action(self.action_show_ang, self.toggle_overlay_solidangle)
         if self.plo.show_solidangle:
             self.action_show_ang.setChecked(True)
@@ -922,7 +980,7 @@ class MainWindow(QtWidgets.QMainWindow):
         menu_overlays.addAction(self.action_show_ang)
         # Overlay warn color toggle
         menu_overlays.addSeparator()
-        self.action_overlay_warn = QtGui.QAction('Highlight', self, checkable=True)
+        self.action_overlay_warn = QtGui.QAction('&Highlight', self, checkable=True)
         self.menu_set_action(self.action_overlay_warn, self.toggle_overlay_highlight)
         if self.plo.overlay_toggle_warn:
             self.action_overlay_warn.setChecked(True)
@@ -935,7 +993,7 @@ class MainWindow(QtWidgets.QMainWindow):
         ####################
         menu_functions = menu_view.addMenu('Functions')
         #set fwhm parameters toggle
-        self.action_funct_fwhm_set = QtGui.QAction('Setup FWHM', self)
+        self.action_funct_fwhm_set = QtGui.QAction('Setup &FWHM', self)
         self.menu_set_action(self.action_funct_fwhm_set, self.win_fwhm_show)
         menu_functions.addAction(self.action_funct_fwhm_set)
         #show fwhm toggle
@@ -948,7 +1006,7 @@ class MainWindow(QtWidgets.QMainWindow):
         menu_functions.addAction(self.action_funct_fwhm_show)
 
         # PXRD pattern
-        self.action_pxrd_pattern = QtGui.QAction('PXRD pattern', self)
+        self.action_pxrd_pattern = QtGui.QAction('P&XRD pattern', self)
         self.menu_set_action(self.action_pxrd_pattern, self.win_pxrd_plot)
         menu_view.addAction(self.action_pxrd_pattern)
 
@@ -1133,12 +1191,16 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_funct_fwhm_show.setChecked(False)
         self.redraw_canvas()
 
-    def toggle_invert_cone_colors(self):
-        self.plo.invert_cone_colors = not self.plo.invert_cone_colors
-        if self.plo.invert_cone_colors:
-            self.action_invert_cone_colors.setChecked(True)
+    def toggle_colored_reference(self):
+        self.plo.colored_reference = not self.plo.colored_reference
+        if self.plo.colored_reference:
+            self.action_colored_reference.setChecked(True)
         else:
-            self.action_invert_cone_colors.setChecked(False)
+            self.action_colored_reference.setChecked(False)
+        self.redraw_canvas()
+
+    def toggle_grid(self):
+        self.plo.show_grid = not self.plo.show_grid
         self.redraw_canvas()
 
     ############
@@ -1294,7 +1356,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # overlay
         if self.plo.show_polarisation or self.plo.show_solidangle or self.plo.show_unit_hover or self.plo.show_fwhm:
-            _grd, self._tth, self._polcor, self._solang, self._fwhm = self.calc_overlays(_omega, res=self.plo.overlay_resolution, pol=self.plo.polarisation_fac)
+            _grd, self._tth, self._azi, self._polcor, self._solang, self._fwhm = self.calc_overlays(_omega, res=self.plo.overlay_resolution, pol=self.plo.polarisation_fac)
             self.patches['overlay'].setImage(_grd * self._polcor * self._solang,
                                              autoLevels=False,
                                              levels=[0.0,1.0],
@@ -1304,6 +1366,7 @@ class MainWindow(QtWidgets.QMainWindow):
                                                     self.ydim * 2))
         else:
             self._tth = None
+            self._azi = None
             self.patches['overlay'].setImage(None)
             self.cor_label.hide()
         
@@ -1375,19 +1438,31 @@ class MainWindow(QtWidgets.QMainWindow):
                 continue
 
             # plot the conic section
-            if self.plo.invert_cone_colors:
-                self.patches['conic'][_n].setData(x, y, pen=pg.mkPen(self.conic_ref_color, width=self.plo.conic_linewidth))
-            else:
-                self.patches['conic'][_n].setData(x, y, pen=pg.mkPen(self.cont_cmap.map(_f, mode='qcolor'), width=self.plo.conic_linewidth))
-            self.patches['conic'][_n].setVisible(True)
-            
             _unit = self.calc_unit(theta)
             self.patches['labels'][_n].setPos(*label_pos)
-            if self.plo.invert_cone_colors:
+            if self.plo.colored_reference:
+                self.patches['conic'][_n].setData(x, y, pen=pg.mkPen(self.conic_ref_color, width=self.plo.conic_linewidth))
                 self.patches['labels'][_n].setText(f'{_unit:.2f}', color=self.conic_ref_color)
             else:
+                self.patches['conic'][_n].setData(x, y, pen=pg.mkPen(self.cont_cmap.map(_f, mode='qcolor'), width=self.plo.conic_linewidth))
                 self.patches['labels'][_n].setText(f'{_unit:.2f}', color=self.cont_cmap.map(_f, mode='qcolor'))
+            self.patches['conic'][_n].setVisible(True)
             self.patches['labels'][_n].setVisible(True)
+            
+            ## plot azimuthal grid lines
+            if self.plo.show_grid:
+                # calculate the azimuthal grid points
+                grid_vectors = self.calc_azi_grid(_omega)
+                for i,[a, v] in enumerate(grid_vectors.items()):
+                    # plot the azimuthal grid point
+                    # Currently the angle a is not used
+                    # but might be useful for future reference
+                    self.patches['polar_grid'][i].setData(v[:,0],
+                                                        v[:,1],)
+                    self.patches['polar_grid'][i].setVisible(True)
+            else:
+                for i in range(self.plo.azimuth_num):
+                    self.patches['polar_grid'][i].setVisible(False)
 
     def draw_reference(self):
         """
@@ -1480,7 +1555,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     self.patches['reference'][_n].name = None
                 
                 # current fraction for colormap
-                if self.plo.invert_cone_colors:
+                if self.plo.colored_reference:
                     # current fraction for colormap
                     _f = _n/len(self.cont_ref_dsp)
                     # plot the conic section
@@ -1506,17 +1581,31 @@ class MainWindow(QtWidgets.QMainWindow):
         self.geo.bssz = size
         self.redraw_canvas()
 
-    def change_cmap(self, cmap):
+    def change_cmap(self, token):
         """
-        Change the colormap of the geo object and update the UI accordingly.
+        Change the colormap of the geo object based on the provided token.
 
         Parameters:
-        cmap (str): The name of the new colormap to be applied.
+        token (str or int): If a string is provided, it sets the colormap directly to the string value.
+                    If an integer is provided, it changes the colormap by the index offset.
+                    Positive integers move forward in the colormap list, and negative integers move backward.
 
-        This method updates the colormap of the geo object, checks the corresponding
-        action in the menu, redraws the canvas, and updates the generic window.
+        Returns:
+        None
         """
-        self.geo.colormap = cmap
+        # cmap name or index
+        if isinstance(token, str):
+            self.geo.colormap = token
+        elif isinstance(token, int):
+            idx = self.colormaps.index(self.geo.colormap) + token
+            if idx >= len(self.colormaps):
+                idx = 0
+            elif idx < 0:
+                idx = len(self.colormaps) - 1
+            self.geo.colormap = self.colormaps[idx]
+        else:
+            return
+        # change cmap
         for action in self.menu_cmap.actions():
             if action.text() == self.geo.colormap:
                 action.setChecked(True)
@@ -1608,7 +1697,7 @@ class MainWindow(QtWidgets.QMainWindow):
         Raises:
             KeyError: If the reference is not found in any of the reference dictionaries.
         """
-        if self.geo.reference in self.ref_library:
+        if self.geo.reference in self.ref_pyfai:
             # get the d spacings for the calibrtant from pyFAI
             self.cont_ref_dsp = np.array(calibrant.get_calibrant(self.geo.reference).get_dSpacing()[:self.plo.conic_ref_num])
             self.cont_ref_hkl = None
@@ -1712,7 +1801,7 @@ class MainWindow(QtWidgets.QMainWindow):
         plo.conic_linewidth = 2.0           # [float]  Contour linewidth (lw)
         plo.conic_label_size = 14           # [int]    Contour labelsize
         plo.conic_label_auto = True         # [bool]   Dynamic label positions
-        plo.invert_cone_colors = False      # [bool]   Invert cone colors
+        plo.colored_reference = False       # [bool]   Color reference cones instead
         # - reference contour section - 
         plo.conic_ref_linewidth = 2.0       # [float]  Reference contour linewidth
         plo.conic_ref_timeout = 500         # [int]    highlight contour on click (msec)
@@ -1737,6 +1826,8 @@ class MainWindow(QtWidgets.QMainWindow):
         plo.show_polarisation = True        # [bool]   Show polarisation overlay
         plo.show_solidangle = False         # [bool]   Show solid angle overlay
         plo.show_unit_hover = True          # [bool]   Show unit value on hover
+        plo.show_grid = False            # [bool]   Show azimuthal grid
+        plo.azimuth_num = 13                # [int]    Number of azimuthal grid lines
         plo.overlay_resolution = 300        # [int]    Overlay resolution
         plo.overlay_toggle_warn = True      # [bool]   Overlay warn color threshold
         # - pxrd plot -
@@ -1776,6 +1867,7 @@ class MainWindow(QtWidgets.QMainWindow):
         plo.reset_settings = False          # [bool]   Reset settings file
         plo.reset_det_bank = False          # [bool]   Reset detector bank
         # - debug/testing -
+        plo.use_native_menubar = True       # [bool]   Use native menubar
         plo.set_debug = False               # [bool]   Debug mode
 
         return plo
@@ -1820,6 +1912,7 @@ class MainWindow(QtWidgets.QMainWindow):
         thm.light_slider_bg_hover = '#C0C0C0'         # [color]  Slider frame hover color
         thm.light_slider_label_color = '#000000'      # [color]  Slider frame label color
         thm.light_overlay_threshold_color = '#FF0000' # [color]  Map threshold color
+        thm.light_grid_color = '#AAAAAA'              # [color]  Grid color
         # dark mode
         thm.dark_conic_label_fill = '#000000'         # [color]  Contour label fill color
         thm.dark_conic_ref_color = '#303030'          # [color]  Reference contour color
@@ -1835,6 +1928,7 @@ class MainWindow(QtWidgets.QMainWindow):
         thm.dark_slider_bg_hover = '#303030'          # [color]  Slider frame hover color
         thm.dark_slider_label_color = '#C0C0C0'       # [color]  Slider frame label color
         thm.dark_overlay_threshold_color = '#FF0000'  # [color]  Map threshold color
+        thm.dark_grid_color = '#606060'               # [color]  Grid color
 
         return thm
     
@@ -2333,6 +2427,74 @@ class MainWindow(QtWidgets.QMainWindow):
                     if i not in self.tooltips[k].keys():
                         print(i, '-> missing')
 
+    def get_hotkeys(self):
+        """
+        Initializes and sets up the hotkeys and their corresponding actions for the application.
+        Attributes:
+        -----------
+        hotkey_desc : list of tuples
+            A list containing tuples where each tuple represents a hotkey and its description.
+            Example: [('#', 'Windows'), ('F1', 'Show about window'), ...]
+        hotkey_dict : dict
+            A dictionary mapping key combinations to their corresponding methods.
+            Example: {(QtCore.Qt.Key.Key_C, QtCore.Qt.KeyboardModifier.ShiftModifier): self.change_cmap(-1), ...}
+        Note:
+        -----
+        The hotkeys are defined using Qt key codes and modifiers.
+        """
+        # '#' indicates a title / new section
+        # used  in the hotkey window
+        self.hotkey_desc = [('#','Windows'),
+                            ('F1','Show about window'),
+                            ('F2','Show geometry window'),
+                            ('F3','Show hotkey window'),
+                            ('x','Show PXRD window'),
+                            ('f','Show FWHM window'),
+                            ('#','Display units'),
+                            ('t','2-theta'),
+                            ('d','d-spacing'),
+                            ('q','Q-space'),
+                            ('s ','sin(\u03B8)/\u03BB'),
+                            ('#','Unit label position'),
+                            ('\u2191','Top left'),
+                            ('\u2193','Bottom left'),
+                            ('#','Toggle overlay'),
+                            ('p','Show polarisation'),
+                            ('a','Show solid angle'),
+                            ('h','Highlight / Transparency'),
+                            ('u','Toggle unit hover display'),
+                            ('g','Toggle azimuthal grid'),
+                            ('#','Colormaps'),
+                            ('c','Next'),
+                            ('\u21E7 + c','Previous'),
+                            ('r','Colored reference')]
+        # used in the keyPressEvent method
+        self.hotkey_dict = {# windows
+                            (QtCore.Qt.Key.Key_F1, QtCore.Qt.KeyboardModifier.NoModifier):(self.show_about_win, None),
+                            (QtCore.Qt.Key.Key_F2, QtCore.Qt.KeyboardModifier.NoModifier):(self.show_geometry_win, None),
+                            (QtCore.Qt.Key.Key_F3, QtCore.Qt.KeyboardModifier.NoModifier):(self.show_hotkeys_win, None),
+                            (QtCore.Qt.Key.Key_X, QtCore.Qt.KeyboardModifier.NoModifier):(self.win_pxrd_plot, None),
+                            (QtCore.Qt.Key.Key_F, QtCore.Qt.KeyboardModifier.NoModifier):(self.win_fwhm_show, None),
+                            # display units
+                            (QtCore.Qt.Key.Key_T, QtCore.Qt.KeyboardModifier.NoModifier):(self.change_units, 0),
+                            (QtCore.Qt.Key.Key_D, QtCore.Qt.KeyboardModifier.NoModifier):(self.change_units, 1),
+                            (QtCore.Qt.Key.Key_Q, QtCore.Qt.KeyboardModifier.NoModifier):(self.change_units, 2),
+                            (QtCore.Qt.Key.Key_S, QtCore.Qt.KeyboardModifier.NoModifier):(self.change_units, 3),
+                            # unit label position
+                            (QtCore.Qt.Key.Key_Up, QtCore.Qt.KeyboardModifier.NoModifier):(self.label_set_position, 'top'),
+                            (QtCore.Qt.Key.Key_Down, QtCore.Qt.KeyboardModifier.NoModifier):(self.label_set_position, 'bottom'),
+                            # toggle overlay
+                            (QtCore.Qt.Key.Key_P, QtCore.Qt.KeyboardModifier.NoModifier):(self.toggle_overlay_polarisation, None),
+                            (QtCore.Qt.Key.Key_A, QtCore.Qt.KeyboardModifier.NoModifier):(self.toggle_overlay_solidangle, None),
+                            (QtCore.Qt.Key.Key_H, QtCore.Qt.KeyboardModifier.NoModifier):(self.toggle_overlay_highlight, None),
+                            (QtCore.Qt.Key.Key_U, QtCore.Qt.KeyboardModifier.NoModifier):(self.toggle_unit_hover, None),
+                            (QtCore.Qt.Key.Key_G, QtCore.Qt.KeyboardModifier.NoModifier):(self.toggle_grid, None),
+                            # cycle colormaps
+                            (QtCore.Qt.Key.Key_C, QtCore.Qt.KeyboardModifier.ShiftModifier):(self.change_cmap, -1),
+                            (QtCore.Qt.Key.Key_C, QtCore.Qt.KeyboardModifier.NoModifier):(self.change_cmap, 1),
+                            (QtCore.Qt.Key.Key_R, QtCore.Qt.KeyboardModifier.NoModifier):(self.toggle_colored_reference, None),
+                            }
+
     #############
     #   BUILD   #
     #############
@@ -2423,7 +2585,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         Note:
         - The tooltip is displayed using QTextEdit to allow HTML formatting.
-        - The highlight is removed by the 'tooltip_hkl_rem_highlight' method.
+        - The highlight is removed by the 'tooltip_hkl_highlight' method.
         """
         if not widget.name or not self.cont_ref_hkl:
             event.ignore()
@@ -2434,17 +2596,21 @@ class MainWindow(QtWidgets.QMainWindow):
             pos = QtCore.QPoint(*map(int, event.screenPos()))# - QtCore.QPoint(10,20)
             QtWidgets.QToolTip.showText(pos, text.toHtml())
             # highlight the contour
-            current_width = widget.opts['pen'].width()
+            # store current pen as 'name' in widget.opts
+            pen = widget.opts['pen']
+            width = widget.opts['pen'].width()
+
             timer = QtCore.QTimer()
             timer.setSingleShot(True)
-            timer.timeout.connect(lambda: self.tooltip_hkl_rem_highlight(widget, current_width, timer))
-            widget.setPen(pg.mkPen(self.cont_cmap.map(0.0, mode='qcolor'), width=current_width))
+            timer.timeout.connect(lambda: self.tooltip_hkl_highlight(widget, pen, timer))
+            widget.setPen(pg.mkPen(self.beamstop_color, width=width))
+            #widget.setPen(pg.mkPen(self.cont_cmap.map(0.0, mode='qcolor'), width=width))
             # add timer to self.list to keep pointers alive
-            # remove -> tooltip_hkl_rem_highlight
+            # remove -> tooltip_hkl_highlight
             self.highlight_timers.append(timer)
             timer.start(self.plo.conic_ref_timeout)
     
-    def tooltip_hkl_rem_highlight(self, widget, width, timer):
+    def tooltip_hkl_highlight(self, widget, pen, timer):
         """
         Resets the contour color of the given widget and removes the specified timer from the highlight timers list.
 
@@ -2454,7 +2620,7 @@ class MainWindow(QtWidgets.QMainWindow):
             timer (QTimer): The timer to be removed from the highlight timers list.
         """
         # reset contour color
-        widget.setPen(pg.mkPen(self.conic_ref_color, width=width))
+        widget.setPen(pen)
         # remove timer
         if timer in self.highlight_timers:
             self.highlight_timers.remove(timer)
@@ -2479,7 +2645,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 temp = json.load(of)
             for name, item in list(temp.items()):
                 self.ref_cif[name] = Ref(name=name, cif=item['cif'])
-                self.add_ref_to_menu(name)
+                self.add_cif_to_menu(name)
 
     def save_ref_db_to_file(self):
         """
@@ -2535,9 +2701,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sub_menu_cif.clear()
         # populate the menu
         for name in self.ref_cif.keys():
-            self.add_ref_to_menu(name)
+            self.add_cif_to_menu(name)
 
-    def add_ref_to_menu(self, name):
+        # toggle enable/disable if empty
+        self.sub_menu_cif.setDisabled(self.sub_menu_cif.isEmpty())
+
+    def add_cif_to_menu(self, name):
         """
         Adds a reference to the submenu if it does not already exist.
         This method checks if a submenu with the given name already exists. If it does not,
@@ -2547,11 +2716,14 @@ class MainWindow(QtWidgets.QMainWindow):
         Args:
             name (str): The name of the reference to be added to the submenu.
         """
+        
         # add only if no menu with same name exists
         if name in [item.text() for item in self.sub_menu_cif.actions()]:
             return
         
-        ref_menu = self.sub_menu_cif.addMenu(name)
+        ref_menu = QtWidgets.QMenu(name, self)
+        self.sub_menu_cif.addMenu(ref_menu)
+        self.sub_menu_cif.setEnabled(True)
         cif = self.ref_cif[name].cif
         if os.path.exists(cif):
             ref_action_open = QtGui.QAction('Open', self, checkable=True)
@@ -2563,6 +2735,9 @@ class MainWindow(QtWidgets.QMainWindow):
         ref_action_del = QtGui.QAction('Delete', self)
         self.menu_set_action(ref_action_del, self.remove_ref_from_db, name)
         ref_menu.addAction(ref_action_del)
+
+        # disable/enable menu if empty
+        self.sub_menu_cif.setDisabled(self.sub_menu_cif.isEmpty())
 
     def calc_ref_from_cif(self, fpath, open_pxrd=True):
         """
@@ -2613,7 +2788,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # and we already did the heavy lifting
         self.ref_cif[self.geo.reference] = Ref(name=self.geo.reference, dsp=self.cont_ref_dsp, hkl=self.cont_ref_hkl, cif=fpath)
         # add to menu
-        self.add_ref_to_menu(self.geo.reference)
+        self.add_cif_to_menu(self.geo.reference)
 
         # update window title
         self.set_win_title()
@@ -2805,11 +2980,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         self.win_uc_apply(self.uc_dict_change)
         self.change_reference(self.geo.reference)
-        ref_action = QtGui.QAction(self.geo.reference, self, checkable=True)
-        self.menu_set_action(ref_action, self.change_reference, self.geo.reference)
-        self.sub_menu_cell.addAction(ref_action)
-        self.group_ref.addAction(ref_action)
-        ref_action.setChecked(True)
+        self.add_cell_to_menu(self.geo.reference)
         self.win_uc.close()
     
     def win_uc_set_link_sbox(self):
@@ -2857,6 +3028,15 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         check = self.sender()
         self.uc_dict_change[check.property('index')].setProperty('linked', check.isChecked())
+
+    def add_cell_to_menu(self, name):
+        # Doesn't work on windows, menus won't show up!
+        ref_action = QtGui.QAction(name, self, checkable=True)
+        self.menu_set_action(ref_action, self.change_reference, name)
+        self.sub_menu_cell.addAction(ref_action)
+        self.group_ref.addAction(ref_action)
+        ref_action.setChecked(True)
+        self.sub_menu_cell.setDisabled(self.sub_menu_cell.isEmpty())
 
     ##########
     #  FWHM  #
@@ -4351,23 +4531,7 @@ class MainWindow(QtWidgets.QMainWindow):
         The hotkeys window contains a table with two columns: 'Key' and 'Action'.
         The table lists various hotkeys and their descriptions, including special sections
         highlighted with bold text.
-        The hotkeys include:
-        - F1: Show about window
-        - F2: Show geometry window
-        - F3: Show hotkey window
-        - x: Show PXRD window
-        - t: 2-theta
-        - d: d-spacing
-        - q: Q-space
-        - s: sin(θ)/λ
-        - ↑: Top left
-        - ↓: Bottom left
-        - p: Show polarisation
-        - a: Show solid angle
-        - h: Highlight / Transparency
-        - u: Toggle unit hover display
-        - c: Next colormap
-        - ⇧ + c: Previous colormap
+        
         The window is styled with alternating row colors, no vertical header, no word wrap,
         and no edit triggers. The columns are resized to fit their contents, and the window
         is adjusted to its contents' size.
@@ -4381,28 +4545,6 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self.hotkeys_win = HotkeyDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
         self.hotkeys_win.setWindowTitle('Hotkeys')
-
-        hotkeys = [('#','Windows'),
-                   ('F1','Show about window'),
-                   ('F2','Show geometry window'),
-                   ('F3','Show hotkey window'),
-                   ('x','Show PXRD window'),
-                   ('#','Display units'),
-                   ('t','2-theta'),
-                   ('d','d-spacing'),
-                   ('q','Q-space'),
-                   ('s ','sin(\u03B8)/\u03BB'),
-                   ('#','Unit label position'),
-                   ('\u2191','Top left'),
-                   ('\u2193','Bottom left'),
-                   ('#','Toggle overlay'),
-                   ('p','Show polarisation'),
-                   ('a','Show solid angle'),
-                   ('h','Highlight / Transparency'),
-                   ('u','Toggle unit hover display'),
-                   ('#','Cycle colormaps'),
-                   ('c','Next'),
-                   ('\u21E7 + c','Previous')]
 
         table = QtWidgets.QTableWidget()
         table.setColumnCount(2)
@@ -4419,7 +4561,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         font_bold = QtGui.QFont()
         font_bold.setBold(True)
-        for i,(k,v) in enumerate(hotkeys):
+        for i,(k,v) in enumerate(self.hotkey_desc):
             table.insertRow(i)
             if k == '#':
                 table.setItem(i, 0, QtWidgets.QTableWidgetItem(v))
@@ -4997,6 +5139,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # unit hover
         tth = 1.0
+        azi = None
         if self.plo.show_unit_hover:
             # Distance POBI - pixel on grid
             R_a = np.sqrt(np.sum(_res[0:2]**2, axis=0)) * 1e-3 # m
@@ -5006,6 +5149,9 @@ class MainWindow(QtWidgets.QMainWindow):
             tth = np.arctan2(R_a, D_a)
             # remove very small values (tth < 0.057 deg) to avoid zero divide
             tth[tth < 1e-3] = np.nan
+            if self.plo.show_grid:
+                # calculate the azimuthal angle eta
+                azi = -np.arctan2(_res[0], _res[1])
 
         # polarisation
         pc = 1.0
@@ -5059,7 +5205,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # H2, FWHM
             fwhm = self.calc_FWHM(dis, dia, thk, mat, pxs, tth_a, nrg, div, dEE)
 
-        return grd, tth, pc, sa, fwhm
+        return grd, tth, azi, pc, sa, fwhm
 
     def calc_FWHM(self, dis, dia, thk, mat, pxs, tth, nrg, div, dEE, deg=True):
             """
@@ -5096,6 +5242,56 @@ class MainWindow(QtWidgets.QMainWindow):
                 return fwhm * 180 / np.pi
             else:
                 return fwhm
+
+    def calc_azi_grid(self, omega):
+        """calculate the azimuthal grid points and return a dictionary with the vectors"""
+
+        # First define vectors from the sample to the azimuthal
+        # grid points for a vertical detector geometry. Then rotate
+        # the vectors by the detector tilt angle. The azimuthal grid
+        # points are then defined by the intersection of the rotated
+        # vectors with the detector plane.
+
+        _comp_shift = -(self.geo.voff - self.geo.dist * np.tan(omega) - np.deg2rad(self.geo.tilt) * self.geo.dist)
+        # calculate the azimuthal grid points
+        _azi = np.linspace(-np.pi, np.pi, self.plo.azimuth_num) # radians
+        # calculate unit vectors to tth=5 deg
+        _azi_vec = np.array([-np.sin(np.pi/36)*np.sin(_azi), # x
+                                np.sin(np.pi/36)*np.cos(_azi), # y
+                                np.cos(np.pi/36)*np.ones(_azi.shape[0]), # z
+                                ]) 
+        
+        # scale the vectors such that z = sdd for all azimuthal grid points
+        _azi_vec *=  self.geo.dist/_azi_vec[2,:]
+        
+        # rotate the vectors by the detector tilt+rotation angle
+        _rot = self.rot_100(omega)
+        _azi_vec = np.dot(_rot.T, _azi_vec)
+        
+        # rescale the vectors such that z = sdd for all azimuthal grid points
+        # to make the points intersect the detector plane
+        _azi_vec *=  self.geo.dist/np.abs(_azi_vec[2,:])
+        # make sure the vectors are pointing in the right direction
+        _azi_vec[2] = np.abs(_azi_vec[2])
+
+        # account for the horizontal offset and the beam center shift
+        _azi_vec[0] += self.geo.hoff
+        _azi_vec[1] -= self.geo.voff
+
+        grid_vectors = {}
+        v0 = np.array([self.geo.hoff, _comp_shift])
+        for i,a in enumerate(_azi):
+            # find the vector in the detector plane from the beam center
+            # to the azimuthal grid point
+            v = np.array([_azi_vec[0,i], _azi_vec[1,i]])-np.array([self.geo.hoff, -(self.geo.voff - self.geo.dist * np.tan(omega))])
+            # extend the vector to the edge of the detector including offsets
+            scale = np.sqrt(self.xdim**2+self.ydim**2)+np.sqrt(self.geo.hoff**2+_comp_shift**2)
+            v = v/np.linalg.norm(v)*scale
+            # add the beam center shift
+            v = np.array([self.geo.hoff, _comp_shift]) + v
+            # store the vector
+            grid_vectors[np.round(a*180/np.pi, 2)] = np.stack([v0, v])
+        return grid_vectors
 
     def dsp2tth(self, dsp):
         """
@@ -5442,7 +5638,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.settings_save_to_file()
         self.redraw_canvas()
         self.menu_init(reset=True)
-        #self.update_menu_entries()
 
     #############
     #   EVENT   #
@@ -5483,58 +5678,23 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def keyPressEvent(self, event):
         """
-        Handles key press events and triggers corresponding actions.
+        Handles key press events and triggers corresponding functions based on the key and modifier combination.
 
-        Parameters:
-        event (QKeyEvent): The key event that triggered this method.
+        Args:
+            event (QKeyEvent): The key event object containing information about the key press.
+
+        The method checks if the key and modifier combination exists in the `hotkey_dict` dictionary.
+        If a match is found, it retrieves the corresponding function and argument.
+        If an argument is provided, it calls the function with the argument; otherwise, it calls the function without arguments.
         """
         k = event.key()
-        # bind 'c' to cycle colormaps
-        if k == QtCore.Qt.Key.Key_C:
-            if event.modifiers() == QtCore.Qt.KeyboardModifier.ShiftModifier:
-                inc = -1
+        m = event.modifiers()
+        if (k,m) in self.hotkey_dict:
+            fn, arg = self.hotkey_dict[(k,m)]
+            if arg is not None:
+                fn(arg)
             else:
-                inc = +1
-            idx = self.colormaps.index(self.geo.colormap) + inc
-            if idx >= len(self.colormaps):
-                idx = 0
-            elif idx < 0:
-                idx = len(self.colormaps) - 1
-            self.change_cmap(self.colormaps[idx])
-        elif k == QtCore.Qt.Key.Key_P:
-            self.toggle_overlay_polarisation()
-        elif k == QtCore.Qt.Key.Key_A:
-            self.toggle_overlay_solidangle()
-        elif k == QtCore.Qt.Key.Key_H:
-            self.toggle_overlay_highlight()
-        elif k == QtCore.Qt.Key.Key_T:
-            self.change_units(0)
-        elif k == QtCore.Qt.Key.Key_D:
-            self.change_units(1)
-        elif k == QtCore.Qt.Key.Key_Q:
-            self.change_units(2)
-        elif k == QtCore.Qt.Key.Key_S:
-            self.change_units(3)
-        elif k == QtCore.Qt.Key.Key_U:
-            self.toggle_unit_hover()
-        elif k == QtCore.Qt.Key.Key_F1:
-            self.show_about_win()
-        elif k == QtCore.Qt.Key.Key_F2:
-            self.show_geometry_win()
-        elif k == QtCore.Qt.Key.Key_F3:
-            self.show_hotkeys_win()
-        elif k == QtCore.Qt.Key.Key_R:
-            self.toggle_fwhm()
-        elif k == QtCore.Qt.Key.Key_Up:
-            self.unit_label.setPos(-self.xdim, self.ydim)
-            self.unit_label.setAnchor((0.0, 0.0))
-        elif k == QtCore.Qt.Key.Key_Down:
-            self.unit_label.setPos(-self.xdim, -self.ydim)
-            self.unit_label.setAnchor((0.0, 1.0))
-        elif k == QtCore.Qt.Key.Key_X:
-            self.win_pxrd_plot()
-        elif k == QtCore.Qt.Key.Key_F:
-            self.win_fwhm_show()
+                fn()
 
     def closeEvent(self, event):
         """
@@ -5589,7 +5749,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # unit label value
         if not isinstance(self._tth, float):
             unit = self.calc_unit(self._tth[x,y])
-            self.unit_label.setText(f'{self.unit_names[self.geo.unit]} {unit:.2f}')
+            if self.plo.show_grid:
+                self.unit_label.setText(f'{self.unit_names[self.geo.unit]} {unit:.2f}\nazi [\u00B0] {self._azi[x,y]*180/np.pi:.0f}')
+            else:
+                self.unit_label.setText(f'{self.unit_names[self.geo.unit]} {unit:.2f}')
         
         _text = []
         # calc_overlays returns either a np.array (if active)
