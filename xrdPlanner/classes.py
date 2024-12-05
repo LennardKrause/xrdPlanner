@@ -163,6 +163,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # disable/reset delta_d/d toggles
         self.action_funct_fwhm_show.setEnabled(False)
+        self.action_funct_fwhm_export.setEnabled(False)
 
         # add the slider frame
         # this calls draw_conics(), 
@@ -1004,7 +1005,11 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
            self.action_funct_fwhm_show.setChecked(False)
         menu_functions.addAction(self.action_funct_fwhm_show)
-
+        #export fwhm toggle
+        self.action_funct_fwhm_export = QtGui.QAction('Export FWHM', self)
+        self.menu_set_action(self.action_funct_fwhm_export, self.export_fwhm_grid)
+        menu_functions.addAction(self.action_funct_fwhm_export)
+        
         # PXRD pattern
         self.action_pxrd_pattern = QtGui.QAction('P&XRD pattern', self)
         self.menu_set_action(self.action_pxrd_pattern, self.win_pxrd_plot)
@@ -3350,9 +3355,22 @@ class MainWindow(QtWidgets.QMainWindow):
         self.plo.scattering_diameter = round(udict[4][0].value() * udict[4][1], 6)
         #self.plo.funct_fwhm_thresh = round(udict[5][0].value() * udict[5][1], 6)
         self.action_funct_fwhm_show.setEnabled(True)
+        self.action_funct_fwhm_export.setEnabled(True)
         self.plo.show_fwhm = False
         self.toggle_fwhm()
         win.close()
+    
+    def export_fwhm_grid(self):
+        # calculate the FWHM grid
+        # res = None -> use the current detector pixel dimensions
+        _fwhm_grid = self.calc_overlays(omega=0, res=None, pol=self.plo.polarisation_fac)[-1]
+        # find target file
+        default_path = os.path.join(os.path.expanduser('~'), f'{self.det.name.replace(' ', '_')}_FWHM')
+        target, filter = QtWidgets.QFileDialog.getSaveFileName(self, 'Export FWHM grid', default_path, "Compressed numpy array (*.npz)")
+        if not target:
+            return
+        # save compressed array to target
+        np.savez_compressed(target, fwhm=np.flipud(_fwhm_grid))
     
     ##########
     #  PXRD  #
@@ -5167,8 +5185,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 The full width at half maximum (FWHM) for the detector.
         """
         # scale overlay to detector dimensions
-        _res_scale = self.ydim/self.xdim
-        _res_v = int(round(_res_scale * res, 0))
+        if res is not None and res > 0:
+            _res_scale = self.ydim/self.xdim
+            _res_v = int(round(_res_scale * res, 0))
+        else:
+            res    = (self.det.hmp * self.det.hmn + self.det.hgp * (self.det.hmn-1) + self.det.cbh)
+            _res_v = (self.det.vmp * self.det.vmn + self.det.vgp * (self.det.vmn-1) + self.det.cbh)
+
         # neutral overlay grid
         grd = np.ones((_res_v, res))
 
