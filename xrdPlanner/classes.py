@@ -4,14 +4,12 @@ import json
 import glob
 import shutil
 import numpy as np
+from scipy.optimize import curve_fit
 import pyqtgraph as pg
 import Dans_Diffraction as dif
 from PyQt6 import QtWidgets, QtCore, QtGui
 from pyFAI import calibrant
 import xrdPlanner.resources
-
-# make cifs added to menu in init similar to calibrants
-# store only the path and calculate the rest on load
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, *args, **kwargs):
@@ -351,6 +349,8 @@ class MainWindow(QtWidgets.QMainWindow):
                         'bs_label':None,
                         'conic':[],
                         'reference':[],
+                        'ref_hl_label':None,
+                        'ref_hl_curve':None,
                         'labels':[],
                         'polar_grid':[]}
 
@@ -368,12 +368,27 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # add empty plot per reference contour line
         for i in range(self.plo.conic_ref_num):
-            ref = pg.PlotCurveItem(useCache=True)
+            ref = HoverableCurveItem(self, useCache=True)
             self.ax.addItem(ref)
             self.patches['reference'].append(ref)
-            self.patches['reference'][i].setClickable(True, width=self.plo.conic_ref_linewidth*2)
-            self.patches['reference'][i].sigClicked.connect(self.tooltip_hkl_show)
             self.patches['reference'][i].name = None
+            self.patches['reference'][i].index = None
+
+        # add ref highlight curve
+        ref_hkl_curve = pg.PlotCurveItem(useCache=True,
+                                         pen=pg.mkPen(color=self.conic_highlight,
+                                                      width=self.plo.conic_ref_linewidth*2))
+        ref_hkl_curve.setVisible(False)
+        self.patches['ref_hl_curve'] = ref_hkl_curve
+        self.ax.addItem(ref_hkl_curve)
+
+        # add hkl annotation label
+        ref_hkl_label = pg.TextItem(anchor=(0.5,1.0), color=self.unit_label_color)
+        ref_hkl_label.setFont(font)
+        ref_hkl_label.setVisible(False)
+        ref_hkl_label.setZValue(1) # place label on top of all other items
+        self.patches['ref_hl_label'] = ref_hkl_label
+        self.ax.addItem(ref_hkl_label)
 
         # add empty plot per contour line
         for i in range(self.plo.conic_tth_num):
@@ -394,17 +409,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ax.addItem(bs_label)
 
         # add poni scatter plot
-        self.patches['poni'] = pg.ScatterPlotItem(symbol = self.plo.poni_marker,
-                                                  size = self.plo.poni_size,
-                                                  brush = pg.mkBrush(self.cont_cmap.map(0, mode='qcolor')),
-                                                  pen = pg.mkPen(None))
+        self.patches['poni'] = pg.ScatterPlotItem(symbol=self.plo.poni_marker,
+                                                  size=self.plo.poni_size,
+                                                  brush=pg.mkBrush(self.cont_cmap.map(0, mode='qcolor')),
+                                                  pen=pg.mkPen(None))
         self.ax.addItem(self.patches['poni'])
 
         # add beam center scatter plot
-        self.patches['beamcenter'] = pg.ScatterPlotItem(symbol = self.plo.beamcenter_marker,
-                                                        size = self.plo.beamcenter_size,
-                                                        brush = pg.mkBrush(self.cont_cmap.map(0, mode='qcolor')),
-                                                        pen = pg.mkPen(None))
+        self.patches['beamcenter'] = pg.ScatterPlotItem(symbol=self.plo.beamcenter_marker,
+                                                        size=self.plo.beamcenter_size,
+                                                        brush=pg.mkBrush(self.cont_cmap.map(0, mode='qcolor')),
+                                                        pen=pg.mkPen(None))
         self.ax.addItem(self.patches['beamcenter'])
 
         self.patches['overlay'] = pg.ImageItem()
@@ -652,6 +667,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # reference contour
             self.conic_label_fill = QtGui.QColor(self.thm.dark_conic_label_fill)
             self.conic_ref_color = QtGui.QColor(self.thm.dark_conic_ref_color)
+            self.conic_highlight = QtGui.QColor(self.thm.dark_conic_highlight)
             self.det_module_color = QtGui.QColor(self.thm.dark_det_module_color)
             self.det_module_fill = QtGui.QColor(self.thm.dark_det_module_fill)
             # general
@@ -689,6 +705,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # reference contour
             self.conic_label_fill = QtGui.QColor(self.thm.light_conic_label_fill)
             self.conic_ref_color = QtGui.QColor(self.thm.light_conic_ref_color)
+            self.conic_highlight = QtGui.QColor(self.thm.light_conic_highlight)
             self.det_module_color = QtGui.QColor(self.thm.light_det_module_color)
             self.det_module_fill = QtGui.QColor(self.thm.light_det_module_fill)
             # general
@@ -1413,7 +1430,7 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # calculate the maximum resolution for the given geometry
         if self.plo.conic_tth_auto:
-            theta_max = np.rad2deg(self.calc_max_resolution(m=0.90))
+            theta_max = np.rad2deg(self.calc_tth_max(scale=0.90))
             # make new array of 2theta values
             self.cont_geom_num = np.linspace(theta_max/self.plo.conic_tth_num, theta_max, self.plo.conic_tth_num)
         
@@ -1507,6 +1524,9 @@ class MainWindow(QtWidgets.QMainWindow):
         - self.conic_ref_color: Color for the reference contour lines.
         - self.patches['reference']: Dictionary to store the reference contour line patches.
         """
+        # remove highlighted curve and hkl label
+        self.patches['ref_hl_curve'].setVisible(False)
+        self.patches['ref_hl_label'].setVisible(False)
         # plot reference contour lines
         # standard contour lines are to be drawn
         for _n in range(self.plo.conic_ref_num):
@@ -1554,10 +1574,13 @@ class MainWindow(QtWidgets.QMainWindow):
                         # 
                         # self.setStyleSheet('''QToolTip {... ) didn't work
                         self.patches['reference'][_n].name = f'({h: 2.0f} {k: 2.0f} {l: 2.0f})<br>{round(itot, 0):,.0f}'
+                        self.patches['reference'][_n].index = _n
                     else:
                         self.patches['reference'][_n].name = f'({h: 2.0f} {k: 2.0f} {l: 2.0f})'
+                        self.patches['reference'][_n].index = _n
                 else:
                     self.patches['reference'][_n].name = None
+                    self.patches['reference'][_n].index = None
                 
                 # current fraction for colormap
                 if self.plo.colored_reference:
@@ -1831,13 +1854,13 @@ class MainWindow(QtWidgets.QMainWindow):
         plo.show_polarisation = True        # [bool]   Show polarisation overlay
         plo.show_solidangle = False         # [bool]   Show solid angle overlay
         plo.show_unit_hover = True          # [bool]   Show unit value on hover
-        plo.show_grid = False            # [bool]   Show azimuthal grid
+        plo.show_grid = False               # [bool]   Show azimuthal grid
         plo.azimuth_num = 13                # [int]    Number of azimuthal grid lines
         plo.overlay_resolution = 300        # [int]    Overlay resolution
         plo.overlay_toggle_warn = True      # [bool]   Overlay warn color threshold
         # - pxrd plot -
         plo.pxrd_marker_symbol = 'arrow_up' # [marker] Symbol to mark peaks
-        plo.pxrd_marker_offset = 0.02       # [float]  offset of marker from x-axis
+        plo.pxrd_marker_offset = 0.05       # [float]  offset of marker from x-axis
         # - extra functions -
         plo.show_fwhm = False               # [bool]   Show delta_d/d function
         plo.sensor_thickness = 1000e-6      # [float]  Detector sensor thickness [m]
@@ -1905,6 +1928,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # light mode
         thm.light_conic_label_fill = '#FFFFFF'        # [color]  Contour label fill color
         thm.light_conic_ref_color = '#DCDCDC'         # [color]  Reference contour color
+        thm.light_conic_highlight = '#FF0000'         # [color]  Reference contour highlight color
         thm.light_beamstop_color = '#80FF0000'        # [color]  Beamstop color
         thm.light_beamstop_edge_color = '#FF0000'     # [color]  Beamstop edge color
         thm.light_det_module_color = '#404040'        # [color]  Detector module border color
@@ -1921,6 +1945,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # dark mode
         thm.dark_conic_label_fill = '#000000'         # [color]  Contour label fill color
         thm.dark_conic_ref_color = '#303030'          # [color]  Reference contour color
+        thm.dark_conic_highlight = '#FF0000'          # [color]  Reference contour highlight color
         thm.dark_beamstop_color = '#AAFF0000'         # [color]  Beamstop color
         thm.dark_beamstop_edge_color = '#FF0000'      # [color]  Beamstop edge color
         thm.dark_det_module_color = '#EEEEEE'         # [color]  Detector module border color
@@ -2600,66 +2625,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 rect_item.setOpacity(self.plo.det_module_alpha)
                 self.ax.addItem(rect_item)
 
-    ##################
-    #  HKL TOOLTIPS  #
-    ##################
-    def tooltip_hkl_show(self, widget, event):
-        """
-        Displays a tooltip with the hkl value at the position of the given widget and highlights the widget.
-
-        Parameters:
-        widget (QWidget): The widget for which the tooltip is to be shown. It should have a 'name' attribute and 'opts' dictionary.
-        event (QEvent): The event that triggered the tooltip display. It should have a 'screenPos' method.
-
-        Behavior:
-        - If the widget does not have a name or the contour reference hkl is not set, the event is ignored.
-        - Otherwise, a tooltip is shown at the event's screen position with the widget's name.
-        - The widget is highlighted by changing its pen width.
-        - A timer is started to remove the highlight after a specified timeout.
-        - The timer is added to a list to keep the reference alive until it times out.
-
-        Note:
-        - The tooltip is displayed using QTextEdit to allow HTML formatting.
-        - The highlight is removed by the 'tooltip_hkl_highlight' method.
-        """
-        if not widget.name or not self.cont_ref_hkl:
-            event.ignore()
-        else:
-            # show hkl tooltip at position
-            text = QtWidgets.QTextEdit(str(widget.name))
-            text.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-            pos = QtCore.QPoint(*map(int, event.screenPos()))# - QtCore.QPoint(10,20)
-            QtWidgets.QToolTip.showText(pos, text.toHtml())
-            # highlight the contour
-            # store current pen as 'name' in widget.opts
-            pen = widget.opts['pen']
-            width = widget.opts['pen'].width()
-
-            timer = QtCore.QTimer()
-            timer.setSingleShot(True)
-            timer.timeout.connect(lambda: self.tooltip_hkl_highlight(widget, pen, timer))
-            widget.setPen(pg.mkPen(self.beamstop_color, width=width))
-            #widget.setPen(pg.mkPen(self.cont_cmap.map(0.0, mode='qcolor'), width=width))
-            # add timer to self.list to keep pointers alive
-            # remove -> tooltip_hkl_highlight
-            self.highlight_timers.append(timer)
-            timer.start(self.plo.conic_ref_timeout)
-    
-    def tooltip_hkl_highlight(self, widget, pen, timer):
-        """
-        Resets the contour color of the given widget and removes the specified timer from the highlight timers list.
-
-        Args:
-            widget (QGraphicsItem): The widget whose contour color needs to be reset.
-            width (int): The width of the pen to be used for resetting the contour color.
-            timer (QTimer): The timer to be removed from the highlight timers list.
-        """
-        # reset contour color
-        widget.setPen(pen)
-        # remove timer
-        if timer in self.highlight_timers:
-            self.highlight_timers.remove(timer)
-
     #######
     # CIF #
     #######
@@ -3199,9 +3164,35 @@ class MainWindow(QtWidgets.QMainWindow):
         self.fwhm_plot.setLabel(axis='left', text='FWHM [\u00B0]', color=self.palette().text().color())
         self.fwhm_plot.scale(sx=2, sy=3)
         self.fwhm_plot.addItem(self.fwhm_curve)
+        # Thomas-Cox-Hastings curve
+        self.tch_curve = pg.PlotCurveItem()
+        self.tch_curve.setPen(pg.mkPen(color=self.palette().highlight().color(), width=6))
+        self.fwhm_plot.addItem(self.tch_curve)
         preview_box_layout.addWidget(self.fwhm_plot)
         layout.addWidget(preview_box)
-        
+
+        # Thomas-Cox-Hastings
+        tch_box = QtWidgets.QGroupBox('Estimate Thomas-Cox-Hastings parameters')
+        tch_box_layout = QtWidgets.QHBoxLayout()
+        tch_box.setLayout(tch_box_layout)
+        tch_btn_est = QtWidgets.QPushButton('Estimate')
+        tch_btn_est.clicked.connect(self.estimate_tch_parameters)
+        tch_box_layout.addWidget(tch_btn_est)
+        tch_box_layout.addSpacing(20)
+        tch_label_U = QtWidgets.QLabel('U:', alignment=QtCore.Qt.AlignmentFlag.AlignRight|QtCore.Qt.AlignmentFlag.AlignVCenter)
+        tch_box_layout.addWidget(tch_label_U)
+        self.tch_value_U = QtWidgets.QLabel()
+        tch_box_layout.addWidget(self.tch_value_U)
+        tch_label_V = QtWidgets.QLabel('V:', alignment=QtCore.Qt.AlignmentFlag.AlignRight|QtCore.Qt.AlignmentFlag.AlignVCenter)
+        tch_box_layout.addWidget(tch_label_V)
+        self.tch_value_V = QtWidgets.QLabel()
+        tch_box_layout.addWidget(self.tch_value_V)
+        tch_label_W = QtWidgets.QLabel('W:', alignment=QtCore.Qt.AlignmentFlag.AlignRight|QtCore.Qt.AlignmentFlag.AlignVCenter)
+        tch_box_layout.addWidget(tch_label_W)
+        self.tch_value_W = QtWidgets.QLabel()
+        tch_box_layout.addWidget(self.tch_value_W)
+        layout.addWidget(tch_box)
+
         # add description
         description = QtWidgets.QLabel('This feature is currently in <b>test phase</b>, feedback is very welcome!<br>\
                                         The estimated FWHM (H, in degrees) is shown in the bottom right corner.')
@@ -3296,7 +3287,7 @@ class MainWindow(QtWidgets.QMainWindow):
         dist = self.geo.dist * 1e-3
         tth = np.linspace(0, np.pi/2, 180)
         # or use:
-        # _current_tth_max = self.calc_max_resolution()
+        # _current_tth_max = self.calc_tth_max()
         # to get max tth for the current setup
 
         # H2, FWHM
@@ -3372,6 +3363,28 @@ class MainWindow(QtWidgets.QMainWindow):
         # save compressed array to target
         np.savez_compressed(target, fwhm=np.flipud(_fwhm_grid))
     
+    def estimate_tch_parameters(self):
+        tth_max_rad = self.calc_tth_max()
+        tth_min = 0.0
+        tth_max = np.rad2deg(tth_max_rad)
+        tth, fwhm = self.fwhm_curve.getData()
+        tch_cond = (tth > tth_min) & (tth < tth_max)
+        tch_tth = tth[tch_cond]
+        instr_fwhm = fwhm[tch_cond]
+
+        def TCH_pv_fit(tth,*UVW):
+            """parser for the TCH pseudo-Voigt function"""
+            fwhm,_ = self.calc_TCH_pV(tth,*UVW,0,0)
+            return fwhm
+        
+        UVW = 0, 0, instr_fwhm[0]**2
+        [u,v,w], _ = curve_fit(TCH_pv_fit, tch_tth, instr_fwhm, p0=UVW, maxfev=10000)
+        tch_fwhm,_ = self.calc_TCH_pV(tch_tth, u, v, w, 0, 0)
+        self.tch_curve.setData(tch_tth, tch_fwhm)
+        self.tch_value_U.setText(f'{u:.6f}')
+        self.tch_value_V.setText(f'{v:.6f}')
+        self.tch_value_W.setText(f'{w:.6f}')
+
     ##########
     #  PXRD  #
     ##########
@@ -3395,6 +3408,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.pxrd_win.close()
                 return
             self.win_pxrd_update()
+            self.pxrd_win.adjustSize()
             self.pxrd_win.show()
             return
         
@@ -3411,10 +3425,19 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self.pxrd_curve = pg.PlotCurveItem()
         self.pxrd_curve.setPen(pg.mkPen(color=self.palette().text().color()))
-        self.pxrd_scatt = pg.ScatterPlotItem(size=15)
+        self.pxrd_scatt = ClickableScatterPlotItem(size=20, tip=None)
         self.pxrd_scatt.setPen(pg.mkPen(color=self.palette().highlight().color()))
+        self.pxrd_scatt.setBrush(pg.mkBrush(color=self.palette().highlight().color()))
         self.pxrd_scatt.setSymbol(self.plo.pxrd_marker_symbol)
-        self.pxrd_scatt.sigClicked.connect(self.win_pxrd_show_hkl)
+        self.pxrd_scatt.sigClicked.connect(self.win_pxrd_hkl_clicked)
+        self.pxrd_scatt_highlighted = []
+
+        font = QtGui.QFont()
+        font.setPixelSize(self.plo.conic_hkl_label_size)
+        font.setBold(True)
+
+        self.pxrd_label = pg.TextItem(anchor=(0.5,0.9))
+        self.pxrd_label.setFont(font)
         self.pxrd_regio = pg.LinearRegionItem(pen=pg.mkPen(None))
         self.pxrd_regio.setMovable(False)
 
@@ -3423,9 +3446,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self.pxrd_plot.setMenuEnabled(False)
         self.pxrd_plot.setLabel(axis='left', text='Intensity [arb. units]', color=self.palette().text().color())
         self.pxrd_plot.showGrid(x=True, y=True, alpha=0.5)
+        self.pxrd_plot.getPlotItem().getViewBox().setDefaultPadding(0.0)
         self.pxrd_plot.addItem(self.pxrd_curve)
-        self.pxrd_plot.addItem(self.pxrd_scatt)
-        self.pxrd_plot.addItem(self.pxrd_regio)
+        # if points are not visible, e.g. outside of currentrange, the plot size will
+        # not be adjusted properly and stays larger than expected.
+        # ignoreBound allows the plot to autorange disregarding the 'invisble' points
+        # however we need to increase the min y padding to make the scatterplot visible!
+        self.pxrd_plot.addItem(self.pxrd_scatt, ignoreBounds=True)
+        self.pxrd_plot.addItem(self.pxrd_label)
+        # same as above, allow the plot to disregard the beamstop if out of bounds
+        self.pxrd_plot.addItem(self.pxrd_regio, ignoreBounds=True)
+        # this invisible line will do the padding for us -> thanks Frederik!
+        self.pxrd_line = pg.InfiniteLine(pos=0, angle=0, pen=pg.mkPen(None))
+        self.pxrd_plot.addItem(self.pxrd_line)
         
         powder_box_layout.addWidget(self.pxrd_plot)
         layout.addWidget(powder_box)
@@ -3467,6 +3500,9 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         if self.pxrd_win is None:
             return
+        
+        # remove highlighting of hkl on update
+        self.win_pxrd_lowlight()
         
         # change color if theme changed
         self.pxrd_curve.setPen(self.palette().text().color())
@@ -3524,7 +3560,7 @@ class MainWindow(QtWidgets.QMainWindow):
             max_res_r = np.nanmax(self._tth)
             min_res_r = max(np.nanmin(self._tth), fwhm.mean()/10)
         else:
-            max_res_r = self.calc_max_resolution()
+            max_res_r = self.calc_tth_max()
             min_res_r = fwhm.mean()/10
 
         # add beamstop shadow
@@ -3547,37 +3583,62 @@ class MainWindow(QtWidgets.QMainWindow):
         self.pxrd_curve.setData(x=xval, y=gauss)
         
         peak_xval = self.calc_unit(peak_ttr)
+        offset = (gauss.max() + gauss.min()) * self.plo.pxrd_marker_offset
+        self.pxrd_scatt.setData(x=peak_xval,
+                                y=np.zeros(len(peak_xval))-offset,
+                                data=hkl)
         # remove peaks that are ouside of the detector screen
-        peak_idx = np.nonzero(peak_xval <= xval.max())[0]
-        offset = (gauss.max() - gauss.min())*self.plo.pxrd_marker_offset
-        self.pxrd_scatt.setData(x=peak_xval[peak_idx], y=np.zeros(len(peak_xval[peak_idx]))-offset, data=[hkl[i] for i in peak_idx])
+        cond = (peak_xval <= xval.max()) & (peak_xval >= xval.min())
+        self.pxrd_scatt.setPointsVisible(cond)
+        self.pxrd_line.setPos(-offset*2)
 
+        # add axis label
         self.pxrd_plot.setLabel(axis='bottom', text=self.unit_names[self.geo.unit], color=self.palette().text().color())
+        
         # flip axis for d-spacing
         if self.geo.unit == 1:
             self.pxrd_plot.getPlotItem().getViewBox().invertX(True)
         else:
             self.pxrd_plot.getPlotItem().getViewBox().invertX(False)
 
-    def win_pxrd_show_hkl(self, widget, points, event):
-        """
-        Displays the HKL (Miller indices) information in a tooltip when a point is clicked.
-
-        Parameters:
-        widget (QtWidgets.QWidget): The widget that triggered the event.
-        points (list): A list of points where the event occurred.
-        event (QtGui.QMouseEvent): The mouse event that triggered the display.
-
-        Returns:
-        None
-        """
+    def win_pxrd_hkl_clicked(self, widget, points, event):
         if not widget.name:
             return
         elif len(points) > 0:
-            text = QtWidgets.QTextEdit(str(points[0].data()))
-            text.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-            pos = QtCore.QPoint(*map(int, event.screenPos()))
-            QtWidgets.QToolTip.showText(pos, text.toHtml())
+            point = points[0]
+            if event.buttons() == QtCore.Qt.MouseButton.RightButton:
+                self.patches['reference'][point.index()].lowlight()
+                return
+            self.win_pxrd_lowlight()
+            point.setPen(pg.mkPen(color=self.conic_highlight))
+            point.setBrush(pg.mkBrush(color=self.conic_highlight))
+            self.pxrd_scatt_highlighted.append(point)
+            self.win_pxrd_set_hkl_label(point)
+            # highlight in main window
+            self.patches['reference'][point.index()].highlight()
+
+    def win_pxrd_set_hkl_label(self, point):
+        self.pxrd_label.setText(str(point.data()))
+        self.pxrd_label.setPos(point.pos())
+        self.pxrd_label.setVisible(True)
+    
+    def win_pxrd_highlight(self, index):
+        # highlight from main window
+        self.win_pxrd_lowlight()
+        point = self.pxrd_scatt.points()[index]
+        point.setPen(pg.mkPen(self.conic_highlight))
+        point.setBrush(pg.mkBrush(self.conic_highlight))
+        self.pxrd_scatt_highlighted.append(point)
+        self.win_pxrd_set_hkl_label(point)
+
+    def win_pxrd_lowlight(self):
+        _pen = pg.mkPen(color=self.palette().highlight().color())
+        _brush = pg.mkBrush(color=self.palette().highlight().color())
+        for p in self.pxrd_scatt_highlighted:
+            #p.resetPen()
+            p.setPen(_pen)
+            p.setBrush(_brush)
+        self.pxrd_label.setVisible(False)
 
     #############
     #  EXPORT   #
@@ -4826,7 +4887,7 @@ class MainWindow(QtWidgets.QMainWindow):
                                   1.05395590e-03, 1.07113920e-03, 1.08845123e-03, 1.10583974e-03,
                                   1.12333211e-03, 1.14094222e-03]}
 
-    def calc_max_resolution(self, m=1.0):
+    def calc_tth_max(self, scale=1.0):
         """
         Calculate the maximum 2theta angle for the given geometry
          - used to generate 2theta values to draw conics
@@ -4838,8 +4899,8 @@ class MainWindow(QtWidgets.QMainWindow):
         float, maximum 2-theta in radians
         """
         # make screen grid
-        size_h = np.array([-self.xdim, self.xdim])*m
-        size_v = np.array([-self.ydim, self.ydim])*m
+        size_h = np.array([-self.xdim, self.xdim])*scale
+        size_v = np.array([-self.ydim, self.ydim])*scale
         _gx, _gy = np.meshgrid(size_h, size_v, sparse=True)
         # build vector -> 3 x n x m
         _vec = np.full((3, 2, 2), self.geo.dist)
@@ -4857,7 +4918,7 @@ class MainWindow(QtWidgets.QMainWindow):
         D_a = _res[2]
         # 2theta - Angle between pixel, sample, and POBI
         tth = np.arctan2(R_a, D_a)
-        # 2theta max 
+        # 2theta max
         return tth.max()
         
     def rot_100(self, a, cc=1):
@@ -5395,6 +5456,26 @@ class MainWindow(QtWidgets.QMainWindow):
         float or array-like: The value(s) of the Gaussian function at the given input value(s).
         """
         return 1/(np.sqrt(2*np.pi)*s)*np.exp(-np.square((x - m)/s)/2)
+
+    def calc_TCH_pV(self, tth, U, V, W, X, Y):
+        """
+        Thompson-Cox-Hastings pseudo-Voigt
+        Gaussian FWHM: U*tan(theta)^2 + V*tan(theta) + W
+        Lorentzian FWHM: X*tan(theta) + Y/cos(theta)
+        return pseudo Voigt FWHM
+        """
+        theta = tth*np.pi/360
+        tt = np.tan(theta)
+        ct = np.cos(theta)
+        G = np.sqrt(U*tt**2 + V*tt + W)
+        L = X*tt + Y/ct
+
+        H = (G**5 + 2.69269*G**4*L + 2.42843*G**3*L**2 \
+                + 4.47163*G**2*L**3 + 0.07842*G*L**4 + L**5)**(1/5)
+        # notice that the eta is defined differently in the FullProf manual
+        # such that eta = 1-eta_FullProf
+        eta = 1-(1.36603*L/H - 0.47719*(L/H)**2 + 0.11116*(L/H)**3)
+        return H, eta
 
     #############
     # SETTINGS  #
@@ -6408,3 +6489,70 @@ class Ref(object):
             bool: True if all required attributes are present, False otherwise.
         """
         return np.all([self.has_cif, self.has_dsp, self.has_hkl])
+
+class HoverableCurveItem(pg.PlotCurveItem):
+    def __init__(self, parent=None, hoverable=True, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.parent = parent
+        self.basePen = self.opts['pen']
+        self.hoverable = hoverable
+        self.setAcceptHoverEvents(True)
+
+    def setData(self, *args, **kargs):
+        # added the pen re-assignment to the function.
+        if 'pen' in kargs:
+            self.basePen = kargs['pen']
+        return super().setData(*args, **kargs)
+
+    def highlight(self, pos=None):
+        self.parent.patches['ref_hl_curve'].setData(self.xData, self.yData)
+        self.parent.patches['ref_hl_curve'].setVisible(True)
+        self.parent.patches['ref_hl_label'].setText(str(self.name))
+        self.parent.patches['ref_hl_label'].setVisible(True)
+        if pos is None:
+            self.parent.patches['ref_hl_label'].setPos(self.xData[0], self.yData[0])
+        else:
+            self.parent.patches['ref_hl_label'].setPos(pos)
+
+        if self.parent.pxrd_win is not None and self.parent.pxrd_win.isVisible():
+            self.parent.win_pxrd_highlight(self.index)
+
+    def lowlight(self):
+        self.setPen(self.basePen)
+        self.parent.patches['ref_hl_label'].setVisible(False)
+        self.parent.patches['ref_hl_curve'].setVisible(False)
+        self.parent.win_pxrd_lowlight()
+
+    def hoverEvent(self, ev):
+        if self.hoverable and not ev.isExit() and ev.buttons() == QtCore.Qt.MouseButton.LeftButton:
+            if self.mouseShape().contains(ev.pos()):
+                self.highlight(ev.pos())
+    
+    def mouseClickEvent(self, ev):
+        if ev.buttons() == QtCore.Qt.MouseButton.LeftButton:
+            if self.mouseShape().contains(ev.pos()):
+                self.highlight(ev.pos())
+        else:
+            self.lowlight()
+        return super().mouseClickEvent(ev)
+
+class ClickableScatterPlotItem(pg.ScatterPlotItem):
+    """
+    Reimplementation of the ScatterPlotItem class with added click event handling.
+    The original class is limited to left mouse button click events.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    
+    def mouseClickEvent(self, ev):
+        if not ev.button() == QtCore.Qt.MouseButton.NoButton:
+            pts = self.pointsAt(ev.pos())
+            if len(pts) > 0:
+                self.ptsClicked = pts
+                ev.accept()
+                self.sigClicked.emit(self, self.ptsClicked, ev)
+            else:
+                #print "no spots"
+                ev.ignore()
+        else:
+            ev.ignore()
