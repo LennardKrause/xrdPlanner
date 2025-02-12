@@ -99,9 +99,9 @@ where $SDD$ is the sample to detector distance.
 
 ## Latest updates:
   - 2025-02-12 Bugfix: Fixed f-string SyntaxError crash on startup (python version < 3.12).
-  - 2025-01-10 Update: Added the option to estimate Thomas-Cox-Hastings parameters (gaussian) from the estimated instrumental broadening.
-  - 2025-01-10 Update: Reworked the hkl display and cone highlighting to make identification and location of hkl more straightforward.
-  - 2025-01-10 Update: Highlighting is now linked between the main window and the pxrd viewer.
+  - 2025-02-10 Update: Added the option to estimate Thomas-Cox-Hastings parameters (gaussian) from the estimated instrumental broadening.
+  - 2025-02-10 Update: Reworked the hkl display and cone highlighting to make identification and location of hkl more straightforward.
+  - 2025-02-10 Update: Highlighting is now linked between the main window and the pxrd viewer.
   - 2024-12-05 Update: Added the option to export the FWHM grid as a compressed numpy .npz file (View > Functions > Export FWHM).
   - 2024-11-08 Update: Added a visual indicators for azimuthal bins (View > Overlay > Grid or hotkey G).
   - 2024-11-08 Bugfix: Fixed invisible menus on windows os.
