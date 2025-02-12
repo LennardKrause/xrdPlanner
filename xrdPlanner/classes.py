@@ -1573,10 +1573,10 @@ class MainWindow(QtWidgets.QMainWindow):
                         # hence the <br> instead of \n
                         # 
                         # self.setStyleSheet('''QToolTip {... ) didn't work
-                        self.patches['reference'][_n].name = f'({h: 2.0f} {k: 2.0f} {l: 2.0f})<br>{round(itot, 0):,.0f}'
+                        self.patches['reference'][_n].name = f'{h: 2.0f} {k: 2.0f} {l: 2.0f}<br>{round(itot, 0):,.0f}'
                         self.patches['reference'][_n].index = _n
                     else:
-                        self.patches['reference'][_n].name = f'({h: 2.0f} {k: 2.0f} {l: 2.0f})'
+                        self.patches['reference'][_n].name = f'{h: 2.0f} {k: 2.0f} {l: 2.0f}'
                         self.patches['reference'][_n].index = _n
                 else:
                     self.patches['reference'][_n].name = None
@@ -3356,7 +3356,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # res = None -> use the current detector pixel dimensions
         _fwhm_grid = self.calc_overlays(omega=0, res=None, pol=self.plo.polarisation_fac)[-1]
         # find target file
-        default_path = os.path.join(os.path.expanduser('~'), f'{self.det.name.replace(' ', '_')}_FWHM')
+        default_path = os.path.join(os.path.expanduser('~'), f"{self.det.name.replace(' ', '_')}_FWHM")
         target, filter = QtWidgets.QFileDialog.getSaveFileName(self, 'Export FWHM grid', default_path, "Compressed numpy array (*.npz)")
         if not target:
             return
@@ -3618,7 +3618,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.patches['reference'][point.index()].highlight()
 
     def win_pxrd_set_hkl_label(self, point):
-        self.pxrd_label.setText(str(point.data()))
+        self.pxrd_label.setText(' '.join(map(str, point.data())))
         self.pxrd_label.setPos(point.pos())
         self.pxrd_label.setVisible(True)
     
@@ -6496,7 +6496,7 @@ class HoverableCurveItem(pg.PlotCurveItem):
         self.parent = parent
         self.basePen = self.opts['pen']
         self.hoverable = hoverable
-        self.setAcceptHoverEvents(True)
+        self.setAcceptHoverEvents(hoverable)
 
     def setData(self, *args, **kargs):
         # added the pen re-assignment to the function.
