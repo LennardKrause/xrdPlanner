@@ -98,6 +98,7 @@ where $SDD$ is the sample to detector distance.
 > - A new parameter was added to allow for detector screen padding (plo.plot_padding), default is 0.
 
 ## Latest updates:
+  - 2025-02-12 Bugfix: Fixed f-string SyntaxError crash on startup (python version < 3.12).
   - 2025-01-10 Update: Added the option to estimate Thomas-Cox-Hastings parameters (gaussian) from the estimated instrumental broadening.
   - 2025-01-10 Update: Reworked the hkl display and cone highlighting to make identification and location of hkl more straightforward.
   - 2025-01-10 Update: Highlighting is now linked between the main window and the pxrd viewer.
