@@ -113,6 +113,10 @@ where $SDD$ is the sample to detector distance.
   - 2024-09-23 Update: Added a [detector db editor](#detector-db-editor) to define and add whatever detector you collect your data with, now more easily.
   - 2024-09-23 Update: Changed the detector module definition from mm to px (pre 2.0.0 custom detectors won't work!).
   - 2024-09-23 Update: Added a preview plot to the FWHM setup window.
+
+<details>
+<summary>Older updates</summary>
+  
   - 2024-06-20 Update: Added highlighting of a clicked contour.
   - 2024-06-20 Bugfix: Incorrect removal of beamstop contour.
   - 2024-05-30 Update: Added support for custom unit cells to calculate and plot conics.
@@ -120,10 +124,6 @@ where $SDD$ is the sample to detector distance.
   - 2024-05-02 Update: Added the option to calculate the [resolution function](https://doi.org/10.1107/S2053273321007506) (as FWHM, H) for powder diffraction with area detectors (Thanks Stefano).
   - 2024-05-02 Update: Automatic label placement (conic_label_auto, default=True).
   - 2024-05-02 Update: Dynamic cones try to keep the number of visible conics constant (conic_tth_auto, default=True).
-
-<details>
-<summary>Older updates</summary>
-  
   - 2024-05-02 Update: Current colors are displayed in the export window and a colorpicker is used.
   - 2024-02-17 Bugfix: Fixed crash on importing settings files (Thanks Andy).
   - 2024-02-16 Update: Added a unit value at mouse position (hover) to the overlay.
