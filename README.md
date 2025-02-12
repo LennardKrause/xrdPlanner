@@ -181,6 +181,7 @@ where $SDD$ is the sample to detector distance.
 >  - As of now, there is no consistency check performed on the imported .json file.
 >  - The projections fail at a combined angle (rotation + tilt) of 90 degrees and beyond.
 >  - If the program crashes (libc++abi) when opening the export window (on a Mac) please update PyQt6 to the latest version.
+>  - A crash on startup due to an f-string SyntaxError can be circumvented by upgrading python to version 3.12 or later.
 
 ## Examples
 #### A PILATUS3 300K detector and a Rubrene sample.
