@@ -1,4 +1,5 @@
 # xrdPlanner
+## Version 2.4.0 (released 04.03.2025)
 #### A tool to project X-ray diffraction cones on a detector screen at different geometries (tilt, rotation, offset) and X-ray energies
  - Article published in [_J. Synchrotron Rad._ (2024). **31**](https://doi.org/10.1107/S1600577523011086).
  - Main application is to visualize the maximum achievable resolution at a given geometry.
@@ -98,6 +99,11 @@ where $SDD$ is the sample to detector distance.
 > - A new parameter was added to allow for detector screen padding (plo.plot_padding), default is 0.
 
 ## Latest updates:
+  - 2025-03-04 Update: Added pxrd ghost lines to play with and compare the scattering using different parameters.
+  - 2025-03-04 Update: Made some improvements to the highlighting.
+  - 2025-03-04 Update: Trained most sub-windows to remember their place.
+  - 2025-03-04 Update: Started to declutter the code.
+  - 2025-03-04 Bugfix: Resynchronized the menu button for the angular grid (Thanks Frederik).
   - 2025-02-12 Bugfix: Fixed f-string SyntaxError crash on startup (python version < 3.12).
   - 2025-02-10 Update: Added the option to estimate Thomas-Cox-Hastings parameters (gaussian) from the estimated instrumental broadening.
   - 2025-02-10 Update: Reworked the hkl display and cone highlighting to make identification and location of hkl more straightforward.
