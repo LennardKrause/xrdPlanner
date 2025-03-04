@@ -11,6 +11,22 @@ from PyQt6 import QtWidgets, QtCore, QtGui
 from pyFAI import calibrant
 import xrdPlanner.resources
 
+# Add the Absorption window and connect scattering diameter slider (from FWHM)
+# change pxrd scatterplot highlight to use dedicated highlighter (scatterplot)
+# check what windows need update on theme change
+# out-class pxrd window
+
+# work out how to update fwhm window only in visible
+
+# debug fn to show who is calling what and when to find out why.
+#import inspect
+#def print_stack(context=True):
+#    print('>----|')
+#    if context:
+#        print('\n'.join([f"{x.lineno:>5}| {x.function} > {''.join(x.code_context).strip()}" for x in inspect.stack()][1:][::-1]))
+#    else:
+#        print('\n'.join([f"{x.lineno:>5}| {x.function}" for x in inspect.stack()][1:][::-1]))
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, *args, **kwargs):
         """
@@ -53,17 +69,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.path_cif_db = os.path.join(self.path_settings, 'cif_db.json')
         # initialize powder diffraction plot window
         self.pxrd_win = None
-        # initialize fwhm parameter window
-        self.fwhm_win = None
-        # initialize about window
-        self.about_win = None
-        # initialize geometry window
-        self.geometry_win = None
-        # initialize hotkey window
-        self.hotkeys_win = None
         # dicts to store custom reference data
         self.ref_cif = {}
         self.ref_cell = {}
+        self.cont_ref_dsp = None
+        self.cont_ref_hkl = None
+        self.xtl = None
         # What standards should be available as reference
         # The d spacings will be imported from pyFAI
         self.ref_pyfai = calibrant.names()
@@ -91,11 +102,6 @@ class MainWindow(QtWidgets.QMainWindow):
         # the settings parameter keys
         # to their description
         self.get_tooltips()
-
-        # get the hotkeys
-        # self.hotkey_desc: list of tuples [(hotkey, description)]
-        # self.hotkey_dict: dictionary of hotkeys (key, modifier): function
-        self.get_hotkeys()
 
         # get X-ray attenuation lengths
         # for the FWHM / detector sensor
@@ -147,6 +153,33 @@ class MainWindow(QtWidgets.QMainWindow):
         # to the settings file -> settings_reload()
         self.modifiables_init()
         
+        # initialize about window
+        self.about_win = AboutWindow(parent=self,
+                                     path_settings=self.path_settings,
+                                     path_home=self.path_home,
+                                     pixmap=self.pixmap,
+                                     icon=self.icon)
+        # initialize geometry window
+        self.geometry_win = GeometryWindow(parent=self)
+        # initialize hotkey window
+        self.hotkeys_win = HotkeysWindow(parent=self)
+        # initialize detdb window
+        self.detdb_win = DetdbWindow(parent=self)
+        # initialize export window
+        self.export_win = ExportWindow(parent=self)
+        # initialize fwhm parameter window
+        self.fwhm_win = FwhmWindow(parent=self)
+        # initialize unit cell window
+        self.uc_win = UnitCellWindow(parent=self)
+        # initialize absorption window
+        #self.abs_win = AbsorptionWindow(parent=self)
+
+        # get the hotkeys
+        # self.hotkey_desc: list of tuples [(hotkey, description)]
+        # self.hotkey_dict: dictionary of hotkeys (key, modifier): function
+        self.get_hotkeys()
+        self.hotkeys_win.add_hotkeys(self.hotkey_dict)
+
         # populate the menus with detectors, references and units
         self.menu_init()
         
@@ -368,7 +401,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # add empty plot per reference contour line
         for i in range(self.plo.conic_ref_num):
-            ref = HoverableCurveItem(self, useCache=True)
+            ref = HoverableCurveItem(self, useCache=True, mouseWidth=1)
             self.ax.addItem(ref)
             self.patches['reference'].append(ref)
             self.patches['reference'][i].name = None
@@ -379,6 +412,7 @@ class MainWindow(QtWidgets.QMainWindow):
                                          pen=pg.mkPen(color=self.conic_highlight,
                                                       width=self.plo.conic_ref_linewidth*2))
         ref_hkl_curve.setVisible(False)
+        ref_hkl_curve.index = None
         self.patches['ref_hl_curve'] = ref_hkl_curve
         self.ax.addItem(ref_hkl_curve)
 
@@ -748,6 +782,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # redraw the canvas
         if redraw:
             self.redraw_canvas()
+            self.about_win.update_logo(self.pixmap)
     
     def change_palette_recursive(self, root, palette):
         """
@@ -870,7 +905,7 @@ class MainWindow(QtWidgets.QMainWindow):
         menu_ref.addSeparator()
         # menu Reference: add None
         cell_action = QtGui.QAction('Calculate from Cell', self)
-        cell_action.triggered.connect(self.win_uc_show)
+        cell_action.triggered.connect(self.uc_win.show)
         menu_ref.addAction(cell_action)
         
         ############
@@ -1012,7 +1047,7 @@ class MainWindow(QtWidgets.QMainWindow):
         menu_functions = menu_view.addMenu('Functions')
         #set fwhm parameters toggle
         self.action_funct_fwhm_set = QtGui.QAction('Setup &FWHM', self)
-        self.menu_set_action(self.action_funct_fwhm_set, self.win_fwhm_show)
+        self.menu_set_action(self.action_funct_fwhm_set, self.fwhm_win.show)
         menu_functions.addAction(self.action_funct_fwhm_set)
         #show fwhm toggle
         self.action_funct_fwhm_show = QtGui.QAction('Show FWHM', self, checkable=True)
@@ -1024,13 +1059,18 @@ class MainWindow(QtWidgets.QMainWindow):
         menu_functions.addAction(self.action_funct_fwhm_show)
         #export fwhm toggle
         self.action_funct_fwhm_export = QtGui.QAction('Export FWHM', self)
-        self.menu_set_action(self.action_funct_fwhm_export, self.export_fwhm_grid)
+        self.menu_set_action(self.action_funct_fwhm_export, self.fwhm_win.export_grid)
         menu_functions.addAction(self.action_funct_fwhm_export)
         
         # PXRD pattern
         self.action_pxrd_pattern = QtGui.QAction('P&XRD pattern', self)
         self.menu_set_action(self.action_pxrd_pattern, self.win_pxrd_plot)
         menu_view.addAction(self.action_pxrd_pattern)
+
+        # Absorption window
+        #self.action_abs_win = QtGui.QAction('A&bsorption', self)
+        #self.menu_set_action(self.action_abs_win, self.abs_win.show)
+        #menu_view.addAction(self.action_abs_win)
 
         ############
         # SETTINGS #
@@ -1065,7 +1105,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # SETTINGS - EXPORT #
         #####################
         export_action = QtGui.QAction('Export editor', self)
-        self.menu_set_action(export_action, self.win_export_show)
+        self.menu_set_action(export_action, self.export_win.show)
         menu_Settings.addAction(export_action)
         
         menu_Settings.addSeparator()
@@ -1073,7 +1113,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # SETTINGS - DETDB  #
         #####################
         detdb_action = QtGui.QAction('Detector db editor', self)
-        self.menu_set_action(detdb_action, self.win_detdb_show)
+        #self.menu_set_action(detdb_action, self.win_detdb_show)
+        self.menu_set_action(detdb_action, self.detdb_win.show)
         menu_Settings.addAction(detdb_action)
         ###################
         # SETTINGS - EDIT #
@@ -1112,13 +1153,14 @@ class MainWindow(QtWidgets.QMainWindow):
         # menu About
         menu_help = self.menu_bar.addMenu('Help')
         action_about = QtGui.QAction('xrdPlanner', self)
-        self.menu_set_action(action_about, self.show_about_win)
+        #self.menu_set_action(action_about, self.show_about_win)
+        self.menu_set_action(action_about, self.about_win.show)
         menu_help.addAction(action_about)
         action_geometry = QtGui.QAction('Geometry conventions', self)
-        self.menu_set_action(action_geometry, self.show_geometry_win)
+        self.menu_set_action(action_geometry, self.geometry_win.show)
         menu_help.addAction(action_geometry)
         action_hotkeys = QtGui.QAction('Hotkeys', self)
-        self.menu_set_action(action_hotkeys, self.show_hotkeys_win)
+        self.menu_set_action(action_hotkeys, self.hotkeys_win.show)
         menu_help.addAction(action_hotkeys)
 
     def menu_set_action(self, action, target, *args):
@@ -1223,6 +1265,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def toggle_grid(self):
         self.plo.show_grid = not self.plo.show_grid
+        if self.plo.show_grid:
+            self.action_grid.setChecked(True)
+        else:
+            self.action_grid.setChecked(False)
         self.redraw_canvas()
 
     ############
@@ -1311,6 +1357,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.geo.hoff = float(val)
             elif self.sender().objectName() == 'ener':
                 self.geo.ener = float(val)
+                #if self.abs_win.isVisible():
+                #    self.abs_win.update_keV(self.geo.ener)
             elif self.sender().objectName() == 'bsdx':
                 self.geo.bsdx = float(val)
 
@@ -1330,8 +1378,10 @@ class MainWindow(QtWidgets.QMainWindow):
         This method performs updates to the PXRD window and the FWHM window
         by calling the respective update methods.
         """
-        self.win_pxrd_update()
-        self.win_fwhm_update()
+        if hasattr(self, 'pxrd_win') and self.pxrd_win is not None and self.pxrd_win.isVisible():
+            self.win_pxrd_update()
+        if hasattr(self, 'fwhm_win'):
+            self.fwhm_win.update()
 
     ##################
     #  DRAW CONICS   #
@@ -1524,9 +1574,8 @@ class MainWindow(QtWidgets.QMainWindow):
         - self.conic_ref_color: Color for the reference contour lines.
         - self.patches['reference']: Dictionary to store the reference contour line patches.
         """
-        # remove highlighted curve and hkl label
-        self.patches['ref_hl_curve'].setVisible(False)
-        self.patches['ref_hl_label'].setVisible(False)
+        if len(self.patches['reference']) == 0:
+            return
         # plot reference contour lines
         # standard contour lines are to be drawn
         for _n in range(self.plo.conic_ref_num):
@@ -1573,7 +1622,7 @@ class MainWindow(QtWidgets.QMainWindow):
                         # hence the <br> instead of \n
                         # 
                         # self.setStyleSheet('''QToolTip {... ) didn't work
-                        self.patches['reference'][_n].name = f'{h: 2.0f} {k: 2.0f} {l: 2.0f}<br>{round(itot, 0):,.0f}'
+                        self.patches['reference'][_n].name = f'{h: 2.0f} {k: 2.0f} {l: 2.0f}\n{round(itot, 0):,.0f}'
                         self.patches['reference'][_n].index = _n
                     else:
                         self.patches['reference'][_n].name = f'{h: 2.0f} {k: 2.0f} {l: 2.0f}'
@@ -1595,6 +1644,15 @@ class MainWindow(QtWidgets.QMainWindow):
                                                                              width=max(self.plo.conic_ref_cif_lw_min, 
                                                                                        self.plo.conic_ref_linewidth * width)))
                 self.patches['reference'][_n].setVisible(True)
+        
+        # update highlighted curve position and hkl label
+        _index_hl = self.patches['ref_hl_curve'].index
+        if _index_hl is None:
+            pass
+        elif self.patches['reference'][_index_hl].isVisible():
+            self.patches['reference'][_index_hl].highlight()
+        else:
+            self.patches['reference'][_index_hl].lowlight()
     
     ############
     #  CHANGE  #
@@ -1638,7 +1696,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if action.text() == self.geo.colormap:
                 action.setChecked(True)
         self.redraw_canvas()
-        self.update_win_generic()
+        #self.update_win_generic()
 
     def change_detector(self, det_name=None, det_size=None):
         """
@@ -1664,7 +1722,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.main_screen_init()
         # center the slider frame
         self.sliderWidget.center_frame()
-        self.update_win_generic()
+        #self.update_win_generic()
 
     def change_units(self, unit_index):
         """
@@ -1725,13 +1783,16 @@ class MainWindow(QtWidgets.QMainWindow):
         Raises:
             KeyError: If the reference is not found in any of the reference dictionaries.
         """
+        # reset the Dans_Diffraction object
+        self.xtl = None
+        # check what type of reference is selected
         if self.geo.reference in self.ref_pyfai:
             # get the d spacings for the calibrtant from pyFAI
             self.cont_ref_dsp = np.array(calibrant.get_calibrant(self.geo.reference).get_dSpacing()[:self.plo.conic_ref_num])
             self.cont_ref_hkl = None
         elif self.geo.reference in self.ref_cif:
             if not self.ref_cif[self.geo.reference].has_hkl or not self.ref_cif[self.geo.reference].has_dsp:
-                self.calc_ref_from_cif(self.ref_cif[self.geo.reference].cif, open_pxrd=False)
+                self.calc_ref_from_cif(self.ref_cif[self.geo.reference].cif, open_pxrd=True)
             else:
                 # get custom d spacings
                 self.cont_ref_dsp = self.ref_cif[self.geo.reference].dsp
@@ -2500,23 +2561,29 @@ class MainWindow(QtWidgets.QMainWindow):
         # to map hotkeys to functions and descriptions
         #
         # 'key' is the key to be pressed, must be a valid QtKey string and mappable
-        # to the QtGui.QKeySequence(key).toString() function used in the keypressevent
+        # to the QtGui.QKeySequence(key).toString() function used in the keyReleaseEvent
         #
         # the following keymodifier mappings are available:
         # QtCore.Qt.KeyboardModifier.AltModifier:'ALT'
         # QtCore.Qt.KeyboardModifier.ShiftModifier:'SHIFT'
         # QtCore.Qt.KeyboardModifier.ControlModifier:'CTRL'
         self.hotkey_dict = {('Windows'):None,
-                            ('F1', None):  {'fn':(self.show_about_win, None),
+                            ('F1', None):  {'fn':(self.about_win.show, None),
                                             'dc':'Show about window'},
-                            ('F2', None):  {'fn':(self.show_geometry_win, None),
+                            ('F2', None):  {'fn':(self.geometry_win.show, None),
                                             'dc':'Show geometry window'},
-                            ('F3', None):  {'fn':(self.show_hotkeys_win, None),
+                            ('F3', None):  {'fn':(self.hotkeys_win.show, None),
                                             'dc':'Show hotkey window'},
                             ('X', None):   {'fn':(self.win_pxrd_plot, None),
                                             'dc':'Show PXRD window'},
-                            ('F', None):   {'fn':(self.win_fwhm_show, None),
+                            ('F', None):   {'fn':(self.fwhm_win.show, None),
                                             'dc':'Show FWHM window'},
+                            #('B', None):   {'fn':(self.abs_win.show, None),
+                            #                'dc':'Show Absorption window'},
+                            ('O', None):   {'fn':(self.detdb_win.show, None),
+                                            'dc':'Show Detector DB'},
+                            ('E', None):   {'fn':(self.export_win.show, None),
+                                            'dc':'Show Export window'},
                             
                             ('Unit'):None,
                             ('T', None):   {'fn':(self.change_units, 0),
@@ -2624,6 +2691,360 @@ class MainWindow(QtWidgets.QMainWindow):
                 rect_item.setBrush(pg.mkBrush(color = self.det_module_fill))
                 rect_item.setOpacity(self.plo.det_module_alpha)
                 self.ax.addItem(rect_item)
+
+    ##########
+    #  PXRD  #
+    ##########
+    def win_pxrd_plot(self, keep=False):
+        """
+        Displays or updates the Powder X-ray Diffraction (PXRD) plot window.
+        If the PXRD window is already visible and `keep` is False, the window will be closed.
+        Otherwise, the window will be updated or created if it does not exist.
+        Parameters:
+        -----------
+        keep : bool, optional
+            If True, keeps the PXRD window open even if it is already visible. Default is False.
+        Notes:
+        ------
+        - The PXRD window includes a plot of the PXRD data, with options to interact with the plot.
+        - A disclaimer box is included in the window, indicating that the feature is in the test phase.
+        - A button to set up Full Width at Half Maximum (FWHM) is also included in the disclaimer box.
+        """
+        if self.pxrd_win is not None:
+            self.win_pxrd_update()
+            self.pxrd_win.adjustSize()
+            self.pxrd_win.show(keep=keep)
+            return
+
+        if self.cont_ref_dsp is None or self.cont_ref_hkl is None:
+            return
+        
+        font = QtGui.QFont()
+        font.setPixelSize(self.plo.conic_hkl_label_size)
+        font.setBold(True)
+
+        self.pxrd_win = HotkeyDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
+        self.pxrd_win.setStyleSheet('QGroupBox { font-weight: bold; }')
+
+        layout = QtWidgets.QVBoxLayout()
+        
+        powder_box = QtWidgets.QGroupBox('')
+        powder_box_layout = QtWidgets.QVBoxLayout()
+        powder_box_layout.setContentsMargins(6,6,6,6)
+        powder_box.setLayout(powder_box_layout)
+        
+        self.pxrd_curve = pg.PlotCurveItem(mousewidth=20)
+        self.pxrd_curve.setPen(pg.mkPen(color=self.palette().text().color()))
+        self.pxrd_curve.setClickable(True)
+        self.pxrd_curve.sigClicked.connect(self.win_pxrd_curve_clicked)
+        self.pxrd_scatt = ClickableScatterPlotItem(size=20, tip=None)
+        self.pxrd_scatt.setPen(pg.mkPen(color=self.palette().highlight().color()))
+        self.pxrd_scatt.setBrush(pg.mkBrush(color=self.palette().highlight().color()))
+        self.pxrd_scatt.setSymbol(self.plo.pxrd_marker_symbol)
+        self.pxrd_scatt.sigClicked.connect(self.win_pxrd_hkl_clicked)
+        self.pxrd_scatt_highlighted = None
+
+        self.pxrd_label = pg.TextItem(anchor=(0.5,0.9))
+        self.pxrd_label.setFont(font)
+        self.pxrd_regio = pg.LinearRegionItem(pen=pg.mkPen(None))
+        self.pxrd_regio.setMovable(False)
+        self.pxrd_plot = pg.PlotWidget(background=self.palette().base().color())
+        self.pxrd_ghost_legend = self.pxrd_plot.addLegend(offset=(0,1), verSpacing=0, labelTextSize='12pt')
+        self.pxrd_plot.viewport().setAttribute(QtCore.Qt.WidgetAttribute.WA_AcceptTouchEvents, False)
+        self.pxrd_plot.setMenuEnabled(False)
+        self.pxrd_plot.setLabel(axis='left', text='Intensity [arb. units]', color=self.palette().text().color())
+        self.pxrd_plot.showGrid(x=True, y=True, alpha=0.5)
+        self.pxrd_plot.getPlotItem().getViewBox().setDefaultPadding(0.0)
+        self.pxrd_plot.addItem(self.pxrd_curve, zlevel=1)
+        # if points are not visible, e.g. outside of currentrange, the plot size will
+        # not be adjusted properly and stays larger than expected.
+        # ignoreBound allows the plot to autorange disregarding the 'invisble' points
+        # however we need to increase the min y padding to make the scatterplot visible!
+        self.pxrd_plot.addItem(self.pxrd_scatt, ignoreBounds=True)
+        self.pxrd_plot.addItem(self.pxrd_label)
+        # same as above, allow the plot to disregard the beamstop if out of bounds
+        self.pxrd_plot.addItem(self.pxrd_regio, ignoreBounds=True)
+        # this invisible line will do the padding for us -> thanks Frederik!
+        self.pxrd_line = pg.InfiniteLine(pos=0, angle=0, pen=pg.mkPen(None))
+        self.pxrd_plot.addItem(self.pxrd_line)
+        
+
+        self.pxrd_ghost_curves = [] # list to store ghost lines
+        self.pxrd_ghost_bank = [('blinky', '#fb0009'), ('pinky', '#fc60ff'), ('inky', '#22ffff'),
+                                ('clyde', '#f27a10'), ('sue', '#9208ff'), ('dinky', '#e1e1e1'),
+                                ('miru', '#80ff14'), ('tim', '#dd8308'), ('funky', '#18b804'),
+                                ('kinky', '#ffdc14'), ('orson', '#96a382')]
+
+        powder_box_layout.addWidget(self.pxrd_plot)
+        layout.addWidget(powder_box)
+
+        # Disclimer box info
+        citation_box = QtWidgets.QGroupBox()
+        citation_box.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        citation_box_layout = QtWidgets.QHBoxLayout()
+        citation_box_layout.setContentsMargins(6,6,6,6)
+        citation_box.setLayout(citation_box_layout)
+        # add ghost plot
+        button_ghost = QtWidgets.QPushButton('Ghosts')
+        button_ghost.setToolTip('Add or remove ghost lines to the PXRD plot.\nSet visibility in the legend.\nRemove all invisible ghosts or last added.')
+        button_ghost.clicked.connect(self.win_pxrd_add_ghost)
+        menu = QtWidgets.QMenu()
+        menu.addAction('Add', self.win_pxrd_add_ghost)
+        menu.addAction('Remove', self.win_pxrd_rem_ghost)
+        button_ghost.setMenu(menu)
+        citation_box_layout.addWidget(button_ghost, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
+        # add citation
+        citation = QtWidgets.QLabel('This feature is currently in <b>test phase</b>, feedback is very welcome!')
+        citation.setOpenExternalLinks(True)
+        citation_box_layout.addWidget(citation, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
+        # Add the fwhm button
+        button_fwhm = QtWidgets.QPushButton('Setup FHWM')
+        button_fwhm.clicked.connect(self.fwhm_win.show)
+        citation_box_layout.addWidget(button_fwhm, alignment=QtCore.Qt.AlignmentFlag.AlignRight)
+        layout.addWidget(citation_box)
+        
+        self.win_pxrd_update()
+        self.pxrd_win.setWindowIcon(self.icon)
+        self.pxrd_win.setLayout(layout)
+        self.pxrd_win.show()
+
+    def win_pxrd_update(self, update_dict=None):
+        """
+        Updates the PXRD (Powder X-ray Diffraction) window with new data and settings.
+        Parameters:
+        update_dict (dict, optional): A dictionary containing updated parameters for the PXRD calculation. 
+                                      If None, default parameters from the object are used. The dictionary 
+                                      should have the following keys:
+                                      - '0': Sensor thickness
+                                      - '1': Sensor material
+                                      - '2': Beam divergence
+                                      - '3': Energy resolution
+                                      - '4': Scattering diameter
+        Returns:
+        None
+        """
+        if self.pxrd_win is None:
+            return
+        
+        # change color if theme changed
+        self.pxrd_curve.setPen(self.palette().text().color())
+        self.pxrd_plot.setBackground(self.palette().base().color())
+        self.pxrd_scatt.setPen(self.palette().highlight().color())
+        self.pxrd_scatt.setBrush(self.palette().highlight().color())
+
+        if self.geo.reference.lower() == 'none':
+            self.pxrd_win.setWindowTitle(f'Load a cif to show PXRD pattern')
+            self.pxrd_curve.setData(x=None, y=None, data=None)
+            self.pxrd_scatt.setData(x=None, y=None, data=None)
+            return
+        
+        if self.geo.reference in self.ref_cif and self.ref_cif[self.geo.reference].is_complete:
+            dsp = self.ref_cif[self.geo.reference].dsp # np.array
+            peak_ttr, idx = self.dsp2tth(dsp)
+            inten = np.array(self.ref_cif[self.geo.reference].hkl)[:,4][idx] # list[ (h k l I Irel) ]
+            hkl = list(map(tuple, np.array(self.ref_cif[self.geo.reference].hkl)[:,:3][idx].astype(int)))
+        else:
+            self.pxrd_win.setWindowTitle(f'Load a cif to show PXRD pattern')
+            self.pxrd_curve.setData(x=None, y=None, data=None)
+            self.pxrd_scatt.setData(x=None, y=None, data=None)
+            return
+        
+        if update_dict is None:
+            thk = self.plo.sensor_thickness
+            mat = self.plo.sensor_material
+            div = self.plo.beam_divergence
+            dEE = self.plo.energy_resolution
+            dia = self.plo.scattering_diameter
+        else:
+            thk = update_dict['0']
+            mat = update_dict['1']
+            div = update_dict['2']
+            dEE = update_dict['3']
+            dia = update_dict['4']
+
+        self.pxrd_win.setWindowTitle(f'PXRD pattern of {self.geo.reference}')
+        self.pxrd_plot.setTitle(f'Estimated diffration pattern for a <b>perpendicular\
+                                 & flat</b> detector geometry (F\u00B2 & d-spacing @\
+                                 {self.plo.conic_ref_cif_kev} keV).', color=self.palette().text().color())
+        
+        fwhm = self.calc_FWHM(dis=self.geo.dist * 1e-3,
+                              dia=dia,
+                              thk=thk,
+                              mat=mat,
+                              pxs=self.det.pxs * 1e-3,
+                              tth=peak_ttr,
+                              nrg=self.geo.ener,
+                              div=div,
+                              dEE=dEE,
+                              deg=False)
+        # calc visible extent
+        if self._tth is not None and not isinstance(self._tth, float):
+            max_res_r = np.nanmax(self._tth)
+            min_res_r = max(np.nanmin(self._tth), fwhm.mean()/10)
+        else:
+            max_res_r = self.calc_tth_max()
+            min_res_r = fwhm.mean()/10
+
+        # add beamstop shadow
+        if self.geo.bssz and not (isinstance(self.geo.bssz, str) and self.geo.bssz.lower() == 'none'):
+            if min_res_r < self.bs_theta:
+                regio_min = self.calc_unit(min_res_r)
+                regio_max = self.calc_unit(self.bs_theta)
+                self.pxrd_regio.setRegion((regio_min, regio_max))
+                regio_color = self.beamstop_color
+                regio_color.setAlphaF(0.10)
+                self.pxrd_regio.setBrush(regio_color)
+                self.pxrd_regio.setVisible(True)
+        else:
+            self.pxrd_regio.setVisible(False)
+        
+        ttr = np.arange(min_res_r, max_res_r, fwhm.mean()/10)
+
+        gauss = np.sum(self.gaussian(ttr, np.atleast_2d(peak_ttr).T, np.atleast_2d(fwhm).T) * np.atleast_2d(inten).T, axis=0)
+        xval = self.calc_unit(ttr)
+        self.pxrd_curve.setData(x=xval, y=gauss)
+        
+        peak_xval = self.calc_unit(peak_ttr)
+        self.pxrd_scatt_offset = -(gauss.max() + gauss.min()) * self.plo.pxrd_marker_offset
+        self.pxrd_scatt.setData(x=peak_xval,
+                                y=np.zeros(len(peak_xval))+self.pxrd_scatt_offset,
+                                data=hkl)
+        # remove peaks that are ouside of the detector screen
+        cond = (peak_xval <= xval.max()) & (peak_xval >= xval.min())
+        self.pxrd_scatt.setPointsVisible(cond)
+        self.pxrd_line.setPos(self.pxrd_scatt_offset*2)
+
+        # add axis label
+        self.pxrd_plot.setLabel(axis='bottom', text=self.unit_names[self.geo.unit], color=self.palette().text().color())
+        
+        # flip axis for d-spacing
+        if self.geo.unit == 1:
+            self.pxrd_plot.getPlotItem().getViewBox().invertX(True)
+            #self.pxrd_plot.setXRange(20, xval.min(), padding=0)
+        else:
+            self.pxrd_plot.getPlotItem().getViewBox().invertX(False)
+
+        self.pxrd_plot.getPlotItem().getViewBox().setLimits(xMin=xval.min(),
+                                                            xMax=xval.max(),
+                                                            yMin=self.pxrd_scatt_offset*2,
+                                                            yMax=gauss.max())
+
+        if self.pxrd_scatt_highlighted is not None:
+            self.win_pxrd_highlight(self.pxrd_scatt_highlighted.index())
+
+    def win_pxrd_hkl_clicked(self, widget, points, event):
+        if not widget.name:
+            return
+        elif len(points) > 0:
+            point = self.get_closest_point_x(points, event.pos())
+            if event.buttons() == QtCore.Qt.MouseButton.RightButton:
+                self.patches['reference'][point.index()].lowlight()
+                return
+            # highlight in main window
+            # calls the highlight method of the HoverableCurveItem
+            # calls win_pxrd_highlight
+            self.patches['reference'][point.index()].highlight()
+
+    def win_pxrd_curve_clicked(self, widget, event):
+        """
+        Handles the event when a PXRD curve is clicked in the window.
+
+        This method is triggered when the user clicks on the PXRD curve in the window.
+        It processes the click event, determines the position of the click, and identifies
+        the corresponding points on the PXRD scatter plot. It then calls another method
+        to handle the click event on the identified points.
+
+        Args:
+            widget: The widget that received the click event.
+            event: The event object containing details about the click event.
+
+        Returns:
+            None
+        """
+        pos = event.pos()
+        pos.setY(self.pxrd_scatt_offset)
+        points = self.pxrd_scatt.pointsAt(pos)
+        self.win_pxrd_hkl_clicked(self.pxrd_scatt, points, event)
+
+    def win_pxrd_set_hkl_label(self, point):
+        self.pxrd_label.setText(' '.join(map(str, point.data())))
+        self.pxrd_label.setPos(point.pos())
+        self.pxrd_label.setVisible(True)
+    
+    def win_pxrd_highlight(self, index):
+        # highlight from main window
+        if self.pxrd_win is not None:
+            self.win_pxrd_lowlight()
+            point = self.pxrd_scatt.points()[index]
+            point.setPen(pg.mkPen(self.conic_highlight))
+            point.setBrush(pg.mkBrush(self.conic_highlight))
+            self.pxrd_scatt_highlighted = point
+            self.win_pxrd_set_hkl_label(point)
+
+    def win_pxrd_lowlight(self):
+        # called by HoverableCurveItem:lowlight
+        if self.pxrd_win is not None:
+            if self.pxrd_scatt_highlighted is not None:
+                _pen = pg.mkPen(color=self.palette().highlight().color())
+                _brush = pg.mkBrush(color=self.palette().highlight().color())
+                self.pxrd_scatt_highlighted.setPen(_pen)
+                self.pxrd_scatt_highlighted.setBrush(_brush)
+                self.pxrd_scatt_highlighted = None
+            self.pxrd_label.setVisible(False)
+
+    def win_pxrd_add_ghost(self):
+        """
+        Adds a ghost curve to the PXRD plot from the ghost bank.
+
+        This method pops the first ghost curve from the `pxrd_ghost_bank`, sets its data and color,
+        and then appends it to the `pxrd_ghost_curves` list. The ghost curve is then added to the 
+        PXRD plot with a z-level based on the number of ghost curves.
+
+        Attributes:
+            pxrd_ghost_bank (list): A list of tuples containing the name and color of ghost curves.
+            pxrd_curve (object): An object containing the x and y data for the PXRD curve.
+            pxrd_ghost_curves (list): A list to store the ghost curves added to the plot.
+            pxrd_plot (object): The plot object where the ghost curves are added.
+
+        Returns:
+            None
+        """
+        if len(self.pxrd_ghost_bank) > 0:
+            name, color = self.pxrd_ghost_bank.pop(0)
+            pxrd_ghost = pg.PlotCurveItem(name=name)
+            pxrd_ghost.setData(x=self.pxrd_curve.xData, y=self.pxrd_curve.yData)
+            pxrd_ghost.setPen(color)
+            self.pxrd_ghost_curves.append(pxrd_ghost)
+            self.pxrd_plot.addItem(pxrd_ghost, zlevel=-len(self.pxrd_ghost_curves), ignoreBounds=True)
+
+    def win_pxrd_rem_ghost(self):
+        """
+        Removes ghost curves from the PXRD plot that are not visible.
+
+        This method iterates through the list of current PXRD ghost curves and 
+        removes those that are not visible from the plot. The removed ghost curves 
+        are then added to the ghost bank with their name and pen color. If no ghost 
+        curves are removed and there are still ghost curves present, the last ghost 
+        curve in the list is removed from the plot.
+
+        Attributes:
+            pxrd_ghost_curves (list): List of current PXRD ghost curves.
+            pxrd_plot (object): The PXRD plot object.
+            pxrd_ghost_bank (list): List to store removed ghost curves with their 
+                                    name and pen color.
+        """
+        remove_later = []
+        for ghost in self.pxrd_ghost_curves:
+            if not ghost.isVisible():
+                remove_later.append(ghost)
+        for ghost in remove_later:
+            self.pxrd_plot.getPlotItem().removeItem(ghost)
+            self.pxrd_ghost_curves.remove(ghost)
+            self.pxrd_ghost_bank.insert(0, (ghost.name(), ghost.opts['pen'].color().name()))
+        if len(remove_later) == 0 and len(self.pxrd_ghost_curves) > 0:
+                ghost = self.pxrd_ghost_curves[-1]
+                self.pxrd_plot.getPlotItem().removeItem(ghost)
+                self.pxrd_ghost_curves.remove(ghost)
 
     #######
     # CIF #
@@ -2763,11 +3184,11 @@ class MainWindow(QtWidgets.QMainWindow):
             ref_cif (dict): Dictionary containing reference data with the CIF file basename as the key.
         """
         # called when a cif is dropped onto the window
-        xtl = dif.Crystal(fpath)
+        self.xtl = dif.Crystal(fpath)
         # :return xval: arrray : x-axis of powder scan (units)
         # :return inten: array : intensity values at each point in x-axis
         # :return reflections: (h, k, l, xval, intensity) array of reflection positions, grouped by min_overlap
-        xval, inten, reflections = xtl.Scatter.powder(scattering_type='xray', units='dspace', powder_average=True, min_overlap=0.02, energy_kev=self.plo.conic_ref_cif_kev)
+        xval, inten, reflections = self.xtl.Scatter.powder(scattering_type='xray', units='dspace', powder_average=True, min_overlap=0.02, energy_kev=self.plo.conic_ref_cif_kev)
         # reject low intensities: based on median or mean?
         # median is always around unity -> useless
         # mean rejects many, add adjustable multiplicator?
@@ -2799,1918 +3220,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.draw_reference()
 
         self.save_ref_db_to_file()
-
-    ###############
-    #  UNIT CELL  #
-    ###############
-    def win_uc_show(self):
-        """
-        Displays a dialog for entering custom unit cell parameters.
-        This method creates and shows a QDialog with various input fields for 
-        entering unit cell parameters such as 'a', 'b', 'c', 'α', 'β', 'γ', 
-        centring, sampling, and name. The dialog includes QDoubleSpinBox, 
-        QLineEdit, and QComboBox widgets for input, and QCheckBox widgets for 
-        linking parameters. The dialog also has Apply and OK buttons for 
-        applying changes or accepting the dialog.
-        Attributes:
-            win_uc (QDialog): The dialog window for entering unit cell parameters.
-            uc_dict_change (dict): Dictionary to store the input widgets.
-            uc_check_boxes (dict): Dictionary to store the checkboxes for linking parameters.
-            linked_axes (bool): Flag to indicate if axes are linked.
-        Widgets:
-            QVBoxLayout: Main layout for the dialog.
-            QGroupBox: Group box containing the input fields.
-            QFrame: Frames for organizing input fields and buttons.
-            QHBoxLayout: Layouts for organizing input fields and buttons.
-            QLabel: Labels for input fields.
-            QLineEdit: Input field for custom name.
-            QComboBox: Dropdowns for centring and sampling.
-            QDoubleSpinBox: Spin boxes for numerical input with units.
-            QCheckBox: Checkboxes for linking parameters.
-            QDialogButtonBox: Button boxes for Apply and OK buttons.
-        Methods:
-            win_uc_set_link_sbox: Slot for handling value changes in spin boxes.
-            win_uc_set_link_cbox: Slot for handling state changes in checkboxes.
-            win_uc_apply: Slot for applying changes.
-            win_uc_accept: Slot for accepting the dialog.
-        """
-        self.win_uc = QtWidgets.QDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
-
-        layout = QtWidgets.QVBoxLayout()
-        layout.setSpacing(0)
-
-        box = QtWidgets.QGroupBox(title='Enter unit cell parameters')
-        box.setStyleSheet('QGroupBox { font-weight: bold; }')
-        box_layout = QtWidgets.QVBoxLayout()
-        box_layout.setSpacing(0)
-        box_layout.setContentsMargins(0,0,0,0)
-        self.uc_dict_change = {}
-        self.uc_check_boxes = {}
-        self.linked_axes = True
-        #              label,        unit,  link, min, max
-        uc_widgets = [('a',     ' \u212b', [1,2],   1,  99, 2),
-                      ('b',     ' \u212b',  True,   1,  99, 2),
-                      ('c',     ' \u212b',  True,   1,  99, 2),
-                      ('\u03b1', '\u00b0', False,  60, 150, 1),
-                      ('\u03b2', '\u00b0', False,  60, 150, 1),
-                      ('\u03b3', '\u00b0', False,  60, 150, 1),
-                      ('Centring',  False, False,   0,   0, 0),
-                      ('Sampling',   True, False,   0,   0, 0),
-                      ('Name',       None, False,   0,   0, 0)]
-        for idx, (label, unit, link, minval, maxval, decimals) in enumerate(uc_widgets):
-            entry_box = QtWidgets.QFrame()
-            entry_layout = QtWidgets.QHBoxLayout()
-            entry_layout.setSpacing(6)
-            entry_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-            entry_label = QtWidgets.QLabel(label)
-            entry_layout.addWidget(entry_label)
-            if unit is None:
-                box_widget = QtWidgets.QLineEdit(text=f'Custom {len(self.ref_cell)+1:>02}')
-                entry_layout.addWidget(box_widget)
-            elif unit is False:
-                box_widget = QtWidgets.QComboBox()
-                box_widget.addItems(['P','F','I','C','A','B'])
-                entry_layout.addWidget(box_widget)
-            elif unit is True:
-                box_widget = QtWidgets.QComboBox()
-                box_widget.addItems(['1','2','3','4','5'])
-                box_widget.setCurrentIndex(2)
-                entry_layout.addWidget(box_widget)
-            else:
-                box_widget = QtWidgets.QDoubleSpinBox(decimals=decimals, singleStep=10**(-decimals), minimum=minval, maximum=maxval, value=self.default_custom_cell[idx], suffix=unit)
-                box_widget.setProperty('linked', link)
-                box_widget.setProperty('index', idx)
-                #box_widget.setStepType(QtWidgets.QDoubleSpinBox.StepType.AdaptiveDecimalStepType)
-                entry_layout.addWidget(box_widget)
-                box_check = QtWidgets.QCheckBox()
-                box_check.setProperty('index', idx)
-                self.uc_check_boxes[idx] = box_check
-                if link is True:
-                    box_check.setChecked(True)
-                else:
-                    box_check.setChecked(False)
-                    box_check.setEnabled(False)
-                entry_layout.addWidget(box_check)
-            
-            entry_box.setLayout(entry_layout)
-            box_layout.addWidget(entry_box)
-            self.uc_dict_change[idx] = box_widget
-        
-        for idx in range(6):
-            self.uc_dict_change[idx].valueChanged.connect(self.win_uc_set_link_sbox)
-            self.uc_check_boxes[idx].stateChanged.connect(self.win_uc_set_link_cbox)
-
-        box.setLayout(box_layout)
-        layout.addWidget(box)
-
-        button_box = QtWidgets.QFrame()
-        button_layout = QtWidgets.QHBoxLayout()
-        # Add the apply button
-        button_apply = QtWidgets.QDialogButtonBox()
-        button_apply.addButton(QtWidgets.QDialogButtonBox.StandardButton.Apply)
-        button_apply.setCenterButtons(True)
-        button_apply.clicked.connect(lambda: self.win_uc_apply(self.uc_dict_change))
-        button_layout.addWidget(button_apply)
-        # Add the OK button
-        button_ok = QtWidgets.QDialogButtonBox()
-        button_ok.addButton(QtWidgets.QDialogButtonBox.StandardButton.Ok)
-        button_ok.setCenterButtons(True)
-        button_ok.clicked.connect(self.win_uc_accept)
-        button_layout.addWidget(button_ok)
-        # Set the button box layout
-        button_box.setLayout(button_layout)
-        layout.addWidget(button_box)
-
-        self.win_uc.setWindowIcon(self.icon)
-        self.win_uc.setWindowTitle('Add custom unit cell')
-        self.win_uc.setLayout(layout)
-        self.win_uc.setFixedSize(self.win_uc.sizeHint())
-        self.win_uc.accepted.connect(self.win_uc_accept)
-        self.win_uc.rejected.connect(self.win_uc.close)
-        self.win_uc.exec()
-    
-    def win_uc_apply(self, dict):
-        """
-        Applies the unit cell parameters from the given dictionary to the current object.
-        Parameters:
-        dict (dict): A dictionary containing unit cell parameters and other settings. 
-                 Expected keys and their corresponding values:
-                 - 0 to 5: Objects with a `value()` method returning unit cell parameters.
-                 - 6: Object with a `currentText()` method returning the center.
-                 - 7: Object with a `currentText()` method returning the decimal precision.
-                 - 8: Object with a `text()` method returning the reference name.
-        This method performs the following actions:
-        1. Extracts unit cell parameters from the dictionary and stores them in `self.default_custom_cell`.
-        2. Calculates the hkl values and stores them in `self.cont_ref_dsp` and `self.cont_ref_hkl`.
-        3. Updates the reference name in `self.geo.reference`.
-        4. Creates a `Ref` object with the reference name, dsp values, and hkl values, and stores it in `self.ref_cell`.
-        5. Updates the window title and draws the reference.
-        """
-        uc = []
-        for i in range(6):
-            uc.append(dict[i].value())
-        hkld = self.calc_hkld(uc, dec=int(dict[7].currentText()), cen=dict[6].currentText())
-        self.default_custom_cell = uc
-
-        self.cont_ref_dsp = hkld[:,3]
-        # hkl -> integer
-        # cast hkl array to list of tuples (for easy display)
-        _zeros = np.zeros(hkld.shape[0])
-        self.cont_ref_hkl = list(zip(hkld[:,0], hkld[:,1], hkld[:,2], _zeros, _zeros))
-
-        self.geo.reference = dict[8].text()
-        reference = Ref(name=self.geo.reference, dsp=self.cont_ref_dsp, hkl=self.cont_ref_hkl)
-        self.ref_cell[self.geo.reference] = reference
-        
-        # update window title
-        self.set_win_title()
-        self.draw_reference()
-
-    def win_uc_accept(self):
-        """
-        Applies changes to the unit cell, updates the reference, and manages the UI actions accordingly.
-
-        This method performs the following steps:
-        1. Applies changes to the unit cell dictionary.
-        2. Updates the reference geometry.
-        3. Creates a new QAction for the updated reference.
-        4. Adds the new QAction to the relevant menu and action group.
-        5. Sets the new QAction as checked.
-        6. Closes the unit cell window.
-        """
-        self.win_uc_apply(self.uc_dict_change)
-        self.change_reference(self.geo.reference)
-        self.add_cell_to_menu(self.geo.reference)
-        self.win_uc.close()
-    
-    def win_uc_set_link_sbox(self):
-        """
-        Handles the state change of a widget's 'linked' property and updates associated checkboxes and child widgets.
-
-        If the 'linked' property of the sender widget is True, it sets the property to False and unchecks the associated checkbox.
-        If the 'linked' property is a list, it iterates through the list, and for each index, if the corresponding checkbox is checked,
-        it updates the value of the associated child widget without emitting signals.
-
-        The sender widget is expected to have the following properties:
-        - 'linked': A boolean or a list of indices.
-        - 'index': An index to identify the associated checkbox.
-
-        The method interacts with the following attributes of the class:
-        - self.uc_check_boxes: A list of checkboxes.
-        - self.uc_dict_change: A dictionary of child widgets.
-
-        Returns:
-            None
-        """
-        widget = self.sender()
-        linked = widget.property('linked')
-        if linked is True:
-            widget.setProperty('linked', False)
-            self.uc_check_boxes[widget.property('index')].setChecked(False)
-        elif isinstance(linked, list):
-            for idx in linked:
-                checkbox = self.uc_check_boxes[idx]
-                child = self.uc_dict_change[idx]
-                if checkbox.isChecked():
-                    child.blockSignals(True)
-                    child.setValue(widget.value())
-                    child.blockSignals(False)
-    
-    def win_uc_set_link_cbox(self):
-        """
-        Updates the 'linked' property of an item in the uc_dict_change dictionary based on the state of a checkbox.
-
-        This method retrieves the sender of the signal (assumed to be a checkbox), gets its 'index' property, and updates
-        the corresponding item in the uc_dict_change dictionary by setting its 'linked' property to the checked state of the checkbox.
-
-        Attributes:
-            self.uc_dict_change (dict): A dictionary where the keys are indices and the values are objects with a 'linked' property.
-        """
-        check = self.sender()
-        self.uc_dict_change[check.property('index')].setProperty('linked', check.isChecked())
-
-    def add_cell_to_menu(self, name):
-        # Doesn't work on windows, menus won't show up!
-        ref_action = QtGui.QAction(name, self, checkable=True)
-        self.menu_set_action(ref_action, self.change_reference, name)
-        self.sub_menu_cell.addAction(ref_action)
-        self.group_ref.addAction(ref_action)
-        ref_action.setChecked(True)
-        self.sub_menu_cell.setDisabled(self.sub_menu_cell.isEmpty())
-
-    ##########
-    #  FWHM  #
-    ##########
-    def win_fwhm_show(self):
-        """
-        Displays a window to enter instrument/beam details for calculating the instrumental broadening.
-        The window allows the user to input the following parameters:
-        - Sensor thickness: Estimated effective thickness of the detector absorption layer depending on sensor material and incident wavelength.
-        - Sensor material: Currently available options are Si and CdTe.
-        - Divergence: Estimated beam divergence.
-        - Energy resolution: Expected bandwidth of the incident X-ray beam.
-        - Scattering volume: Intersection of the sample size and the beam size as the diameter.
-        
-        The effective thickness is calculated from the attenuation length of the detector sensor material at the given energy and the sensor
-        thickness. The smaller value is used. Attenuation lengths are stored (up to 150 keV) and are retrieved by calling get_att_lengths().
-        
-        The window includes:
-        - Input fields for the parameters using QDoubleSpinBox for floats and QComboBox for sensor material.
-        - A preview plot showing the estimated Full Width at Half Maximum (FWHM) with the equation: FWHM = A×X⁴ + B×X² + C + M.
-        - A description label indicating the feature is in the test phase.
-        - Apply and Reset buttons to accept or reset the input values.
-        - A citation box with a reference to a relevant article.
-        """
-        # window to enter instrument/beam details
-        #
-        # Sensor thickness : Estimated *effective thickness* of the detector absorption layer
-        #                    depending on sensor material and incident wavelength
-        # Sensor material : currently Si, CdTe are available
-        # Divergence : Estimated beam divergence
-        # Energy resolution : Expected bandwidth of the incident X-ray beam
-        # Scattering volume : Intersection of the sample size and the beam size as the diameter
-        #
-        # - The effective thickness is calculated from the attenuation length of the detector sensor
-        #   material at the given energy and the sensor thickness. The smaller value is used.
-        # - Attenuation lengths are stored (up to 150 keV) and are retrieved by calling get_att_lengths()
-        # show window if it already was created
-        if self.fwhm_win is not None:
-            if self.fwhm_win.isVisible():
-                self.fwhm_win.close()
-                return
-            self.fwhm_win.show()
-            return
-
-        self.fwhm_win = HotkeyDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
-        self.fwhm_win.setWindowTitle('Setup calculation of the instrumental broadening')
-        self.fwhm_win.setStyleSheet('QGroupBox { font-weight: bold; }')
-        # dict: index: needed to identify the vars upon reassignment (win_fwhm_accept) and to link it to the tooltips
-        #       name: Display string
-        #       variable: the variable to use
-        #       exponent: exponent to display the value more intuitive
-        #       decimals: how many decimals to display
-        #       stepsize: single step size
-        #       unit: unit to display
-        param_dict = {'Detector':[(0, 'Sensor thickness', self.plo.sensor_thickness, 1e-6, 0, 1, '\u00B5m'),
-                                  (1, 'Sensor material', self.plo.sensor_material, 0, 0, 1, '')],
-                          'Beam':[(2, 'Divergence', self.plo.beam_divergence, 1e-6, 0, 1, '\u00B5rad'),
-                                  (3, 'Energy resolution \u0394E/E', self.plo.energy_resolution, 1e-4, 2, 0.1, '\u00B710\u207b\u2074')],
-                        'Sample':[(4, 'Scattering volume \u2300', self.plo.scattering_diameter, 1e-6, 0, 1, '\u00B5m')],}
-                      #'Display':[(5, 'FWHM threshold', self.plo.funct_fwhm_thresh, 1e-3, 'FWHM [m\u00B0]')]}
-        param_dict_change = {}
-
-        # dict needed to update the preview plot in the setup window
-        self.param_dict_tr = {'0':self.plo.sensor_thickness,
-                              '1':self.plo.sensor_material,
-                              '2':self.plo.beam_divergence,
-                              '3':self.plo.energy_resolution,
-                              '4':self.plo.scattering_diameter}
-
-        # tooltip dictionary
-        tooltips = {0:'Estimated effective thickness of the detector absorption layer depending on sensor material and incident wavelength.',
-                    1:'Detector sensor layer material.',
-                    2:'Estimated beam divergence.',
-                    3:'Expected bandwidth of the incident X-ray beam.',
-                    4:'Intersection of the sample size and the beam size as the diameter.'}
-        # add user input spinboxes for the variables
-        #  - it uses doublespinboxes for all floats
-        #    and a combobox to choose the sensor material.
-        #    Distinction is made by setting the divisor to 0.
-        layout = QtWidgets.QVBoxLayout()
-        for title, entry in param_dict.items():
-            box = QtWidgets.QGroupBox(title=title)
-            box_layout = QtWidgets.QVBoxLayout()
-            box_layout.setContentsMargins(0,0,0,0)
-            for idx, label, value, div, decimals, step, unit in entry:
-                entry_box = QtWidgets.QFrame()
-                entry_layout = QtWidgets.QHBoxLayout()
-                entry_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-                if div > 0:
-                    box_combobox = QtWidgets.QDoubleSpinBox(decimals=decimals, singleStep=step, minimum=step, maximum=100000, value=value/div)
-                    box_combobox.valueChanged.connect(self.win_fwhm_update)
-                    box_combobox.setObjectName(f'{idx} {div}')
-                else:
-                    box_combobox = QtWidgets.QComboBox()
-                    box_combobox.addItems(self.att_lengths.keys())
-                    box_combobox.setCurrentIndex(box_combobox.findText(self.plo.sensor_material))
-                    box_combobox.currentTextChanged.connect(self.win_fwhm_update)
-                    box_combobox.setObjectName(f'{idx} {div}')
-                box_combobox.setToolTip(tooltips[idx])
-                entry_label = QtWidgets.QLabel(label)
-                entry_label.setToolTip(tooltips[idx])
-                entry_layout.addWidget(entry_label)
-                entry_layout.addWidget(box_combobox)
-                entry_unit = QtWidgets.QLabel(unit)
-                entry_unit.setToolTip(tooltips[idx])
-                entry_layout.addWidget(entry_unit)
-                entry_box.setLayout(entry_layout)
-                box_layout.addWidget(entry_box)
-                param_dict_change[idx] = [box_combobox, div]
-            box.setLayout(box_layout)
-            layout.addWidget(box)
-
-        # preview plot
-        preview_box = QtWidgets.QGroupBox('Preview')
-        preview_box_layout = QtWidgets.QVBoxLayout()
-        preview_box_layout.setContentsMargins(6,6,6,6)
-        preview_box.setLayout(preview_box_layout)
-        self.fwhm_curve = pg.PlotCurveItem()
-        self.fwhm_curve.setPen(pg.mkPen(color=self.palette().text().color(), width=3))
-        self.fwhm_plot = pg.PlotWidget(background=self.palette().base().color())
-        self.fwhm_plot.viewport().setAttribute(QtCore.Qt.WidgetAttribute.WA_AcceptTouchEvents, False)
-        self.fwhm_plot.setMenuEnabled(False)
-        self.fwhm_plot.setTitle('FWHM = A\u00D7X\u2074 + B\u00D7X\u00B2 + C + M', color=self.palette().text().color())
-        self.fwhm_plot.setLabel(axis='bottom', text='2\u03B8 [\u00B0]', color=self.palette().text().color())
-        self.fwhm_plot.setLabel(axis='left', text='FWHM [\u00B0]', color=self.palette().text().color())
-        self.fwhm_plot.scale(sx=2, sy=3)
-        self.fwhm_plot.addItem(self.fwhm_curve)
-        # Thomas-Cox-Hastings curve
-        self.tch_curve = pg.PlotCurveItem()
-        self.tch_curve.setPen(pg.mkPen(color=self.palette().highlight().color(), width=6))
-        self.fwhm_plot.addItem(self.tch_curve)
-        preview_box_layout.addWidget(self.fwhm_plot)
-        layout.addWidget(preview_box)
-
-        # Thomas-Cox-Hastings
-        tch_box = QtWidgets.QGroupBox('Estimate Thomas-Cox-Hastings parameters')
-        tch_box_layout = QtWidgets.QHBoxLayout()
-        tch_box.setLayout(tch_box_layout)
-        tch_btn_est = QtWidgets.QPushButton('Estimate')
-        tch_btn_est.clicked.connect(self.estimate_tch_parameters)
-        tch_box_layout.addWidget(tch_btn_est)
-        tch_box_layout.addSpacing(20)
-        tch_label_U = QtWidgets.QLabel('U:', alignment=QtCore.Qt.AlignmentFlag.AlignRight|QtCore.Qt.AlignmentFlag.AlignVCenter)
-        tch_box_layout.addWidget(tch_label_U)
-        self.tch_value_U = QtWidgets.QLabel()
-        tch_box_layout.addWidget(self.tch_value_U)
-        tch_label_V = QtWidgets.QLabel('V:', alignment=QtCore.Qt.AlignmentFlag.AlignRight|QtCore.Qt.AlignmentFlag.AlignVCenter)
-        tch_box_layout.addWidget(tch_label_V)
-        self.tch_value_V = QtWidgets.QLabel()
-        tch_box_layout.addWidget(self.tch_value_V)
-        tch_label_W = QtWidgets.QLabel('W:', alignment=QtCore.Qt.AlignmentFlag.AlignRight|QtCore.Qt.AlignmentFlag.AlignVCenter)
-        tch_box_layout.addWidget(tch_label_W)
-        self.tch_value_W = QtWidgets.QLabel()
-        tch_box_layout.addWidget(self.tch_value_W)
-        layout.addWidget(tch_box)
-
-        # add description
-        description = QtWidgets.QLabel('This feature is currently in <b>test phase</b>, feedback is very welcome!<br>\
-                                        The estimated FWHM (H, in degrees) is shown in the bottom right corner.')
-        description.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(description)
-        # Add the apply & reset buttons
-        button_box = QtWidgets.QGroupBox()
-        button_box_layout = QtWidgets.QHBoxLayout()
-        button_box.setLayout(button_box_layout)
-        button_reset = QtWidgets.QPushButton('Reset')
-        button_reset.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-        button_reset.clicked.connect(self.win_fwhm_reset)
-        button_apply = QtWidgets.QPushButton('Apply')
-        button_apply.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-        button_apply.clicked.connect(lambda: self.win_fwhm_accept(param_dict_change, self.fwhm_win))
-        button_box_layout.addWidget(button_reset)
-        button_box_layout.addWidget(button_apply)
-        layout.addWidget(button_box)
-        # Disclimer box info
-        citation_box = QtWidgets.QGroupBox()
-        citation_box.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        citation_box_layout = QtWidgets.QVBoxLayout()
-        citation_box_layout.setContentsMargins(6,6,6,6)
-        citation_box.setLayout(citation_box_layout)
-        citation = QtWidgets.QLabel('The interested user is referred to the article:<br>\
-                                      <b>On the resolution function for powder diffraction with area detectors</b><br>\
-                                      <a href="https://doi.org/10.1107/S2053273321007506">\
-                                      D. Chernyshov <i> et al., Acta Cryst.</i> (2021). <b>A77</b>, 497-505</a>')
-        citation.setOpenExternalLinks(True)
-        citation.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        citation_box_layout.addWidget(citation)
-        layout.addWidget(citation_box)
-
-        self.fwhm_win.setWindowIcon(self.icon)
-        self.fwhm_win.setLayout(layout)
-        self.fwhm_win.setFixedSize(self.fwhm_win.sizeHint())
-
-        self.win_fwhm_update()
-        self.fwhm_win.show()
-    
-    def win_fwhm_update(self, val=None):
-        """
-        Updates the Full Width at Half Maximum (FWHM) plot based on the current parameters and theme settings.
-
-        Parameters:
-        val (optional): A value to update the parameter dictionary. If provided, it should be a numerical value.
-
-        Description:
-        - Updates the pen color and background of the FWHM plot based on the current theme.
-        - If `val` is provided, updates the parameter dictionary `param_dict_tr` with the new value.
-        - Calculates the FWHM using the current parameters:
-            - Sensor thickness
-            - Sensor material
-            - Beam divergence
-            - Energy resolution
-            - Scattering diameter
-        - Updates the FWHM plot with the calculated values.
-        - Calls `win_pxrd_update` to refresh the plot with the updated parameters.
-        """
-        if self.fwhm_win is None:
-            return
-
-        # change color if theme was changed
-        self.fwhm_curve.setPen(pg.mkPen(color=self.palette().text().color(), width=3))
-        self.fwhm_plot.setBackground(self.palette().base().color())
-
-        # Crude calculation of the FWHM
-        # 
-        # get updated values from param_dict_tr
-        # 0, self.plo.sensor_thickness
-        # 1, self.plo.sensor_material
-        # 2, self.plo.beam_divergence
-        # 3, self.plo.energy_resolution
-        # 4, self.plo.scattering_diameter
-        if val is not None:
-            idx, div = self.sender().objectName().split()
-            div = float(div)
-            if div > 0:
-                self.param_dict_tr[idx] = val * div
-            else:
-                self.param_dict_tr[idx] = val
-
-        if len(self.att_lengths[self.param_dict_tr['1']]) > int(self.geo.ener):
-            t = min(self.param_dict_tr['0'], self.att_lengths[self.param_dict_tr['1']][int(self.geo.ener)])
-        else:
-            t = self.param_dict_tr['0']
-        p = self.det.pxs * 1e-3
-        phi = self.param_dict_tr['2']
-        dE_E = self.param_dict_tr['3']
-        c = self.param_dict_tr['4']
-
-        dist = self.geo.dist * 1e-3
-        tth = np.linspace(0, np.pi/2, 180)
-        # or use:
-        # _current_tth_max = self.calc_tth_max()
-        # to get max tth for the current setup
-
-        # H2, FWHM
-        A = 2*np.log(2) / dist**2 * (p**2-2*t**2-c**2)
-        B = 2*np.log(2) / dist**2 * (2*t**2 + 2*c**2)
-        C = 2*np.log(2) * phi**2
-        M = (4*np.sqrt(2*np.log(2)) * dE_E)**2 * ((1-np.cos(tth))/(1+np.cos(tth)))
-        X = np.cos(tth)
-        H2 = A*X**4 + B*X**2 + C + M
-        fwhm = np.sqrt(H2) * 180 / np.pi
-        self.fwhm_curve.setData(np.rad2deg(tth), fwhm)
-        self.win_pxrd_update(update_dict=self.param_dict_tr)
-
-    def win_fwhm_reset(self):
-        """
-        Resets the FWHM window by closing the current window, setting the window 
-        attribute to None, and then reopening the FWHM window.
-
-        This method ensures that the FWHM window is properly reset and displayed 
-        again.
-        """
-        self.fwhm_win.close()
-        self.fwhm_win = None
-        self.win_fwhm_show()
-
-    def win_fwhm_accept(self, udict, win):
-        """
-        Updates the properties of the `plo` object based on the values from the provided dictionary
-        and closes the given window.
-
-        Parameters:
-        udict (dict): A dictionary where each key corresponds to an index and each value is a list
-                      containing a widget and a divisor. The widget's value is used to update the 
-                      properties of the `plo` object after being multiplied by the divisor.
-        win (QWidget): The window that will be closed after updating the properties.
-
-        Updates:
-        - self.plo.sensor_thickness: Rounded value from udict[0].
-        - self.plo.sensor_material: Text from udict[1].
-        - self.plo.beam_divergence: Rounded value from udict[2].
-        - self.plo.energy_resolution: Rounded value from udict[3].
-        - self.plo.scattering_diameter: Rounded value from udict[4].
-
-        Additional Actions:
-        - Enables the action to show FWHM.
-        - Sets `self.plo.show_fwhm` to False.
-        - Calls `self.toggle_fwhm()` to toggle the FWHM display.
-        - Closes the provided window.
-        """
-        # assign combo/spinbox values
-        # Index:[combo/spinbox widget, divisor]
-        self.plo.sensor_thickness = round(udict[0][0].value() * udict[0][1], 6)
-        self.plo.sensor_material = str(udict[1][0].currentText())
-        self.plo.beam_divergence = round(udict[2][0].value() * udict[2][1], 6)
-        self.plo.energy_resolution = round(udict[3][0].value() * udict[3][1], 6)
-        self.plo.scattering_diameter = round(udict[4][0].value() * udict[4][1], 6)
-        #self.plo.funct_fwhm_thresh = round(udict[5][0].value() * udict[5][1], 6)
-        self.action_funct_fwhm_show.setEnabled(True)
-        self.action_funct_fwhm_export.setEnabled(True)
-        self.plo.show_fwhm = False
-        self.toggle_fwhm()
-        win.close()
-    
-    def export_fwhm_grid(self):
-        # calculate the FWHM grid
-        # res = None -> use the current detector pixel dimensions
-        _fwhm_grid = self.calc_overlays(omega=0, res=None, pol=self.plo.polarisation_fac)[-1]
-        # find target file
-        default_path = os.path.join(os.path.expanduser('~'), f"{self.det.name.replace(' ', '_')}_FWHM")
-        target, filter = QtWidgets.QFileDialog.getSaveFileName(self, 'Export FWHM grid', default_path, "Compressed numpy array (*.npz)")
-        if not target:
-            return
-        # save compressed array to target
-        np.savez_compressed(target, fwhm=np.flipud(_fwhm_grid))
-    
-    def estimate_tch_parameters(self):
-        tth_max_rad = self.calc_tth_max()
-        tth_min = 0.0
-        tth_max = np.rad2deg(tth_max_rad)
-        tth, fwhm = self.fwhm_curve.getData()
-        tch_cond = (tth > tth_min) & (tth < tth_max)
-        tch_tth = tth[tch_cond]
-        instr_fwhm = fwhm[tch_cond]
-
-        def TCH_pv_fit(tth,*UVW):
-            """parser for the TCH pseudo-Voigt function"""
-            fwhm,_ = self.calc_TCH_pV(tth,*UVW,0,0)
-            return fwhm
-        
-        UVW = 0, 0, instr_fwhm[0]**2
-        [u,v,w], _ = curve_fit(TCH_pv_fit, tch_tth, instr_fwhm, p0=UVW, maxfev=10000)
-        tch_fwhm,_ = self.calc_TCH_pV(tch_tth, u, v, w, 0, 0)
-        self.tch_curve.setData(tch_tth, tch_fwhm)
-        self.tch_value_U.setText(f'{u:.6f}')
-        self.tch_value_V.setText(f'{v:.6f}')
-        self.tch_value_W.setText(f'{w:.6f}')
-
-    ##########
-    #  PXRD  #
-    ##########
-    def win_pxrd_plot(self, keep=False):
-        """
-        Displays or updates the Powder X-ray Diffraction (PXRD) plot window.
-        If the PXRD window is already visible and `keep` is False, the window will be closed.
-        Otherwise, the window will be updated or created if it does not exist.
-        Parameters:
-        -----------
-        keep : bool, optional
-            If True, keeps the PXRD window open even if it is already visible. Default is False.
-        Notes:
-        ------
-        - The PXRD window includes a plot of the PXRD data, with options to interact with the plot.
-        - A disclaimer box is included in the window, indicating that the feature is in the test phase.
-        - A button to set up Full Width at Half Maximum (FWHM) is also included in the disclaimer box.
-        """
-        if self.pxrd_win is not None:
-            if self.pxrd_win.isVisible() and not keep:
-                self.pxrd_win.close()
-                return
-            self.win_pxrd_update()
-            self.pxrd_win.adjustSize()
-            self.pxrd_win.show()
-            return
-        
-        #self.pxrd_win = QtWidgets.QDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
-        self.pxrd_win = HotkeyDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
-        self.pxrd_win.setStyleSheet('QGroupBox { font-weight: bold; }')
-        
-        layout = QtWidgets.QVBoxLayout()
-        
-        powder_box = QtWidgets.QGroupBox('')
-        powder_box_layout = QtWidgets.QVBoxLayout()
-        powder_box_layout.setContentsMargins(6,6,6,6)
-        powder_box.setLayout(powder_box_layout)
-        
-        self.pxrd_curve = pg.PlotCurveItem()
-        self.pxrd_curve.setPen(pg.mkPen(color=self.palette().text().color()))
-        self.pxrd_scatt = ClickableScatterPlotItem(size=20, tip=None)
-        self.pxrd_scatt.setPen(pg.mkPen(color=self.palette().highlight().color()))
-        self.pxrd_scatt.setBrush(pg.mkBrush(color=self.palette().highlight().color()))
-        self.pxrd_scatt.setSymbol(self.plo.pxrd_marker_symbol)
-        self.pxrd_scatt.sigClicked.connect(self.win_pxrd_hkl_clicked)
-        self.pxrd_scatt_highlighted = []
-
-        font = QtGui.QFont()
-        font.setPixelSize(self.plo.conic_hkl_label_size)
-        font.setBold(True)
-
-        self.pxrd_label = pg.TextItem(anchor=(0.5,0.9))
-        self.pxrd_label.setFont(font)
-        self.pxrd_regio = pg.LinearRegionItem(pen=pg.mkPen(None))
-        self.pxrd_regio.setMovable(False)
-
-        self.pxrd_plot = pg.PlotWidget(background=self.palette().base().color())
-        self.pxrd_plot.viewport().setAttribute(QtCore.Qt.WidgetAttribute.WA_AcceptTouchEvents, False)
-        self.pxrd_plot.setMenuEnabled(False)
-        self.pxrd_plot.setLabel(axis='left', text='Intensity [arb. units]', color=self.palette().text().color())
-        self.pxrd_plot.showGrid(x=True, y=True, alpha=0.5)
-        self.pxrd_plot.getPlotItem().getViewBox().setDefaultPadding(0.0)
-        self.pxrd_plot.addItem(self.pxrd_curve)
-        # if points are not visible, e.g. outside of currentrange, the plot size will
-        # not be adjusted properly and stays larger than expected.
-        # ignoreBound allows the plot to autorange disregarding the 'invisble' points
-        # however we need to increase the min y padding to make the scatterplot visible!
-        self.pxrd_plot.addItem(self.pxrd_scatt, ignoreBounds=True)
-        self.pxrd_plot.addItem(self.pxrd_label)
-        # same as above, allow the plot to disregard the beamstop if out of bounds
-        self.pxrd_plot.addItem(self.pxrd_regio, ignoreBounds=True)
-        # this invisible line will do the padding for us -> thanks Frederik!
-        self.pxrd_line = pg.InfiniteLine(pos=0, angle=0, pen=pg.mkPen(None))
-        self.pxrd_plot.addItem(self.pxrd_line)
-        
-        powder_box_layout.addWidget(self.pxrd_plot)
-        layout.addWidget(powder_box)
-
-        # Disclimer box info
-        citation_box = QtWidgets.QGroupBox()
-        citation_box.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        citation_box_layout = QtWidgets.QHBoxLayout()
-        citation_box_layout.setContentsMargins(6,6,6,6)
-        citation_box.setLayout(citation_box_layout)
-        citation = QtWidgets.QLabel('This feature is currently in <b>test phase</b>, feedback is very welcome!')
-        citation.setOpenExternalLinks(True)
-        citation_box_layout.addWidget(citation, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
-        # Add the fwhm button
-        button_fwhm = QtWidgets.QPushButton('Setup FHWM')
-        button_fwhm.clicked.connect(self.win_fwhm_show)
-        citation_box_layout.addWidget(button_fwhm, alignment=QtCore.Qt.AlignmentFlag.AlignRight)
-        layout.addWidget(citation_box)
-        
-        self.win_pxrd_update()
-        self.pxrd_win.setWindowIcon(self.icon)
-        self.pxrd_win.setLayout(layout)
-        self.pxrd_win.show()
-
-    def win_pxrd_update(self, update_dict=None):
-        """
-        Updates the PXRD (Powder X-ray Diffraction) window with new data and settings.
-        Parameters:
-        update_dict (dict, optional): A dictionary containing updated parameters for the PXRD calculation. 
-                                      If None, default parameters from the object are used. The dictionary 
-                                      should have the following keys:
-                                      - '0': Sensor thickness
-                                      - '1': Sensor material
-                                      - '2': Beam divergence
-                                      - '3': Energy resolution
-                                      - '4': Scattering diameter
-        Returns:
-        None
-        """
-        if self.pxrd_win is None:
-            return
-        
-        # remove highlighting of hkl on update
-        self.win_pxrd_lowlight()
-        
-        # change color if theme changed
-        self.pxrd_curve.setPen(self.palette().text().color())
-        self.pxrd_plot.setBackground(self.palette().base().color())
-        self.pxrd_scatt.setPen(self.palette().highlight().color())
-        self.pxrd_scatt.setBrush(self.palette().highlight().color())
-
-        if self.geo.reference.lower() == 'none':
-            self.pxrd_win.setWindowTitle(f'Load a cif to show PXRD pattern')
-            self.pxrd_curve.setData(x=None, y=None, data=None)
-            self.pxrd_scatt.setData(x=None, y=None, data=None)
-            return
-        
-        if self.geo.reference in self.ref_cif and self.ref_cif[self.geo.reference].is_complete:
-            dsp = self.ref_cif[self.geo.reference].dsp # np.array
-            peak_ttr, idx = self.dsp2tth(dsp)
-            inten = np.array(self.ref_cif[self.geo.reference].hkl)[:,4][idx] # list[ (h k l I Irel) ]
-            hkl = list(map(tuple, np.array(self.ref_cif[self.geo.reference].hkl)[:,:3][idx].astype(int)))
-        else:
-            self.pxrd_win.setWindowTitle(f'Load a cif to show PXRD pattern')
-            self.pxrd_curve.setData(x=None, y=None, data=None)
-            self.pxrd_scatt.setData(x=None, y=None, data=None)
-            return
-        
-        if update_dict is None:
-            thk = self.plo.sensor_thickness
-            mat = self.plo.sensor_material
-            div = self.plo.beam_divergence
-            dEE = self.plo.energy_resolution
-            dia = self.plo.scattering_diameter
-        else:
-            thk = update_dict['0']
-            mat = update_dict['1']
-            div = update_dict['2']
-            dEE = update_dict['3']
-            dia = update_dict['4']
-
-        self.pxrd_win.setWindowTitle(f'PXRD pattern of {self.geo.reference}')
-        self.pxrd_plot.setTitle(f'Estimated diffration pattern for a <b>perpendicular\
-                                 & flat</b> detector geometry (F\u00B2 & d-spacing @\
-                                 {self.plo.conic_ref_cif_kev} keV).', color=self.palette().text().color())
-        
-        fwhm = self.calc_FWHM(dis=self.geo.dist * 1e-3,
-                              dia=dia,
-                              thk=thk,
-                              mat=mat,
-                              pxs=self.det.pxs * 1e-3,
-                              tth=peak_ttr,
-                              nrg=self.geo.ener,
-                              div=div,
-                              dEE=dEE,
-                              deg=False)
-        # calc visible extent
-        if self._tth is not None and not isinstance(self._tth, float):
-            max_res_r = np.nanmax(self._tth)
-            min_res_r = max(np.nanmin(self._tth), fwhm.mean()/10)
-        else:
-            max_res_r = self.calc_tth_max()
-            min_res_r = fwhm.mean()/10
-
-        # add beamstop shadow
-        if self.geo.bssz and not (isinstance(self.geo.bssz, str) and self.geo.bssz.lower() == 'none'):
-            if min_res_r < self.bs_theta:
-                regio_min = self.calc_unit(min_res_r)
-                regio_max = self.calc_unit(self.bs_theta)
-                self.pxrd_regio.setRegion((regio_min, regio_max))
-                regio_color = self.beamstop_color
-                regio_color.setAlphaF(0.10)
-                self.pxrd_regio.setBrush(regio_color)
-                self.pxrd_regio.setVisible(True)
-        else:
-            self.pxrd_regio.setVisible(False)
-        
-        ttr = np.arange(min_res_r, max_res_r, fwhm.mean()/10)
-
-        gauss = np.sum(self.gaussian(ttr, np.atleast_2d(peak_ttr).T, np.atleast_2d(fwhm).T) * np.atleast_2d(inten).T, axis=0)
-        xval = self.calc_unit(ttr)
-        self.pxrd_curve.setData(x=xval, y=gauss)
-        
-        peak_xval = self.calc_unit(peak_ttr)
-        offset = (gauss.max() + gauss.min()) * self.plo.pxrd_marker_offset
-        self.pxrd_scatt.setData(x=peak_xval,
-                                y=np.zeros(len(peak_xval))-offset,
-                                data=hkl)
-        # remove peaks that are ouside of the detector screen
-        cond = (peak_xval <= xval.max()) & (peak_xval >= xval.min())
-        self.pxrd_scatt.setPointsVisible(cond)
-        self.pxrd_line.setPos(-offset*2)
-
-        # add axis label
-        self.pxrd_plot.setLabel(axis='bottom', text=self.unit_names[self.geo.unit], color=self.palette().text().color())
-        
-        # flip axis for d-spacing
-        if self.geo.unit == 1:
-            self.pxrd_plot.getPlotItem().getViewBox().invertX(True)
-        else:
-            self.pxrd_plot.getPlotItem().getViewBox().invertX(False)
-
-    def win_pxrd_hkl_clicked(self, widget, points, event):
-        if not widget.name:
-            return
-        elif len(points) > 0:
-            point = points[0]
-            if event.buttons() == QtCore.Qt.MouseButton.RightButton:
-                self.patches['reference'][point.index()].lowlight()
-                return
-            self.win_pxrd_lowlight()
-            point.setPen(pg.mkPen(color=self.conic_highlight))
-            point.setBrush(pg.mkBrush(color=self.conic_highlight))
-            self.pxrd_scatt_highlighted.append(point)
-            self.win_pxrd_set_hkl_label(point)
-            # highlight in main window
-            self.patches['reference'][point.index()].highlight()
-
-    def win_pxrd_set_hkl_label(self, point):
-        self.pxrd_label.setText(' '.join(map(str, point.data())))
-        self.pxrd_label.setPos(point.pos())
-        self.pxrd_label.setVisible(True)
-    
-    def win_pxrd_highlight(self, index):
-        # highlight from main window
-        self.win_pxrd_lowlight()
-        point = self.pxrd_scatt.points()[index]
-        point.setPen(pg.mkPen(self.conic_highlight))
-        point.setBrush(pg.mkBrush(self.conic_highlight))
-        self.pxrd_scatt_highlighted.append(point)
-        self.win_pxrd_set_hkl_label(point)
-
-    def win_pxrd_lowlight(self):
-        _pen = pg.mkPen(color=self.palette().highlight().color())
-        _brush = pg.mkBrush(color=self.palette().highlight().color())
-        for p in self.pxrd_scatt_highlighted:
-            #p.resetPen()
-            p.setPen(_pen)
-            p.setBrush(_brush)
-        self.pxrd_label.setVisible(False)
-
-    #############
-    #  EXPORT   #
-    #############
-    def win_export_show(self):
-        """
-        Displays a dialog window for exporting current settings to a file.
-        This method creates and configures a QDialog window with various widgets
-        for selecting detectors, beamstop sizes, and reviewing parameters. The 
-        window includes the following components:
-        - Detector bank tree widget: Allows selection of detector types and sizes.
-        - Beamstop bank list widget: Allows specification of available beamstop sizes.
-        - Parameter tree widget: Displays and allows editing of various parameters.
-        The dialog window also includes buttons for adding/removing beamstop sizes 
-        and exporting the settings to a file.
-        Components:
-        - QDialog: The main dialog window.
-        - QVBoxLayout: Main vertical layout for the dialog.
-        - QHBoxLayout: Horizontal layout for grouping widgets.
-        - QFrame: Frame to hold the horizontal layout.
-        - QGroupBox: Group boxes for organizing the detector bank, beamstop bank, and parameters.
-        - QTreeWidget: Tree widget for displaying detector types and sizes.
-        - QListWidget: List widget for displaying beamstop sizes.
-        - QTreeWidget: Tree widget for displaying and editing parameters.
-        - QToolButton: Buttons for adding/removing beamstop sizes and exporting settings.
-        Note:
-        - The method uses custom item delegates for editing float values in the 
-          beamstop list and various data types in the parameter tree.
-        - The method highlights the current detector type and size in the detector tree.
-        - The method connects various signals to appropriate slots for handling user interactions.
-        """
-        # set flags=QtCore.Qt.WindowType.Tool for the window
-        # to not loose focus when the FileDialog is closed
-        self.export_win = QtWidgets.QDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
-        self.export_win.setWindowTitle('Export current settings to file')
-        layout_vbox = QtWidgets.QVBoxLayout()
-        layout_hbox = QtWidgets.QHBoxLayout()
-        layout_hbox.setContentsMargins(0,0,0,0)
-        frame = QtWidgets.QFrame()
-        frame.setLayout(layout_hbox)
-
-        self.export_win.setLayout(layout_vbox)
-
-        # Fonts
-        font_header = QtGui.QFont()
-        font_header.setPixelSize(self.plo.slider_label_size)
-        font_header.setBold(True)
-        font_normal = QtGui.QFont()
-        font_normal.setPixelSize(self.plo.slider_label_size)
-        font_normal.setBold(False)
-
-        # Detector tree box
-        qbox_det = QtWidgets.QGroupBox()
-        qbox_det.setTitle('Detector bank')
-        qbox_det.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
-        qbox_det.setFont(font_header)
-        layout_qbox_det = QtWidgets.QVBoxLayout()
-        qbox_det.setLayout(layout_qbox_det)
-
-        # Detector tree
-        self.tree_det = QtWidgets.QTreeWidget()
-        self.tree_det.setToolTip('Add detectors and models to the detector bank.\nSelect none to make all detectors and models available.')
-        self.tree_det.setColumnCount(1)
-        self.tree_det.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.MultiSelection)
-        self.tree_det.setHeaderLabels(['Detector type / size'])
-        self.tree_det.header().setFont(font_header)
-        self.tree_det.setAlternatingRowColors(True)
-        _cur_det_type = None
-        _cur_det_size = None
-        for det, specs in self.get_det_library(update=False, reset=False).items():
-            item = QtWidgets.QTreeWidgetItem([str(det)])
-            item.setFont(0, font_header)
-            if self.geo.det_type == str(det):
-                _cur_det_type = item
-            for val in specs['size'].keys():
-                child = QtWidgets.QTreeWidgetItem([str(val)])
-                child.setFont(0, font_normal)
-                if self.geo.det_size == str(val) and self.geo.det_type == str(det):
-                    _cur_det_size = child
-                item.addChild(child)
-            self.tree_det.addTopLevelItem(item)
-        self.tree_det.expandAll()
-        self.tree_det.itemClicked.connect(self.win_export_ghost_select)
-
-        # highlight current detector type/size
-        if _cur_det_type is not None:
-            _cur_det_type.setSelected(True)
-        if _cur_det_size is not None:
-            _cur_det_size.setSelected(True)
-
-        # Beamstop list tree box
-        qbox_bsb = QtWidgets.QGroupBox()
-        qbox_bsb.setTitle('Beamstop bank')
-        qbox_bsb.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
-        qbox_bsb.setFont(font_header)
-        layout_qbox_bsb = QtWidgets.QVBoxLayout()
-        layout_qbox_bsb.setSpacing(0)
-        qbox_bsb.setLayout(layout_qbox_bsb)
-
-        # doubleSpinBox editor for the beamstop bank list widget
-        class itemDelegateFloat(QtWidgets.QStyledItemDelegate):
-            def displayText(self, value, locale):
-                return f'{value:.1f}'
-            
-            def createEditor(self, parent, option, index):
-                box = QtWidgets.QDoubleSpinBox(parent)
-                box.setDecimals(1)
-                box.setSingleStep(0.1)
-                box.setMinimum(0)
-                box.setMaximum(100)
-                return box
-
-        # Beamstop bank list widget
-        self.tree_bsb = QtWidgets.QListWidget()
-        self.tree_bsb.setAlternatingRowColors(True)
-        self.tree_bsb.setItemDelegate(itemDelegateFloat())
-        self.tree_bsb.setToolTip('Specify the available beamstop sizes.')
-        self.tree_bsb.itemChanged.connect(self.tree_bsb.sortItems)
-        for bs_size in self.geo.bs_list:
-            item = QtWidgets.QListWidgetItem()
-            item.setData(2, bs_size)
-            item.setFont(font_normal)
-            item.setFlags(item.flags()|QtCore.Qt.ItemFlag.ItemIsEditable)
-            self.tree_bsb.addItem(item)
-
-        # Add row to beamstop bank list widget
-        def row_add(aQListWidget, font):
-            vmax = 0
-            for i in range(aQListWidget.count()):
-                if aQListWidget.item(i).data(0) > vmax:
-                    vmax = aQListWidget.item(i).data(0)
-            item = QtWidgets.QListWidgetItem()
-            item.setData(2, vmax + 1)
-            item.setFont(font)
-            item.setFlags(item.flags()|QtCore.Qt.ItemFlag.ItemIsEditable)
-            aQListWidget.addItem(item)
-
-        # Remove row to beamstop bank list widget
-        def row_rem(aQListWidget):
-            _ = aQListWidget.takeItem(aQListWidget.currentRow())
-
-        # add/remove buttons for the beamstop bank list widget
-        button_add = QtWidgets.QToolButton()
-        button_add.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
-        button_add.setText('+')
-        button_add.setFont(font_header)
-        button_add.setToolTip('Add a new entry to the list.')
-        button_add.clicked.connect(lambda: row_add(self.tree_bsb, font_normal))
-        # remove button
-        button_rem = QtWidgets.QToolButton()
-        button_rem.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
-        button_rem.setText('-')
-        button_rem.setFont(font_header)
-        button_rem.setToolTip('Remove the highlighted entry from the list.')
-        button_rem.clicked.connect(lambda: row_rem(self.tree_bsb))
-        # button in layout
-        layout_hbox_but = QtWidgets.QHBoxLayout()
-        layout_hbox_but.addWidget(button_add)
-        layout_hbox_but.addWidget(button_rem)
-        qbox_buttons = QtWidgets.QGroupBox()
-        qbox_buttons.setLayout(layout_hbox_but)
-
-        # Parameter tree box
-        qbox_par = QtWidgets.QGroupBox()
-        qbox_par.setTitle('Review parameters')
-        qbox_par.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
-        qbox_par.setFont(font_header)
-        layout_qbox_par = QtWidgets.QVBoxLayout()
-        qbox_par.setLayout(layout_qbox_par)
-
-        # Make only one column editable
-        # Specify the editors for different data types
-        class genericItemDelegate(QtWidgets.QItemDelegate):
-            def createEditor(self, parent, option, index):
-                if index.column() == 1:
-                    # bool needs to be evaluated before int as True and False
-                    # will be interpreted as integers
-                    if isinstance(index.data(0), bool):
-                        return super(genericItemDelegate, self).createEditor(parent, option, index)
-                    elif isinstance(index.data(0), int):
-                        box = QtWidgets.QSpinBox(parent)
-                        box.setSingleStep(1)
-                        box.setMinimum(int(-1e9))
-                        box.setMaximum(int(1e9))
-                        return box
-                    elif isinstance(index.data(0), float):
-                        box = QtWidgets.QDoubleSpinBox(parent)
-                        box.setDecimals(2)
-                        box.setSingleStep(0.01)
-                        box.setMinimum(-1e9)
-                        box.setMaximum(1e9)
-                        return box
-                    elif isinstance(index.data(0), str) and index.data(0).startswith('#'):
-                        current_color = QtGui.QColor(index.data(0))
-                        box = QtWidgets.QColorDialog(current_color, parent)
-                        box.setOption(QtWidgets.QColorDialog.ColorDialogOption.ShowAlphaChannel, on=True)
-                        return box
-                    else:
-                        return super(genericItemDelegate, self).createEditor(parent, option, index)
-                return None
-            
-            def setModelData(self, editor, model, index):
-                if isinstance(editor, QtWidgets.QColorDialog):
-                    if editor.result():
-                        model.setData(index, editor.selectedColor().name(format=QtGui.QColor.NameFormat.HexArgb))
-                        model.setData(index.siblingAtColumn(2), QtGui.QBrush(editor.selectedColor()), QtCore.Qt.ItemDataRole.BackgroundRole)
-                else:
-                    return super(genericItemDelegate, self).setModelData(editor, model, index)
-
-        # Parameter tree widget
-        self.tree_par = QtWidgets.QTreeWidget()
-        self.tree_par.setColumnCount(3)
-        #self.tree_par.setHeaderLabels(['Parameter', 'Value', '#'])
-        #self.tree_par.header().setFont(font_header)
-        self.tree_par.setHeaderHidden(True)
-        self.tree_par.setAlternatingRowColors(True)
-        self.tree_par.setItemDelegate(genericItemDelegate())
-
-        # det_bank and bs_list need some special treatment
-        # to facilitate their editing
-        dont_show = ['det_bank', 'bs_list']
-        # detailed header
-        translation = {'geo':'Geometry',
-                       'plo':'Plot layout',
-                       'thm':'Theme',
-                       'lmt':'Limits'}
-        for section, values in {'geo':self.geo.__dict__, 'plo':self.plo.__dict__, 'thm':self.thm.__dict__, 'lmt':self.lmt.__dict__}.items():
-            item = QtWidgets.QTreeWidgetItem([translation[section]])
-            item.setFont(0, font_header)
-            item.setText(1, section)
-            #item.setFlags(QtCore.Qt.ItemFlag.ItemIsSelectable|QtCore.Qt.ItemFlag.ItemIsEnabled)
-            for par, val in values.items():
-                if par in dont_show:
-                    continue
-                child = QtWidgets.QTreeWidgetItem()
-                child.setData(0, 0, str(par))
-                if section in self.tooltips and par in self.tooltips[section]:
-                    child.setToolTip(0, self.tooltips[section][par])
-                    child.setToolTip(1, self.tooltips[section][par])
-                child.setData(1, 2, val)
-                if isinstance(val, str) and val.startswith('#'):
-                    child.setBackground(2, QtGui.QBrush(QtGui.QColor(val)))
-                child.setFont(0, font_normal)
-                child.setFont(1, font_normal)
-                child.setFlags(item.flags()|QtCore.Qt.ItemFlag.ItemIsEditable)
-                item.addChild(child)
-            self.tree_par.addTopLevelItem(item)
-        self.tree_par.expandAll()
-        self.tree_par.resizeColumnToContents(0)
-        self.tree_par.resizeColumnToContents(1)
-
-        button_export = QtWidgets.QToolButton()
-        button_export.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
-        button_export.setText('Export settings to file')
-        button_export.setFont(font_header)
-        button_export.clicked.connect(self.win_export_to)
-
-        qbox_btn = QtWidgets.QGroupBox()
-        layout_qbox_btn = QtWidgets.QVBoxLayout()
-        qbox_btn.setLayout(layout_qbox_btn)
-        
-        layout_vbox.addWidget(frame)
-        layout_hbox.addWidget(qbox_det, stretch=2)
-        layout_hbox.addWidget(qbox_bsb, stretch=1)
-        layout_hbox.addWidget(qbox_par, stretch=3)
-        layout_vbox.addWidget(qbox_btn)
-        layout_qbox_det.addWidget(self.tree_det)
-        layout_qbox_bsb.addWidget(self.tree_bsb)
-        layout_qbox_bsb.addWidget(qbox_buttons)
-        layout_qbox_par.addWidget(self.tree_par)
-        layout_qbox_btn.addWidget(button_export)
-
-        self.export_win.show()
-
-    def win_export_ghost_select(self, item):
-        """
-        Handles the selection logic for a tree-like structure in a GUI.
-
-        Parameters:
-        item (QTreeWidgetItem): The item whose selection state has changed.
-
-        Behavior:
-        - If the item is a top-level item (i.e., it has no parent), selecting it will select all its children,
-          and deselecting it will deselect all its children.
-        - If the item is a child item (i.e., it has a parent), selecting any child will select the parent,
-          and deselecting all children will deselect the parent.
-        """
-        parent = item.parent()
-        # toplevel -> multiselect
-        if parent == None:
-            if item.isSelected():
-                [item.child(i).setSelected(True) for i in range(item.childCount())]
-            else:
-                [item.child(i).setSelected(False) for i in range(item.childCount())]
-        # sublevel -> single + top select
-        else:
-            if any([parent.child(i).isSelected() for i in range(parent.childCount())]):
-                parent.setSelected(True)
-            else:
-                parent.setSelected(False)
-
-    def win_export_to(self):
-        """
-        Exports the current detector and beamstop settings to a JSON file.
-        This method performs the following steps:
-        1. Collects selected detector items from the tree widget and organizes them into a dictionary.
-        2. Retrieves beamstop values from a list widget and rounds them to 5 decimal places.
-        3. Constructs a settings dictionary from the tree widget, rounding float values to 5 decimal places.
-        4. Prompts the user to select a file location to save the settings as a JSON file.
-        5. Adds the detector bank and beamstop list to the settings dictionary.
-        6. Writes the settings dictionary to the selected JSON file.
-        7. Closes the export window if it is open.
-        8. Activates the newly exported settings file.
-        9. Adds the new settings file to the custom settings menu and checks it if it is not already in the list.
-        Returns:
-            None
-        """
-        # make detector bank/dict from selection
-        det_bank = {}
-        for item in self.tree_det.selectedItems():
-            if item.parent() == None:
-                det_name = item.text(0)
-                det_types = [item.child(i).text(0) for i in range(item.childCount()) if item.child(i).isSelected()]
-                det_bank.update({det_name:det_types})
-
-        # get beamstop list from listwidget
-        bs_list = [round(self.tree_bsb.item(i).data(0), 5) for i in range(self.tree_bsb.count())]
-
-        # make settings dict from treewidget
-        settings = dict()
-        for i in range(self.tree_par.topLevelItemCount()):
-            top = self.tree_par.topLevelItem(i)
-            key = top.data(1, 0)
-            settings[key] = dict()
-            for j in range(top.childCount()):
-                k = top.child(j).data(0, 0)
-                v = top.child(j).data(1, 0)
-                if isinstance(v, float):
-                    v = round(v, 5)
-                settings[key][k] = v
-
-        # save parameters to settings file
-        target, filter = QtWidgets.QFileDialog.getSaveFileName(self, 'Export settings file', self.path_settings_current, "Settings files (*.json)")
-        if not target:
-            return
-        
-        # add det_bank and bs_list to settings
-        settings['geo']['det_bank'] = det_bank
-        settings['geo']['bs_list'] = bs_list
-        with open(target, 'w') as wf:
-            json.dump(settings, wf, indent=4)
-        
-        # close the window
-        if self.export_win:
-            self.export_win.close()
-
-        # activate exported settings file
-        basename = os.path.basename(target)
-        self.settings_change_file(basename)
-
-        # add new settings file to menu and check it
-        # add if not in list
-        if basename not in [action.text() for action in self.menu_custom_settings.actions()]:
-            cset_action = QtGui.QAction(basename, self, checkable=True)
-            self.menu_set_action(cset_action, self.settings_change_file, basename)
-            self.menu_custom_settings.addAction(cset_action)
-            self.group_cset.addAction(cset_action)
-            cset_action.setChecked(True)
-        # check if in list
-        else:
-            for action in self.menu_custom_settings.actions():
-                if action.text() == basename:
-                    action.setChecked(True)
-
-    ###############
-    # DETECTOR DB #
-    ###############
-    def win_detdb_show(self):
-        """
-        Displays the detector databank window.
-        This method creates and configures a QDialog window for editing the detector databank.
-        It sets up various UI components including list widgets, table widgets, and buttons 
-        for managing detector parameters and sizes. The window is designed to maintain focus 
-        when a FileDialog is closed.
-        UI Components:
-        - Detector bank list widget
-        - Detector size table widget
-        - Detector parameter table widget
-        - Detector dimensions display
-        - Add/Remove buttons for detector list and size list
-        - Save and Preview buttons
-        Signals:
-        - Connects various signals to their respective slots for handling user interactions.
-        Notes:
-        - The window uses custom item delegates for editing integer values in the table widget.
-        - The detector databank is copied to a local dictionary for manipulation.
-        - Tooltips are provided for various UI elements to guide the user.
-        """
-        # set flags=QtCore.Qt.WindowType.Tool for the window
-        # to not loose focus when the FileDialog is closed
-        self.detdb_win = QtWidgets.QDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
-        self.detdb_win.setWindowTitle('Edit detector databank')
-        self.detdb_win.finished.connect(self.win_detdb_on_close)
-        layout_vbox = QtWidgets.QVBoxLayout()
-        layout_hbox = QtWidgets.QHBoxLayout()
-        layout_hbox.setContentsMargins(0,0,0,0)
-        frame = QtWidgets.QFrame()
-        frame.setLayout(layout_hbox)
-        self.detdb_win.setLayout(layout_vbox)
-
-        self.detdb_win.setStyleSheet('QGroupBox { font-weight: bold; } ')
-
-        # Fonts
-        font_header = QtGui.QFont()
-        font_header.setPixelSize(self.plo.slider_label_size)
-        font_header.setBold(True)
-        font_normal = QtGui.QFont()
-        font_normal.setPixelSize(self.plo.slider_label_size)
-        font_normal.setBold(False)
-
-        # Detector tree box
-        qbox_detbank = QtWidgets.QGroupBox()
-        qbox_detbank.setTitle('Detector bank')
-        qbox_detbank.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
-        layout_qbox_detbank = QtWidgets.QVBoxLayout()
-        qbox_detbank.setLayout(layout_qbox_detbank)
-
-        self._db_dict = self.detector_db.copy()
-
-        tooltips = {'hmp' : 'Module size (horizontal) [px]',
-                    'vmp' : 'Module size (vertical) [px]',
-                    'pxs' : 'Pixel size [mm]',
-                    'hgp' : 'Module gap (horizontal) [px]',
-                    'vgp' : 'Module gap (vertical) [px]',
-                    'cbh' : 'Central beam hole [px]',
-                    'name': 'Detector size name [str]',
-                    'hmn' : 'Module number (horizontal) [int]',
-                    'vmn' : 'Module number (vertical) [int]',
-                    }
-
-        # detector bank list widget
-        self.list_db = QtWidgets.QListWidget()
-        self.list_db.setAlternatingRowColors(True)
-        self.list_db.currentItemChanged.connect(self.win_detdb_par_update)
-        self.list_db.itemChanged.connect(self.win_detdb_dict_update)
-        layout_qbox_detbank.addWidget(self.list_db)
-        for det in self._db_dict.keys():
-            item = QtWidgets.QListWidgetItem()
-            item.setData(0, det)
-            self.list_db.addItem(item)
-
-        # Detector size box
-        qbox_detsize = QtWidgets.QGroupBox()
-        qbox_detsize.setTitle('Size')
-        qbox_detsize.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
-        layout_qbox_detsize = QtWidgets.QVBoxLayout()
-        qbox_detsize.setLayout(layout_qbox_detsize)
-
-        # doubleSpinBox editor for the beamstop bank list widget
-        class itemDelegateInt(QtWidgets.QStyledItemDelegate):
-            def createEditor(self, parent, option, index):
-                if isinstance(index.data(0), int):
-                    box = QtWidgets.QSpinBox(parent)
-                    box.setSingleStep(1)
-                    box.setMinimum(1)
-                    box.setMaximum(100)
-                    return box
-                else:
-                    return super(itemDelegateInt, self).createEditor(parent, option, index)
-        
-        # detector size table widget
-        self.table_size = QtWidgets.QTableWidget(columnCount=3)
-        self.table_size.setHorizontalHeaderLabels(['name','hmn', 'vmn'])
-        self.table_size.horizontalHeaderItem(0).setToolTip(tooltips['name'])
-        self.table_size.horizontalHeaderItem(1).setToolTip(tooltips['hmn'])
-        self.table_size.horizontalHeaderItem(2).setToolTip(tooltips['vmn'])
-        self.table_size.setAlternatingRowColors(True)
-        self.table_size.verticalHeader().hide()
-        self.table_size.setSelectionBehavior(QtWidgets.QTableWidget.SelectionBehavior.SelectRows)
-        self.table_size.setSelectionMode(QtWidgets.QTableWidget.SelectionMode.SingleSelection)
-        self.table_size.setItemDelegate(itemDelegateInt())
-        self.table_size.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
-        self.table_size.cellChanged.connect(self.win_detdb_size_update)
-        self.table_size.itemSelectionChanged.connect(self.win_detdb_dim_update)
-        layout_qbox_detsize.addWidget(self.table_size)
-
-        # Detector parameter box
-        qbox_detpar = QtWidgets.QGroupBox()
-        qbox_detpar.setTitle('Parameter')
-        qbox_detpar.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
-        layout_qbox_detpar = QtWidgets.QGridLayout()
-        qbox_detpar.setLayout(layout_qbox_detpar)
-
-        # detector par table widget
-        self.detpar_items = {}
-        det = next(iter(self._db_dict.keys()))
-        for idx, (par, val) in enumerate(self._db_dict[det].items()):
-            if par == 'size':
-                pass
-            elif par == 'pxs':
-                widget_label = QtWidgets.QLabel(par)
-                widget_label.setToolTip(tooltips[par])
-                widget_value = QtWidgets.QDoubleSpinBox()
-                widget_value.setValue(val)
-                widget_value.setDecimals(3)
-                widget_value.setMinimum(0.001)
-                widget_value.setMaximum(10)
-                widget_value.setSingleStep(0.001)
-                widget_value.setSuffix(' mm')
-                widget_value.setObjectName(par)
-                widget_value.valueChanged.connect(self.win_detdb_par_change)
-                layout_qbox_detpar.addWidget(widget_label, idx, 0)
-                layout_qbox_detpar.addWidget(widget_value, idx, 1)
-                self.detpar_items[par] = widget_value
-            else:
-                widget_label = QtWidgets.QLabel(par)
-                widget_label.setToolTip(tooltips[par])
-                widget_value = QtWidgets.QSpinBox()
-                widget_value.setValue(val)
-                widget_value.setMinimum(0)
-                widget_value.setMaximum(100000)
-                widget_value.setSuffix(' px')
-                widget_value.setObjectName(par)
-                widget_value.valueChanged.connect(self.win_detdb_par_change)
-                layout_qbox_detpar.addWidget(widget_label, idx, 0)
-                layout_qbox_detpar.addWidget(widget_value, idx, 1)
-                self.detpar_items[par] = widget_value
-
-        layout_qbox_detpar.setRowStretch(idx, 1)
-
-        # Detector dimensions box
-        qbox_detdim = QtWidgets.QGroupBox()
-        qbox_detdim.setTitle('Detector area (h \u00D7 v)')
-        qbox_detdim.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
-        layout_qbox_detdim = QtWidgets.QVBoxLayout()
-        qbox_detdim.setLayout(layout_qbox_detdim)
-        self._dim_mm = QtWidgets.QLabel()
-        self._dim_px = QtWidgets.QLabel()
-        layout_qbox_detdim.addWidget(self._dim_mm)
-        layout_qbox_detdim.addWidget(self._dim_px)
-        layout_qbox_detpar.addWidget(qbox_detdim, layout_qbox_detpar.rowCount(), 0, QtCore.Qt.AlignmentFlag.AlignCenter, 2)
-
-        # Add row to detector list widget
-        def row_add(aQListWidget):
-            new = f'CUSTOM{aQListWidget.count():>02}'
-            item = QtWidgets.QListWidgetItem()
-            item.setData(2, new)
-            item.setFlags(item.flags()|QtCore.Qt.ItemFlag.ItemIsEditable)
-
-            self._db_dict[new] = {
-                'pxs' : 100e-3, # [mm] Pixel size
-                'hmp' : 100,    # [px] Module size (horizontal)
-                'vmp' : 100,    # [px] Module size (vertical)
-                'hgp' : 0,      # [px] Gap between modules (horizontal)
-                'vgp' : 0,      # [px] Gap between modules (vertical)
-                'cbh' : 0,      # [px] Central beam hole
-                'size' : {'ONE':(1,1)},
-                }
-            
-            aQListWidget.addItem(item)
-            aQListWidget.setCurrentItem(item)
-
-        # Remove row to detector list widget
-        def rem_item(aQListWidget):
-            det = aQListWidget.takeItem(aQListWidget.currentRow())
-            self._db_dict.pop(det.text())
-
-        # Remove row to detector list widget
-        def rem_row(aQTableWidget):
-            row = aQTableWidget.currentRow()
-            det = self.list_db.currentItem().text()
-            size = self.table_size.item(row, 0).text()
-            aQTableWidget.removeRow(row)
-            self._db_dict[det]['size'].pop(size)
-
-        # Detector button box
-        qbox_detbutton = QtWidgets.QGroupBox()
-        qbox_detbutton.setTitle('')
-        layout_qbox_detbutton = QtWidgets.QHBoxLayout()
-        qbox_detbutton.setLayout(layout_qbox_detbutton)
-        # add/remove buttons detector list widget
-        button_add = QtWidgets.QToolButton()
-        button_add.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
-        button_add.setText('+')
-        button_add.setToolTip('Add a new entry to the list.')
-        button_add.clicked.connect(lambda: row_add(self.list_db))
-        # remove button
-        button_rem = QtWidgets.QToolButton()
-        button_rem.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
-        button_rem.setText('-')
-        button_rem.setToolTip('Remove the highlighted entry from the list.')
-        button_rem.clicked.connect(lambda: rem_item(self.list_db))
-        layout_qbox_detbutton.addWidget(button_add)
-        layout_qbox_detbutton.addWidget(button_rem)
-        layout_qbox_detbank.addWidget(qbox_detbutton)
-
-        # Add row to detector size list widget
-        def row_add_size(aQTableWidget, currentItem):
-            new = f'C{aQTableWidget.rowCount():>02}'
-            self._db_dict[currentItem.text()]['size'][new] = (1,1)
-            self.win_detdb_par_update(currentItem)
-
-        # Detector size button box
-        qbox_sizebutton = QtWidgets.QGroupBox()
-        qbox_sizebutton.setTitle('')
-        layout_qbox_sizebutton = QtWidgets.QHBoxLayout()
-        qbox_sizebutton.setLayout(layout_qbox_sizebutton)
-        # add/remove buttons for the beamstop bank list widget
-        button_size_add = QtWidgets.QToolButton()
-        button_size_add.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
-        button_size_add.setText('+')
-        button_size_add.setToolTip('Add a new entry to the list.')
-        button_size_add.clicked.connect(lambda: row_add_size(self.table_size, self.list_db.currentItem()))
-        # remove button
-        button_size_rem = QtWidgets.QToolButton()
-        button_size_rem.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
-        button_size_rem.setText('-')
-        button_size_rem.setToolTip('Remove the highlighted entry from the list.')
-        button_size_rem.clicked.connect(lambda: rem_row(self.table_size))
-        layout_qbox_sizebutton.addWidget(button_size_add)
-        layout_qbox_sizebutton.addWidget(button_size_rem)
-        layout_qbox_detsize.addWidget(qbox_sizebutton)
-
-        # Close button box
-        qbox_accept = QtWidgets.QGroupBox()
-        #qbox_accept.setTitle('')
-        #qbox_accept.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
-        layout_qbox_accept = QtWidgets.QHBoxLayout()
-        qbox_accept.setLayout(layout_qbox_accept)
-
-        # store button
-        button_store = QtWidgets.QToolButton()
-        button_store.setSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Fixed)
-        button_store.setText('Save')
-        button_store.setToolTip('This will overwrite the detector_db.json. Changes are saved and available upon restart of xrdPlanner.')
-        button_store.clicked.connect(self.win_detdb_overwrite)
-
-        # preview button
-        button_preview = QtWidgets.QToolButton()
-        button_preview.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
-        button_preview.setText('Preview')
-        button_preview.setToolTip('Show a preview of the current detector. All changes are available during this session, the data bank will not be updated.')
-        button_preview.clicked.connect(self.win_detdb_preview)
-
-        # add widgets
-        layout_hbox.addWidget(qbox_detbank)
-        layout_hbox.addWidget(qbox_detpar)
-        layout_hbox.addWidget(qbox_detsize)
-        layout_vbox.addWidget(frame)
-        layout_vbox.addWidget(qbox_accept)
-        layout_qbox_accept.addWidget(button_store)
-        layout_qbox_accept.addWidget(button_preview)
-        
-        # select detector
-        self.list_db.setCurrentRow(0)
-        # calculate detector size for given settings
-        self.win_detdb_dim_update()
-        self.list_db.setFocus()
-        self.detdb_win.show()
-    
-    def win_detdb_dim_update(self):
-        """
-        Updates the detector database dimensions displayed in the UI.
-
-        This method retrieves the current detector and its dimensions from the UI elements,
-        calculates the dimensions in both millimeters and pixels, and updates the corresponding
-        UI text fields with these values.
-
-        The dimensions are calculated based on the horizontal and vertical multipliers and gaps,
-        as well as the pixel size from the detector database.
-
-        Raises:
-            ValueError: If the text from the table items cannot be converted to integers.
-        """
-        det = self.list_db.currentItem().text()
-        size_row = self.table_size.currentRow()
-        hmn = int(self.table_size.item(size_row, 1).text())
-        vmn = int(self.table_size.item(size_row, 2).text())
-        pxs = self._db_dict[det]['pxs']
-        xdim = self._db_dict[det]['hmp'] * hmn + self._db_dict[det]['hgp'] * (hmn-1) + self._db_dict[det]['cbh']
-        ydim = self._db_dict[det]['vmp'] * vmn + self._db_dict[det]['vgp'] * (vmn-1) + self._db_dict[det]['cbh']
-        self._dim_mm.setText(f'{xdim * pxs:.1f} \u00D7 {ydim * pxs:.1f} mm\u00B2')
-        self._dim_px.setText(f'{xdim:.0f} \u00D7 {ydim:.0f} px')
-    
-    def win_detdb_par_change(self, val):
-        """
-        Updates the detector database parameter with the given value and refreshes the display.
-
-        This method retrieves the current detector from the list, identifies the parameter to be updated
-        based on the sender's object name, and updates the corresponding value in the internal database
-        dictionary. After updating the value, it calls the method to update the display dimensions.
-
-        Args:
-            val: The new value to set for the specified parameter.
-        """
-        det = self.list_db.currentItem().text()
-        par = self.sender().objectName()
-        self._db_dict[det][par] = val
-        self.win_detdb_dim_update()
-
-    def win_detdb_size_update(self):
-        """
-        Updates the 'size' entry in the detector database dictionary based on the current items in the table.
-
-        This method retrieves the currently selected detector from the list and updates its 'size' entry in the 
-        internal database dictionary (`_db_dict`). The 'size' entry is replaced with a new dictionary where each 
-        key is a size name and each value is a tuple containing horizontal and vertical measurements.
-
-        The method also calls `win_detdb_dim_update` to update the dimensions.
-
-        Note:
-            The old 'size' entry is completely replaced, and any previous data is lost.
-
-        Raises:
-            AttributeError: If the current item in the list or any item in the table is None.
-            ValueError: If the horizontal or vertical measurements cannot be converted to integers.
-        """
-        # The table is replacing the dict[det]['size'] entry on change
-        # I don't know how to properly handle the renaming of a 'size'
-        # the 'old' name, that is to be replaced be 'new', is lost
-        det = self.list_db.currentItem().text()
-        self._db_dict[det]['size'] = {}
-        for row in range(self.table_size.rowCount()):
-            size = self.table_size.item(row, 0).text()
-            hmn = int(self.table_size.item(row, 1).text())
-            vmn = int(self.table_size.item(row, 2).text())
-            self._db_dict[det]['size'][size] = (hmn, vmn)
-        self.win_detdb_dim_update()
-
-    def win_detdb_dict_update(self, QListWidgetItem):
-        """
-        Updates the detector database dictionary with the selected detector.
-
-        Args:
-            QListWidgetItem (QListWidgetItem): The item selected from the QListWidget, representing a detector.
-
-        Updates:
-            - Moves the current detector entry to the new detector key in the database dictionary.
-            - Calls the method to update the detector dimensions in the window.
-        """
-        det = QListWidgetItem.text()
-        self._db_dict[det] = self._db_dict.pop(self.current_detector)
-        self.win_detdb_dim_update()
-
-    def win_detdb_par_update(self, item):
-        """
-        Updates the detector database parameters in the UI based on the selected item.
-
-        Args:
-            item (QTableWidgetItem): The selected item from the detector database table.
-
-        This method performs the following actions:
-        - Sets the current detector to the text of the selected item.
-        - Iterates through the parameters and values of the selected detector in the database.
-        - If the parameter is 'size', it updates the size table in the UI:
-            - Blocks signals from the size table to prevent unwanted signal emissions.
-            - Clears the contents of the size table.
-            - Sets the row count of the size table to 0.
-            - Iterates through the size values and populates the size table with the new values.
-            - Sets the current cell of the size table to the first cell of each row.
-            - Unblocks signals from the size table.
-        - For other parameters, it updates the corresponding UI elements:
-            - Blocks signals from the UI element to prevent unwanted signal emissions.
-            - Sets the value of the UI element to the parameter value.
-            - Unblocks signals from the UI element.
-        - Calls the `win_detdb_dim_update` method to update the dimensions in the UI.
-        """
-        self.current_detector = item.text()
-        for par, val in self._db_dict[item.text()].items():
-            if par == 'size':
-                self.table_size.blockSignals(True)
-                self.table_size.clearContents()
-                self.table_size.setRowCount(0)
-                for i, (name, (hmn,vmn)) in enumerate(val.items()):
-                    self.table_size.insertRow(i)
-                    self.table_size.setItem(i, 0, QtWidgets.QTableWidgetItem(name))
-                    item_hmn = QtWidgets.QTableWidgetItem(hmn)
-                    item_hmn.setData(QtCore.Qt.ItemDataRole.EditRole, int(hmn))
-                    item_vmn = QtWidgets.QTableWidgetItem(vmn)
-                    item_vmn.setData(QtCore.Qt.ItemDataRole.EditRole, int(vmn))
-                    self.table_size.setItem(i, 1, item_hmn)
-                    self.table_size.setItem(i, 2, item_vmn)
-                    self.table_size.setCurrentCell(i, 0)
-                self.table_size.blockSignals(False)
-            else:
-                self.detpar_items[par].blockSignals(True)
-                self.detpar_items[par].setValue(val)
-                self.detpar_items[par].blockSignals(False)
-        self.win_detdb_dim_update()
-    
-    def win_detdb_on_close(self):
-        """
-        Handles the event when the detector database window is closed.
-
-        This method performs the following actions:
-        1. Copies the current state of the detector database to a backup dictionary.
-        2. Reinitializes the menu with a reset option.
-
-        Returns:
-            None
-        """
-        self.detector_db = self._db_dict.copy()
-        self.menu_init(reset=True)
-
-    def win_detdb_preview(self):
-        """
-        Updates the detector database and changes the detector.
-
-        This method copies the current detector database to `self.detector_db`, 
-        retrieves the selected detector and its size from the UI, and then 
-        updates the detector configuration using the `change_detector` method.
-
-        Steps:
-        1. Copies the current detector database to `self.detector_db`.
-        2. Retrieves the selected detector from `self.list_db`.
-        3. Retrieves the size of the selected detector from `self.table_size`.
-        4. Calls `self.change_detector` with the selected detector and size.
-
-        Note:
-            This method assumes that `self.list_db` and `self.table_size` are 
-            properly initialized and populated with the relevant data.
-
-        """
-        # add new detectors to
-        # -> self.geo.det_bank
-        # if it is not empty!
-        self.detector_db = self._db_dict.copy()
-        detector = self.list_db.currentItem().text()
-        size = self.table_size.item(self.table_size.currentRow(), 0).text()
-        self.change_detector(detector, size)
-
-    def win_detdb_overwrite(self):
-        """
-        Overwrites the detector database file with the current detector database.
-
-        This method first previews the detector database changes by calling 
-        `win_detdb_preview`. Then, it writes the current state of `self.detector_db` 
-        to the file specified by `self.path_detdb` in JSON format with an indentation 
-        of 4 spaces. Finally, it closes the detector database window.
-
-        Returns:
-            None
-        """
-        self.win_detdb_preview()
-        with open(self.path_detdb, 'w') as wf:
-            json.dump(self.detector_db, wf, indent=4)
-        self.detdb_win.close()
-
-    ##########
-    #  HELP  #
-    ##########
-    def show_about_win(self):
-        """
-        Displays the 'About' window for the application.
-        This method checks if the 'About' window is already open. If it is, it toggles its visibility.
-        If the window is not open, it creates a new instance of the 'About' window and populates it
-        with relevant information about the application, including the title, version, description,
-        authors, and links to external resources.
-        The window includes:
-        - Application title and version.
-        - Description of the application with a link to the GitHub repository.
-        - Publication information with a link to the published article.
-        - List of authors.
-        - Feedback email link.
-        - Link to the settings file location.
-        - Link to the old detector database backup file.
-        The window is set to be unresizable and is displayed once all components are added.
-        Attributes:
-            about_win (HotkeyDialog): The dialog window displaying the 'About' information.
-            path_settings (str): Path to the settings file.
-            path_home (str): Path to the home directory.
-            pixmap (QPixmap): The pixmap for the logo.
-            icon (QIcon): The icon for the window.
-        """
-        if self.about_win is not None:
-            if self.about_win.isVisible():
-                self.about_win.close()
-            else:
-                self.about_win.show()
-            return
-        # Show popup window with short description,
-        # version number and links to relevant information
-        self.about_win = HotkeyDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
-        #msgBox.setWindowTitle('About')
-        
-        # title font
-        font_title = QtGui.QFont()
-        font_title.setPointSize(48)
-        title = QtWidgets.QLabel(f'<b>xrdPlanner</b>')
-        title.setFont(font_title)
-        suptitle = QtWidgets.QLabel(f'<b>Version {xrdPlanner.__version__}</b> (released {xrdPlanner.__date__})')
-        # add information
-        github = QtWidgets.QLabel(f'<br>A tool to project X-ray diffraction cones on a detector screen at different \
-                                    geometries (tilt, rotation, offset) and X-ray energies. For more information visit \
-                                    us on <a href="https://github.com/LennardKrause/xrdPlanner">Github</a>.')
-        github.setWordWrap(True)
-        github.setOpenExternalLinks(True)
-        published = QtWidgets.QLabel(f'<br>The article is published in<br><a href="https://doi.org/10.1107/S1600577523011086">\
-                                       <i>J. Synchrotron Rad.</i> (2024). <b>31</b></a>')
-        published.setOpenExternalLinks(True)
-        authors = QtWidgets.QLabel(f'<br><b>Authors:</b><br>{"<br>".join(xrdPlanner.__authors__)}')
-        email = QtWidgets.QLabel(f'<br>Feedback? <a href="mailto:{xrdPlanner.__email__}?subject=xrdPlanner feedback">{xrdPlanner.__email__}</a>')
-        email.setOpenExternalLinks(True)
-        path = QtWidgets.QLabel(f'<br>Open settings file <a href=file:///{self.path_settings}>location</a>')
-        path.setOpenExternalLinks(True)
-        detdb = QtWidgets.QLabel(f'<br>Find <u>old</u> detector db backup file (detector_db.json.bak) <a href=file:///{self.path_home}>here</a>')
-        detdb.setOpenExternalLinks(True)
-        # add widgets to layout
-        box_layout = QtWidgets.QVBoxLayout()
-        box_layout.setSpacing(0)
-        for widget in [title, suptitle, github, published, authors, email, path, detdb]:
-            box_layout.addWidget(widget)
-        # box containing info
-        box = QtWidgets.QGroupBox()
-        box.setFlat(True)
-        box.setLayout(box_layout)
-        # label containing the logo
-        icon = QtWidgets.QLabel()
-        icon.setPixmap(self.pixmap.scaledToHeight(box.sizeHint().height(), mode=QtCore.Qt.TransformationMode.SmoothTransformation))
-        # add both to the window layout
-        layout = QtWidgets.QHBoxLayout()
-        layout.addWidget(icon)
-        layout.addWidget(box)
-        # finish the window and make it unresizable
-        self.about_win.setWindowIcon(self.icon)
-        self.about_win.setLayout(layout)
-        self.about_win.setFixedSize(self.about_win.sizeHint())
-        self.about_win.show()
-
-    def show_geometry_win(self):
-        """
-        Displays a window with information about geometry conventions used in the application.
-        If the geometry window is already visible, it will be closed. Otherwise, it will be shown.
-        If the geometry window does not exist, it will be created and displayed.
-        The window contains:
-        - A title "Geometry conventions" with a large font size.
-        - A detailed description of translations, rotations, and tilts related to the detector geometry.
-        - An image illustrating the geometry conventions.
-        - Links to a publication and a GitHub repository for more information.
-        The window is created as a `HotkeyDialog` with a `QtCore.Qt.WindowType.Tool` flag and is set to a fixed size based on its content.
-        """
-        if self.geometry_win is not None:
-            if self.geometry_win.isVisible():
-                self.geometry_win.close()
-            else:
-                self.geometry_win.show()
-            return
-        
-        self.geometry_win = HotkeyDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
-        self.geometry_win.setWindowTitle('Geometry conventions')
-        
-        font_title = QtGui.QFont()
-        font_title.setPointSize(28)
-        title = QtWidgets.QLabel(f'<b>Geometry conventions</b>')
-        title.setFont(font_title)
-        description = QtWidgets.QLabel('<b>Translations</b> without any <b>tilt</b>/<b>rotation</b> are the horizontal and vertical distances '
-                                       'between the centre of the detector and the point of normal incidence PONI (<i>top</i>). The SDD is the distance from '
-                                       'the sample to the PONI. A <b>rotation</b> moves the detector along the goniometer circle '
-                                       '(constant SDD), keeping the PONI at the same position relative to the detector '
-                                       'surface, here the detector centre (<i>lower left</i>). A <b>tilt</b> rolls the detector surface on '
-                                       'the goniometer circle, hence the SDD is fixed, but the PONI shifts along the detector '
-                                       'face (<i>lower right</i>).')
-        description.setAlignment(QtCore.Qt.AlignmentFlag.AlignJustify)
-        description.setWordWrap(True)
-        pmap = QtGui.QPixmap(':/icons/xrdPlanner_geom').scaled(512, 512, aspectRatioMode=QtCore.Qt.AspectRatioMode.KeepAspectRatio, transformMode=QtCore.Qt.TransformationMode.SmoothTransformation)
-        icon = QtWidgets.QLabel()
-        icon.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        icon.setPixmap(pmap)
-        
-        published = QtWidgets.QLabel('For more information see:<a href="https://doi.org/10.1107/S1600577523011086"> '
-                                     '<i>J. Synchrotron Rad.</i> (2024). <b>31</b></a> or <a href="https://github.com/LennardKrause/xrdPlanner">Github</a>.')
-        published.setOpenExternalLinks(True)
-
-        box_layout = QtWidgets.QVBoxLayout()
-        box_layout.setSpacing(6)
-        box_layout.addWidget(title)
-        box_layout.addWidget(description)
-        box_layout.addWidget(icon)
-        box_layout.addWidget(published)
-
-        box = QtWidgets.QGroupBox()
-        box.setFlat(True)
-        box.setLayout(box_layout)
-        box.setContentsMargins(0,0,0,0)
-
-        layout = QtWidgets.QVBoxLayout()
-        layout.addWidget(box)
-        
-        self.geometry_win.setWindowIcon(self.icon)
-        self.geometry_win.setLayout(layout)
-        self.geometry_win.setFixedSize(self.geometry_win.sizeHint())
-        self.geometry_win.show()
-
-    def show_hotkeys_win(self):
-        """
-        Displays a window with a list of hotkeys and their corresponding actions.
-        If the hotkeys window is already visible, it will be closed. Otherwise, it will be shown.
-        If the hotkeys window does not exist, it will be created and displayed.
-        The hotkeys window contains a table with two columns: 'Key' and 'Action'.
-        The table lists various hotkeys and their descriptions, including special sections
-        highlighted with bold text.
-        
-        The window is styled with alternating row colors, no vertical header, no word wrap,
-        and no edit triggers. The columns are resized to fit their contents, and the window
-        is adjusted to its contents' size.
-        """
-        if self.hotkeys_win is not None:
-            if self.hotkeys_win.isVisible():
-                self.hotkeys_win.close()
-            else:
-                self.hotkeys_win.show()
-            return
-        
-        self.hotkeys_win = HotkeyDialog(parent=self, flags=QtCore.Qt.WindowType.Tool)
-        self.hotkeys_win.setWindowTitle('Hotkeys')
-
-        table = QtWidgets.QTableWidget()
-        table.setColumnCount(2)
-        table.setSortingEnabled(False)
-        table.setHorizontalHeaderLabels(['Key','Action'])
-        table.setAlternatingRowColors(False)
-        table.verticalHeader().hide()
-        table.setWordWrap(False)
-        table.horizontalHeader().setStretchLastSection(True)
-        table.setEditTriggers(QtWidgets.QTableWidget.EditTrigger.NoEditTriggers)
-        table.setSelectionMode(QtWidgets.QTableWidget.SelectionMode.NoSelection)
-        table.setSizeAdjustPolicy(QtWidgets.QTableWidget.SizeAdjustPolicy.AdjustToContents)
-        table.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-
-        font_bold = QtGui.QFont()
-        font_bold.setBold(True)
-
-        for i,(entry, value) in enumerate(self.hotkey_dict.items()):
-            table.insertRow(i)
-            # handle title / sections
-            if isinstance(entry, str) and not value:
-                table.setItem(i, 0, QtWidgets.QTableWidgetItem(entry))
-                table.setSpan(i, 0, 1, 2)
-                #table.item(i, 0).setBackground(self.palette().highlight().color())
-                table.item(i, 0).setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-                table.item(i, 0).setFont(font_bold)
-            else:
-                key, mod = entry
-                desc = value['dc']
-                # handle special keys
-                if key.lower() == 'left':
-                    key = '\u2190'
-                elif key.lower() == 'up':
-                    key = '\u2191'
-                elif key.lower() == 'right':
-                    key = '\u2192'
-                elif key.lower() == 'down':
-                    key = '\u2193'
-                else:
-                    key = QtGui.QKeySequence(key).toString()
-                # add modification keys
-                if mod:
-                    if mod == 'SHIFT':
-                        mod = '\u21E7'
-                    key = f'{mod}+{key}'
-                # add to table
-                table.setItem(i, 0, QtWidgets.QTableWidgetItem(key))
-                table.setItem(i, 1, QtWidgets.QTableWidgetItem(desc))
-
-        table.resizeColumnsToContents()
-        layout = QtWidgets.QVBoxLayout()
-        layout.addWidget(table)
-
-        self.hotkeys_win.setWindowIcon(self.icon)
-        self.hotkeys_win.setLayout(layout)
-        self.hotkeys_win.resize(self.hotkeys_win.sizeHint())
-        self.hotkeys_win.show()
 
     #############
     #  UTILITY  #
@@ -4805,88 +3314,6 @@ class MainWindow(QtWidgets.QMainWindow):
         units = {0:np.rad2deg(tth), 1:dsp, 2:stl*4*np.pi, 3:stl}
         return units[self.geo.unit]
 
-    def get_att_lengths(self):
-        # X-ray attenuation lengths z for Si and CdTe in meter [m] where z = ln(1/e)/mu
-        # calculated in 1 keV steps from 1-150 keV
-        # table values from Chantler (2000) https://doi.org/10.1063/1.1321055
-        # calculated using the xraydb python module https://xraypy.github.io/XrayDB/
-        self.att_lengths = {'Si':[2.92336338e-06, 1.52940940e-06, 4.41817449e-06, 9.68094927e-06,
-                                  1.81408951e-05, 3.02711037e-05, 4.66249577e-05, 6.77473199e-05,
-                                  9.52638566e-05, 1.30549774e-04, 1.73447018e-04, 2.24595659e-04,
-                                  2.84605387e-04, 3.54031165e-04, 4.33380209e-04, 5.23140541e-04,
-                                  6.23712068e-04, 7.35455743e-04, 8.58680607e-04, 9.93585970e-04,
-                                  1.14037836e-03, 1.29916870e-03, 1.46997950e-03, 1.65282867e-03,
-                                  1.84755219e-03, 2.05413078e-03, 2.27435657e-03, 2.51166980e-03,
-                                  2.76076718e-03, 3.02154479e-03, 3.29339416e-03, 3.57595496e-03,
-                                  3.86839569e-03, 4.17070154e-03, 4.48147168e-03, 4.80065791e-03,
-                                  5.12767462e-03, 5.46137164e-03, 5.80102998e-03, 6.15160747e-03,
-                                  6.50892811e-03, 6.87076056e-03, 7.23575505e-03, 7.60377581e-03,
-                                  7.97432820e-03, 8.34584473e-03, 8.71928990e-03, 9.09192353e-03,
-                                  9.46569452e-03, 9.83772142e-03, 1.02072666e-02, 1.05776192e-02,
-                                  1.09433726e-02, 1.13091543e-02, 1.16704952e-02, 1.20265003e-02,
-                                  1.23811631e-02, 1.27324096e-02, 1.30769437e-02, 1.34176491e-02,
-                                  1.37548957e-02, 1.40888666e-02, 1.44155703e-02, 1.47396457e-02,
-                                  1.50576116e-02, 1.53688649e-02, 1.56783348e-02, 1.59792892e-02,
-                                  1.62758741e-02, 1.65681895e-02, 1.68560238e-02, 1.71398554e-02,
-                                  1.74122248e-02, 1.76875177e-02, 1.79512540e-02, 1.82145339e-02,
-                                  1.84671438e-02, 1.87236452e-02, 1.89677703e-02, 1.92079643e-02,
-                                  1.94519568e-02, 1.96857927e-02, 1.99143713e-02, 2.01393629e-02,
-                                  2.03608585e-02, 2.05788754e-02, 2.07833706e-02, 2.09941098e-02,
-                                  2.12017351e-02, 2.14014048e-02, 2.15968609e-02, 2.17951736e-02,
-                                  2.19821326e-02, 2.21717840e-02, 2.23511828e-02, 2.25366433e-02,
-                                  2.27091166e-02, 2.28903416e-02, 2.30570644e-02, 2.32331077e-02,
-                                  2.33946370e-02, 2.35541564e-02, 2.37235475e-02, 2.38780490e-02,
-                                  2.40302885e-02, 2.41803970e-02, 2.43399625e-02, 2.44882422e-02,
-                                  2.46323882e-02, 2.47746094e-02, 2.49149003e-02, 2.50533840e-02,
-                                  2.51901681e-02, 2.53252522e-02, 2.54586507e-02, 2.55903974e-02,
-                                  2.57204103e-02, 2.58490340e-02, 2.59762024e-02, 2.61018936e-02,
-                                  2.62261777e-02, 2.63492097e-02, 2.64707961e-02, 2.65910939e-02,
-                                  2.67101422e-02, 2.68280390e-02, 2.69448830e-02, 2.70602934e-02,
-                                  2.71637201e-02, 2.72706288e-02, 2.73828591e-02, 2.74939145e-02,
-                                  2.76039513e-02, 2.77130685e-02, 2.78212863e-02, 2.79285825e-02,
-                                  2.80224089e-02, 2.81218802e-02, 2.82264203e-02, 2.83300579e-02,
-                                  2.84220811e-02, 2.85159760e-02, 2.86172018e-02, 2.87175212e-02,
-                                  2.88171887e-02, 2.89147878e-02, 2.89995540e-02, 2.90922933e-02,
-                                  2.91891453e-02, 2.92852862e-02],
-                          'CdTe':[8.86140064e-08, 4.41597213e-07, 1.15951587e-06, 8.36374589e-07,
-                                  8.36034310e-07, 1.32724815e-06, 1.97362567e-06, 2.79221097e-06,
-                                  3.79736962e-06, 5.07172559e-06, 6.58646052e-06, 8.34536221e-06,
-                                  1.03633319e-05, 1.26445947e-05, 1.51992203e-05, 1.80585164e-05,
-                                  2.12380712e-05, 2.47559111e-05, 2.86220163e-05, 3.28393095e-05,
-                                  3.74211141e-05, 4.23847110e-05, 4.77396937e-05, 5.34604046e-05,
-                                  5.95357580e-05, 6.58583493e-05, 2.02635396e-05, 2.23180704e-05,
-                                  2.45073128e-05, 2.68096054e-05, 2.92163420e-05, 1.99269432e-05,
-                                  2.15332477e-05, 2.32726190e-05, 2.51068287e-05, 2.70499442e-05,
-                                  2.90850735e-05, 3.12143579e-05, 3.34390888e-05, 3.57606328e-05,
-                                  3.81810110e-05, 4.07109020e-05, 4.33566740e-05, 4.61081874e-05,
-                                  4.89663832e-05, 5.19342068e-05, 5.50092594e-05, 5.81952784e-05,
-                                  6.14950533e-05, 6.49069814e-05, 6.84326118e-05, 7.20745366e-05,
-                                  7.58320671e-05, 7.97392476e-05, 8.37930712e-05, 8.79696403e-05,
-                                  9.22722203e-05, 9.66991799e-05, 1.01254296e-04, 1.05935695e-04,
-                                  1.10745003e-04, 1.15686534e-04, 1.20756232e-04, 1.25977939e-04,
-                                  1.31365089e-04, 1.36890012e-04, 1.42551567e-04, 1.48351972e-04,
-                                  1.54290824e-04, 1.60366939e-04, 1.66584684e-04, 1.72943591e-04,
-                                  1.79440083e-04, 1.86083525e-04, 1.92866175e-04, 1.99789869e-04,
-                                  2.06859516e-04, 2.14074597e-04, 2.21432043e-04, 2.28971821e-04,
-                                  2.36785318e-04, 2.44789163e-04, 2.52956288e-04, 2.61270529e-04,
-                                  2.69748772e-04, 2.78374465e-04, 2.87160014e-04, 2.96098601e-04,
-                                  3.05197594e-04, 3.14457023e-04, 3.23869498e-04, 3.33440320e-04,
-                                  3.43178015e-04, 3.53053462e-04, 3.63091886e-04, 3.73283283e-04,
-                                  3.83651351e-04, 3.94156444e-04, 4.04836771e-04, 4.15653703e-04,
-                                  4.26625960e-04, 4.37759844e-04, 4.49053794e-04, 4.60495597e-04,
-                                  4.72077099e-04, 4.83837118e-04, 4.95744109e-04, 5.07781340e-04,
-                                  5.19964672e-04, 5.32316813e-04, 5.44823489e-04, 5.57483665e-04,
-                                  5.70297686e-04, 5.83249863e-04, 5.96338131e-04, 6.09594120e-04,
-                                  6.23013435e-04, 6.36594830e-04, 6.50297249e-04, 6.64142222e-04,
-                                  6.78147980e-04, 6.92282395e-04, 7.06561344e-04, 7.20987946e-04,
-                                  7.35548731e-04, 7.50255560e-04, 7.65122247e-04, 7.80063756e-04,
-                                  7.95147555e-04, 8.10396744e-04, 8.25793330e-04, 8.41276246e-04,
-                                  8.56872987e-04, 8.72612687e-04, 8.88496254e-04, 9.04519016e-04,
-                                  9.20619462e-04, 9.36881518e-04, 9.53292628e-04, 9.69782092e-04,
-                                  9.86397315e-04, 1.00312754e-03, 1.01996070e-03, 1.03689757e-03,
-                                  1.05395590e-03, 1.07113920e-03, 1.08845123e-03, 1.10583974e-03,
-                                  1.12333211e-03, 1.14094222e-03]}
-
     def calc_tth_max(self, scale=1.0):
         """
         Calculate the maximum 2theta angle for the given geometry
@@ -4920,25 +3347,6 @@ class MainWindow(QtWidgets.QMainWindow):
         tth = np.arctan2(R_a, D_a)
         # 2theta max
         return tth.max()
-        
-    def rot_100(self, a, cc=1):
-        """
-        Generate a rotation matrix for a rotation around the [100] axis.
-
-        Parameters:
-        a (float): The angle of rotation in radians.
-        cc (int, optional): Clockwise rotation if 1 (default), counterclockwise if 0.
-
-        Returns:
-        numpy.ndarray: A 3x3 rotation matrix.
-        """
-        #Omega in radians
-        ca = np.cos(a)
-        sa = np.sin(a)
-        if cc: sa = -sa
-        return np.array([[1,   0,  0],
-                         [0,  ca, sa],
-                         [0, -sa, ca]])
 
     def calc_conic(self, omega, theta, steps=100):
         """
@@ -5066,6 +3474,299 @@ class MainWindow(QtWidgets.QMainWindow):
             y = y0 + np.ones(len(t)) * y1
         
         return x, y
+    
+    def calc_overlays(self, omega, res=150, pol=0.99):
+        """
+        Calculate overlays for the detector grid.
+        Parameters:
+        -----------
+        omega : float
+            The combination of rotation and tilt, in radians.
+        res : int, optional
+            The resolution of the grid, default is 150.
+        pol : float, optional
+            The polarization factor, default is 0.99.
+        Returns:
+        --------
+        tuple
+            A tuple containing:
+            - grd : ndarray
+                The neutral overlay grid.
+            - tth : ndarray
+                The 2theta angle between pixel, sample, and POBI.
+            - pc : ndarray
+                The polarization correction factor.
+            - sa : ndarray
+                The solid angle correction factor.
+            - fwhm : ndarray
+                The full width at half maximum (FWHM) for the detector.
+        """
+        # scale overlay to detector dimensions
+        if res is not None and res > 0:
+            _res_scale = self.ydim/self.xdim
+            _res_v = int(round(_res_scale * res, 0))
+        else:
+            res    = (self.det.hmp * self.det.hmn + self.det.hgp * (self.det.hmn-1) + self.det.cbh)
+            _res_v = (self.det.vmp * self.det.vmn + self.det.vgp * (self.det.vmn-1) + self.det.cbh)
+
+        # neutral overlay grid
+        grd = np.ones((_res_v, res))
+
+        # make screen grid
+        size_h = np.linspace(-self.xdim, self.xdim, res, endpoint=False)
+        size_v = np.linspace(-self.ydim, self.ydim, _res_v, endpoint=False)
+        _gx, _gy = np.meshgrid(size_h, size_v, sparse=True)
+        # build vector -> 3 x n x m
+        _vec = np.full((3, _res_v, res), self.geo.dist)
+        _vec[0,:,:] = _gx - self.geo.hoff
+        # Compensate for vertical offset and PONI offset caused by the tilt (sdd*tilt)
+        _vec[1,:,:] = _gy + self.geo.voff - np.deg2rad(self.geo.tilt) * self.geo.dist
+
+        # omega is the combination of rotation and tilt, in radians
+        _rot = self.rot_100(omega)
+        # reshape to allow matrix multiplication
+        # _rot: 3 x 3 @ _norm: 3 x n*m -> _res: 3 x n x m
+        _res = np.reshape(_rot @ np.reshape(_vec, (3,-1)), _vec.shape)
+
+        # unit hover
+        tth = 1.0
+        azi = None
+        if self.plo.show_unit_hover:
+            # Distance POBI - pixel on grid
+            R_a = np.sqrt(np.sum(_res[0:2]**2, axis=0)) * 1e-3 # m
+            # POBI distance
+            D_a = _res[2] * 1e-3 # m
+            # 2theta - Angle between pixel, sample, and POBI
+            tth = np.arctan2(R_a, D_a)
+            # remove very small values (tth < 0.057 deg) to avoid zero divide
+            tth[tth < 1e-3] = np.nan
+            if self.plo.show_grid:
+                # calculate the azimuthal angle eta
+                azi = -np.arctan2(_res[0], _res[1])
+
+        # polarisation
+        pc = 1.0
+        if self.plo.show_polarisation:
+            _mag = np.sqrt(np.sum(_res**2, axis=0))
+            _norm = _res / _mag
+            # add pol fractions (-> 1.0)
+            # this notation is equivalent to cos(psi)**2,
+            # psi angle of polarization direction to the observer
+            # _res is direct cos(psi)
+            pc_hor = _norm[0,:,:]**2 * pol
+            pc_ver = _norm[1,:,:]**2 * (1-pol)
+            pc = 1.0 - (pc_hor + pc_ver)
+
+        # solid angle
+        sa = 1.0
+        if self.plo.show_solidangle:
+            _mag = np.sqrt(np.sum(_vec**2, axis=0))
+            sa = 1 / _mag**3
+            sa = sa / np.max(sa)
+        
+        # delta d / d
+        fwhm = 1.0
+        #fwhm_width = 0.0
+        if self.plo.show_fwhm:
+            # dia: sample scattering diameter
+            dia = self.plo.scattering_diameter
+            # thk: detector sensor thickness
+            thk = self.plo.sensor_thickness
+            # mat: detector sensor material
+            mat = self.plo.sensor_material
+            # nrg: X-ray energy
+            nrg = self.geo.ener
+            # pxs: detector pixel size
+            pxs = self.det.pxs * 1e-3
+            # div: X-ray beam divergence
+            div = self.plo.beam_divergence
+            # dEE: X-ray energy resolution
+            dEE = self.plo.energy_resolution
+            # use the "unrotated" vector coordinates to define
+            # R and D in the detector plane
+            # radial component of the unrotated detector
+            # i.e. radius away from the PONI
+            r = np.sqrt(np.sum(_vec[0:2]**2, axis=0)) * 1e-3 # m
+            # dis: PONI distance
+            dis = self.geo.dist * 1e-3 # m
+            # 2theta-alpha - Angle between pixel, sample, and PONI
+            tth_a = np.arctan2(r, dis)
+            # remove very small values (tth < 0.057 deg) to avoid zero divide
+            tth_a[tth_a < 1e-3] = np.nan
+            # H2, FWHM
+            fwhm = self.calc_FWHM(dis, dia, thk, mat, pxs, tth_a, nrg, div, dEE)
+
+        return grd, tth, azi, pc, sa, fwhm
+
+    def calc_azi_grid(self, omega):
+        """calculate the azimuthal grid points and return a dictionary with the vectors"""
+
+        # First define vectors from the sample to the azimuthal
+        # grid points for a vertical detector geometry. Then rotate
+        # the vectors by the detector tilt angle. The azimuthal grid
+        # points are then defined by the intersection of the rotated
+        # vectors with the detector plane.
+
+        _comp_shift = -(self.geo.voff - self.geo.dist * np.tan(omega) - np.deg2rad(self.geo.tilt) * self.geo.dist)
+        # calculate the azimuthal grid points
+        _azi = np.linspace(-np.pi, np.pi, self.plo.azimuth_num) # radians
+        # calculate unit vectors to tth=5 deg
+        _azi_vec = np.array([-np.sin(np.pi/36)*np.sin(_azi), # x
+                                np.sin(np.pi/36)*np.cos(_azi), # y
+                                np.cos(np.pi/36)*np.ones(_azi.shape[0]), # z
+                                ]) 
+        
+        # scale the vectors such that z = sdd for all azimuthal grid points
+        _azi_vec *=  self.geo.dist/_azi_vec[2,:]
+        
+        # rotate the vectors by the detector tilt+rotation angle
+        _rot = self.rot_100(omega)
+        _azi_vec = np.dot(_rot.T, _azi_vec)
+        
+        # rescale the vectors such that z = sdd for all azimuthal grid points
+        # to make the points intersect the detector plane
+        _azi_vec *=  self.geo.dist/np.abs(_azi_vec[2,:])
+        # make sure the vectors are pointing in the right direction
+        _azi_vec[2] = np.abs(_azi_vec[2])
+
+        # account for the horizontal offset and the beam center shift
+        _azi_vec[0] += self.geo.hoff
+        _azi_vec[1] -= self.geo.voff
+
+        grid_vectors = {}
+        v0 = np.array([self.geo.hoff, _comp_shift])
+        for i,a in enumerate(_azi):
+            # find the vector in the detector plane from the beam center
+            # to the azimuthal grid point
+            v = np.array([_azi_vec[0,i], _azi_vec[1,i]])-np.array([self.geo.hoff, -(self.geo.voff - self.geo.dist * np.tan(omega))])
+            # extend the vector to the edge of the detector including offsets
+            scale = np.sqrt(self.xdim**2+self.ydim**2)+np.sqrt(self.geo.hoff**2+_comp_shift**2)
+            v = v/np.linalg.norm(v)*scale
+            # add the beam center shift
+            v = np.array([self.geo.hoff, _comp_shift]) + v
+            # store the vector
+            grid_vectors[np.round(a*180/np.pi, 2)] = np.stack([v0, v])
+        return grid_vectors
+
+    def dsp2tth(self, dsp):
+        """
+        Converts d-spacing to 2-theta
+         uses arcsin -> restricted to
+         the interval -pi/2 - pi/2
+        
+        Returns
+        -------
+          np.arr, np.arr: tth values, valid indices
+        """
+        lambda_2d = (12.398/self.geo.ener) / (2*np.atleast_1d(dsp))
+        idx = np.nonzero(lambda_2d < 1)
+        tth = 2 * np.arcsin(lambda_2d[idx])
+        return tth, idx
+
+    #################
+    #    UTILITY    #
+    #  INDEPENDENT  #
+    #################
+    def get_att_lengths(self):
+        # X-ray attenuation lengths z for Si and CdTe in meter [m] where z = ln(1/e)/mu
+        # calculated in 1 keV steps from 1-150 keV
+        # table values from Chantler (2000) https://doi.org/10.1063/1.1321055
+        # calculated using the xraydb python module https://xraypy.github.io/XrayDB/
+        self.att_lengths = {'Si':[2.92336338e-06, 1.52940940e-06, 4.41817449e-06, 9.68094927e-06,
+                                  1.81408951e-05, 3.02711037e-05, 4.66249577e-05, 6.77473199e-05,
+                                  9.52638566e-05, 1.30549774e-04, 1.73447018e-04, 2.24595659e-04,
+                                  2.84605387e-04, 3.54031165e-04, 4.33380209e-04, 5.23140541e-04,
+                                  6.23712068e-04, 7.35455743e-04, 8.58680607e-04, 9.93585970e-04,
+                                  1.14037836e-03, 1.29916870e-03, 1.46997950e-03, 1.65282867e-03,
+                                  1.84755219e-03, 2.05413078e-03, 2.27435657e-03, 2.51166980e-03,
+                                  2.76076718e-03, 3.02154479e-03, 3.29339416e-03, 3.57595496e-03,
+                                  3.86839569e-03, 4.17070154e-03, 4.48147168e-03, 4.80065791e-03,
+                                  5.12767462e-03, 5.46137164e-03, 5.80102998e-03, 6.15160747e-03,
+                                  6.50892811e-03, 6.87076056e-03, 7.23575505e-03, 7.60377581e-03,
+                                  7.97432820e-03, 8.34584473e-03, 8.71928990e-03, 9.09192353e-03,
+                                  9.46569452e-03, 9.83772142e-03, 1.02072666e-02, 1.05776192e-02,
+                                  1.09433726e-02, 1.13091543e-02, 1.16704952e-02, 1.20265003e-02,
+                                  1.23811631e-02, 1.27324096e-02, 1.30769437e-02, 1.34176491e-02,
+                                  1.37548957e-02, 1.40888666e-02, 1.44155703e-02, 1.47396457e-02,
+                                  1.50576116e-02, 1.53688649e-02, 1.56783348e-02, 1.59792892e-02,
+                                  1.62758741e-02, 1.65681895e-02, 1.68560238e-02, 1.71398554e-02,
+                                  1.74122248e-02, 1.76875177e-02, 1.79512540e-02, 1.82145339e-02,
+                                  1.84671438e-02, 1.87236452e-02, 1.89677703e-02, 1.92079643e-02,
+                                  1.94519568e-02, 1.96857927e-02, 1.99143713e-02, 2.01393629e-02,
+                                  2.03608585e-02, 2.05788754e-02, 2.07833706e-02, 2.09941098e-02,
+                                  2.12017351e-02, 2.14014048e-02, 2.15968609e-02, 2.17951736e-02,
+                                  2.19821326e-02, 2.21717840e-02, 2.23511828e-02, 2.25366433e-02,
+                                  2.27091166e-02, 2.28903416e-02, 2.30570644e-02, 2.32331077e-02,
+                                  2.33946370e-02, 2.35541564e-02, 2.37235475e-02, 2.38780490e-02,
+                                  2.40302885e-02, 2.41803970e-02, 2.43399625e-02, 2.44882422e-02,
+                                  2.46323882e-02, 2.47746094e-02, 2.49149003e-02, 2.50533840e-02,
+                                  2.51901681e-02, 2.53252522e-02, 2.54586507e-02, 2.55903974e-02,
+                                  2.57204103e-02, 2.58490340e-02, 2.59762024e-02, 2.61018936e-02,
+                                  2.62261777e-02, 2.63492097e-02, 2.64707961e-02, 2.65910939e-02,
+                                  2.67101422e-02, 2.68280390e-02, 2.69448830e-02, 2.70602934e-02,
+                                  2.71637201e-02, 2.72706288e-02, 2.73828591e-02, 2.74939145e-02,
+                                  2.76039513e-02, 2.77130685e-02, 2.78212863e-02, 2.79285825e-02,
+                                  2.80224089e-02, 2.81218802e-02, 2.82264203e-02, 2.83300579e-02,
+                                  2.84220811e-02, 2.85159760e-02, 2.86172018e-02, 2.87175212e-02,
+                                  2.88171887e-02, 2.89147878e-02, 2.89995540e-02, 2.90922933e-02,
+                                  2.91891453e-02, 2.92852862e-02],
+                          'CdTe':[8.86140064e-08, 4.41597213e-07, 1.15951587e-06, 8.36374589e-07,
+                                  8.36034310e-07, 1.32724815e-06, 1.97362567e-06, 2.79221097e-06,
+                                  3.79736962e-06, 5.07172559e-06, 6.58646052e-06, 8.34536221e-06,
+                                  1.03633319e-05, 1.26445947e-05, 1.51992203e-05, 1.80585164e-05,
+                                  2.12380712e-05, 2.47559111e-05, 2.86220163e-05, 3.28393095e-05,
+                                  3.74211141e-05, 4.23847110e-05, 4.77396937e-05, 5.34604046e-05,
+                                  5.95357580e-05, 6.58583493e-05, 2.02635396e-05, 2.23180704e-05,
+                                  2.45073128e-05, 2.68096054e-05, 2.92163420e-05, 1.99269432e-05,
+                                  2.15332477e-05, 2.32726190e-05, 2.51068287e-05, 2.70499442e-05,
+                                  2.90850735e-05, 3.12143579e-05, 3.34390888e-05, 3.57606328e-05,
+                                  3.81810110e-05, 4.07109020e-05, 4.33566740e-05, 4.61081874e-05,
+                                  4.89663832e-05, 5.19342068e-05, 5.50092594e-05, 5.81952784e-05,
+                                  6.14950533e-05, 6.49069814e-05, 6.84326118e-05, 7.20745366e-05,
+                                  7.58320671e-05, 7.97392476e-05, 8.37930712e-05, 8.79696403e-05,
+                                  9.22722203e-05, 9.66991799e-05, 1.01254296e-04, 1.05935695e-04,
+                                  1.10745003e-04, 1.15686534e-04, 1.20756232e-04, 1.25977939e-04,
+                                  1.31365089e-04, 1.36890012e-04, 1.42551567e-04, 1.48351972e-04,
+                                  1.54290824e-04, 1.60366939e-04, 1.66584684e-04, 1.72943591e-04,
+                                  1.79440083e-04, 1.86083525e-04, 1.92866175e-04, 1.99789869e-04,
+                                  2.06859516e-04, 2.14074597e-04, 2.21432043e-04, 2.28971821e-04,
+                                  2.36785318e-04, 2.44789163e-04, 2.52956288e-04, 2.61270529e-04,
+                                  2.69748772e-04, 2.78374465e-04, 2.87160014e-04, 2.96098601e-04,
+                                  3.05197594e-04, 3.14457023e-04, 3.23869498e-04, 3.33440320e-04,
+                                  3.43178015e-04, 3.53053462e-04, 3.63091886e-04, 3.73283283e-04,
+                                  3.83651351e-04, 3.94156444e-04, 4.04836771e-04, 4.15653703e-04,
+                                  4.26625960e-04, 4.37759844e-04, 4.49053794e-04, 4.60495597e-04,
+                                  4.72077099e-04, 4.83837118e-04, 4.95744109e-04, 5.07781340e-04,
+                                  5.19964672e-04, 5.32316813e-04, 5.44823489e-04, 5.57483665e-04,
+                                  5.70297686e-04, 5.83249863e-04, 5.96338131e-04, 6.09594120e-04,
+                                  6.23013435e-04, 6.36594830e-04, 6.50297249e-04, 6.64142222e-04,
+                                  6.78147980e-04, 6.92282395e-04, 7.06561344e-04, 7.20987946e-04,
+                                  7.35548731e-04, 7.50255560e-04, 7.65122247e-04, 7.80063756e-04,
+                                  7.95147555e-04, 8.10396744e-04, 8.25793330e-04, 8.41276246e-04,
+                                  8.56872987e-04, 8.72612687e-04, 8.88496254e-04, 9.04519016e-04,
+                                  9.20619462e-04, 9.36881518e-04, 9.53292628e-04, 9.69782092e-04,
+                                  9.86397315e-04, 1.00312754e-03, 1.01996070e-03, 1.03689757e-03,
+                                  1.05395590e-03, 1.07113920e-03, 1.08845123e-03, 1.10583974e-03,
+                                  1.12333211e-03, 1.14094222e-03]}
+
+    def rot_100(self, a, cc=1):
+        """
+        Generate a rotation matrix for a rotation around the [100] axis.
+
+        Parameters:
+        a (float): The angle of rotation in radians.
+        cc (int, optional): Clockwise rotation if 1 (default), counterclockwise if 0.
+
+        Returns:
+        numpy.ndarray: A 3x3 rotation matrix.
+        """
+        #Omega in radians
+        ca = np.cos(a)
+        sa = np.sin(a)
+        if cc: sa = -sa
+        return np.array([[1,   0,  0],
+                         [0,  ca, sa],
+                         [0, -sa, ca]])
 
     def calc_hkld(self, ucp, res=0.2e-10, dec=4, cen='P'):
         """
@@ -5218,129 +3919,6 @@ class MainWindow(QtWidgets.QMainWindow):
         # stack the hkl and dsp
         out = np.hstack([hkl[idx], (dsp*10**(-dec)).reshape(-1,1)])[::-1]
         return out
-    
-    def calc_overlays(self, omega, res=150, pol=0.99):
-        """
-        Calculate overlays for the detector grid.
-        Parameters:
-        -----------
-        omega : float
-            The combination of rotation and tilt, in radians.
-        res : int, optional
-            The resolution of the grid, default is 150.
-        pol : float, optional
-            The polarization factor, default is 0.99.
-        Returns:
-        --------
-        tuple
-            A tuple containing:
-            - grd : ndarray
-                The neutral overlay grid.
-            - tth : ndarray
-                The 2theta angle between pixel, sample, and POBI.
-            - pc : ndarray
-                The polarization correction factor.
-            - sa : ndarray
-                The solid angle correction factor.
-            - fwhm : ndarray
-                The full width at half maximum (FWHM) for the detector.
-        """
-        # scale overlay to detector dimensions
-        if res is not None and res > 0:
-            _res_scale = self.ydim/self.xdim
-            _res_v = int(round(_res_scale * res, 0))
-        else:
-            res    = (self.det.hmp * self.det.hmn + self.det.hgp * (self.det.hmn-1) + self.det.cbh)
-            _res_v = (self.det.vmp * self.det.vmn + self.det.vgp * (self.det.vmn-1) + self.det.cbh)
-
-        # neutral overlay grid
-        grd = np.ones((_res_v, res))
-
-        # make screen grid
-        size_h = np.linspace(-self.xdim, self.xdim, res, endpoint=False)
-        size_v = np.linspace(-self.ydim, self.ydim, _res_v, endpoint=False)
-        _gx, _gy = np.meshgrid(size_h, size_v, sparse=True)
-        # build vector -> 3 x n x m
-        _vec = np.full((3, _res_v, res), self.geo.dist)
-        _vec[0,:,:] = _gx - self.geo.hoff
-        # Compensate for vertical offset and PONI offset caused by the tilt (sdd*tilt)
-        _vec[1,:,:] = _gy + self.geo.voff - np.deg2rad(self.geo.tilt) * self.geo.dist
-
-        # omega is the combination of rotation and tilt, in radians
-        _rot = self.rot_100(omega)
-        # reshape to allow matrix multiplication
-        # _rot: 3 x 3 @ _norm: 3 x n*m -> _res: 3 x n x m
-        _res = np.reshape(_rot @ np.reshape(_vec, (3,-1)), _vec.shape)
-
-        # unit hover
-        tth = 1.0
-        azi = None
-        if self.plo.show_unit_hover:
-            # Distance POBI - pixel on grid
-            R_a = np.sqrt(np.sum(_res[0:2]**2, axis=0)) * 1e-3 # m
-            # POBI distance
-            D_a = _res[2] * 1e-3 # m
-            # 2theta - Angle between pixel, sample, and POBI
-            tth = np.arctan2(R_a, D_a)
-            # remove very small values (tth < 0.057 deg) to avoid zero divide
-            tth[tth < 1e-3] = np.nan
-            if self.plo.show_grid:
-                # calculate the azimuthal angle eta
-                azi = -np.arctan2(_res[0], _res[1])
-
-        # polarisation
-        pc = 1.0
-        if self.plo.show_polarisation:
-            _mag = np.sqrt(np.sum(_res**2, axis=0))
-            _norm = _res / _mag
-            # add pol fractions (-> 1.0)
-            # this notation is equivalent to cos(psi)**2,
-            # psi angle of polarization direction to the observer
-            # _res is direct cos(psi)
-            pc_hor = _norm[0,:,:]**2 * pol
-            pc_ver = _norm[1,:,:]**2 * (1-pol)
-            pc = 1.0 - (pc_hor + pc_ver)
-
-        # solid angle
-        sa = 1.0
-        if self.plo.show_solidangle:
-            _mag = np.sqrt(np.sum(_vec**2, axis=0))
-            sa = 1 / _mag**3
-            sa = sa / np.max(sa)
-        
-        # delta d / d
-        fwhm = 1.0
-        #fwhm_width = 0.0
-        if self.plo.show_fwhm:
-            # dia: sample scattering diameter
-            dia = self.plo.scattering_diameter
-            # thk: detector sensor thickness
-            thk = self.plo.sensor_thickness
-            # mat: detector sensor material
-            mat = self.plo.sensor_material
-            # nrg: X-ray energy
-            nrg = self.geo.ener
-            # pxs: detector pixel size
-            pxs = self.det.pxs * 1e-3
-            # div: X-ray beam divergence
-            div = self.plo.beam_divergence
-            # dEE: X-ray energy resolution
-            dEE = self.plo.energy_resolution
-            # use the "unrotated" vector coordinates to define
-            # R and D in the detector plane
-            # radial component of the unrotated detector
-            # i.e. radius away from the PONI
-            r = np.sqrt(np.sum(_vec[0:2]**2, axis=0)) * 1e-3 # m
-            # dis: PONI distance
-            dis = self.geo.dist * 1e-3 # m
-            # 2theta-alpha - Angle between pixel, sample, and PONI
-            tth_a = np.arctan2(r, dis)
-            # remove very small values (tth < 0.057 deg) to avoid zero divide
-            tth_a[tth_a < 1e-3] = np.nan
-            # H2, FWHM
-            fwhm = self.calc_FWHM(dis, dia, thk, mat, pxs, tth_a, nrg, div, dEE)
-
-        return grd, tth, azi, pc, sa, fwhm
 
     def calc_FWHM(self, dis, dia, thk, mat, pxs, tth, nrg, div, dEE, deg=True):
             """
@@ -5378,71 +3956,6 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 return fwhm
 
-    def calc_azi_grid(self, omega):
-        """calculate the azimuthal grid points and return a dictionary with the vectors"""
-
-        # First define vectors from the sample to the azimuthal
-        # grid points for a vertical detector geometry. Then rotate
-        # the vectors by the detector tilt angle. The azimuthal grid
-        # points are then defined by the intersection of the rotated
-        # vectors with the detector plane.
-
-        _comp_shift = -(self.geo.voff - self.geo.dist * np.tan(omega) - np.deg2rad(self.geo.tilt) * self.geo.dist)
-        # calculate the azimuthal grid points
-        _azi = np.linspace(-np.pi, np.pi, self.plo.azimuth_num) # radians
-        # calculate unit vectors to tth=5 deg
-        _azi_vec = np.array([-np.sin(np.pi/36)*np.sin(_azi), # x
-                                np.sin(np.pi/36)*np.cos(_azi), # y
-                                np.cos(np.pi/36)*np.ones(_azi.shape[0]), # z
-                                ]) 
-        
-        # scale the vectors such that z = sdd for all azimuthal grid points
-        _azi_vec *=  self.geo.dist/_azi_vec[2,:]
-        
-        # rotate the vectors by the detector tilt+rotation angle
-        _rot = self.rot_100(omega)
-        _azi_vec = np.dot(_rot.T, _azi_vec)
-        
-        # rescale the vectors such that z = sdd for all azimuthal grid points
-        # to make the points intersect the detector plane
-        _azi_vec *=  self.geo.dist/np.abs(_azi_vec[2,:])
-        # make sure the vectors are pointing in the right direction
-        _azi_vec[2] = np.abs(_azi_vec[2])
-
-        # account for the horizontal offset and the beam center shift
-        _azi_vec[0] += self.geo.hoff
-        _azi_vec[1] -= self.geo.voff
-
-        grid_vectors = {}
-        v0 = np.array([self.geo.hoff, _comp_shift])
-        for i,a in enumerate(_azi):
-            # find the vector in the detector plane from the beam center
-            # to the azimuthal grid point
-            v = np.array([_azi_vec[0,i], _azi_vec[1,i]])-np.array([self.geo.hoff, -(self.geo.voff - self.geo.dist * np.tan(omega))])
-            # extend the vector to the edge of the detector including offsets
-            scale = np.sqrt(self.xdim**2+self.ydim**2)+np.sqrt(self.geo.hoff**2+_comp_shift**2)
-            v = v/np.linalg.norm(v)*scale
-            # add the beam center shift
-            v = np.array([self.geo.hoff, _comp_shift]) + v
-            # store the vector
-            grid_vectors[np.round(a*180/np.pi, 2)] = np.stack([v0, v])
-        return grid_vectors
-
-    def dsp2tth(self, dsp):
-        """
-        Converts d-spacing to 2-theta
-         uses arcsin -> restricted to
-         the interval -pi/2 - pi/2
-        
-        Returns
-        -------
-          np.arr, np.arr: tth values, valid indices
-        """
-        lambda_2d = (12.398/self.geo.ener) / (2*dsp)
-        idx = np.nonzero(lambda_2d < 1)
-        tth = 2 * np.arcsin(lambda_2d[idx])
-        return tth, idx
-
     def gaussian(self, x, m, s):
         """
         Calculate the value of a Gaussian function.
@@ -5457,25 +3970,19 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         return 1/(np.sqrt(2*np.pi)*s)*np.exp(-np.square((x - m)/s)/2)
 
-    def calc_TCH_pV(self, tth, U, V, W, X, Y):
+    def get_closest_point_x(self, points, pos):
         """
-        Thompson-Cox-Hastings pseudo-Voigt
-        Gaussian FWHM: U*tan(theta)^2 + V*tan(theta) + W
-        Lorentzian FWHM: X*tan(theta) + Y/cos(theta)
-        return pseudo Voigt FWHM
-        """
-        theta = tth*np.pi/360
-        tt = np.tan(theta)
-        ct = np.cos(theta)
-        G = np.sqrt(U*tt**2 + V*tt + W)
-        L = X*tt + Y/ct
+        Find the point in a list of points that is closest to a given position.
 
-        H = (G**5 + 2.69269*G**4*L + 2.42843*G**3*L**2 \
-                + 4.47163*G**2*L**3 + 0.07842*G*L**4 + L**5)**(1/5)
-        # notice that the eta is defined differently in the FullProf manual
-        # such that eta = 1-eta_FullProf
-        eta = 1-(1.36603*L/H - 0.47719*(L/H)**2 + 0.11116*(L/H)**3)
-        return H, eta
+        Args:
+            points (list): A list of objects, each having a method `pos()` that returns an object with method `x()`.
+            pos (object): An object with a method `x()` representing the position to compare against.
+
+        Returns:
+            object: The point from the list that is closest to the given position.
+        """
+        dist = [np.linalg.norm(np.array(p.pos().x()) - np.array(pos.x())) for p in points]
+        return points[np.argmin(dist)]
 
     #############
     # SETTINGS  #
@@ -5831,7 +4338,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if os.path.splitext(fpath)[1] == '.cif':
             self.calc_ref_from_cif(fpath, open_pxrd=True)
 
-    def keyPressEvent(self, event):
+    def keyReleaseEvent(self, event):
         """
         Handles key press events and executes corresponding functions based on 
         key and modifier combinations defined in the hotkey_dict.
@@ -5939,12 +4446,138 @@ class MainWindow(QtWidgets.QMainWindow):
             #_text.append(f'H: {self.calc_unit(self._fwhm[x,y]):.4f}')
         self.cor_label.setText('\n'.join(_text))
 
+############
+#   MISC   #
+############
 class Container(object):
     """
     A class used to represent a Container.
     """
     pass
 
+class Ref(object):
+    """
+    Ref is a class that represents a reference object with attributes for name, dsp, hkl, and cif.
+    """
+    def __init__(self, name, dsp=None, hkl=None, cif=None):
+        """
+        Initialize a new instance of the class.
+
+        Parameters:
+        name (str): The name of the instance.
+        dsp (optional): The dsp value. Default is None.
+        hkl (optional): The hkl value. Default is None.
+        cif (optional): The cif value. Default is None.
+        """
+        self.name = name
+        self.dsp = dsp
+        self.hkl = hkl
+        self.cif = cif
+        self.has_dsp = False
+        self.has_hkl = False
+        self.has_cif = False
+        # set falgs
+        if dsp is not None:
+            self.has_dsp = True
+        if hkl is not None:
+            self.has_hkl = True
+        if cif is not None:
+            self.has_cif = True
+        
+    def add_cif(self, cif):
+        """
+        Adds a CIF (Crystallographic Information File) to the instance.
+
+        Parameters:
+        cif (str): The CIF data to be added.
+
+        Sets the instance's `cif` attribute to the provided CIF data and 
+        marks `has_cif` as True.
+        """
+        self.cif = cif
+        self.has_cif = True
+
+    def add_dsp(self, dsp):
+        """
+        Adds a DSP (Digital Signal Processor) to the instance.
+
+        Parameters:
+        dsp (object): The DSP object to be added.
+
+        Sets:
+        self.dsp: The provided DSP object.
+        self.has_dsp (bool): Flag indicating that a DSP has been added, set to True.
+        """
+        self.dsp = dsp
+        self.has_dsp = True
+
+    def add_hkl(self, hkl):
+        """
+        Adds the Miller indices (hkl) to the instance and sets the has_hkl flag to True.
+
+        Parameters:
+        hkl (tuple): A tuple representing the Miller indices (h, k, l).
+        """
+        self.hkl = hkl
+        self.has_hkl = True
+    
+    def rem_cif(self):
+        """
+        Remove the CIF (Crystallographic Information File) from the object.
+
+        This method sets the `cif` attribute to None and the `has_cif` attribute to False,
+        indicating that the object no longer has an associated CIF file.
+        """
+        self.cif = None
+        self.has_cif = False
+
+    def rem_hkl(self):
+        """
+        Remove the Miller indices (hkl) from the object.
+
+        This method sets the `hkl` attribute to None and the `has_hkl` attribute to False,
+        indicating that the object no longer has Miller indices assigned.
+        """
+        self.hkl = None
+        self.has_hkl = False
+
+    def rem_dsp(self):
+        """
+        Remove the dsp attribute from the instance.
+
+        This method sets the `dsp` attribute to None and the `has_dsp` attribute to False.
+        """
+        self.dsp = None
+        self.has_dsp = False
+    
+    def validate_cif(self):
+        """
+        Validates the existence of the CIF (Crystallographic Information File).
+
+        This method checks if the CIF file specified by the `self.cif` attribute exists.
+        If the file does not exist, it calls the `rem_cif` method to handle the missing file.
+
+        Raises:
+            FileNotFoundError: If the CIF file does not exist.
+        """
+        if not os.path.exists(self.cif):
+            self.rem_cif()
+    
+    def is_complete(self):
+        """
+        Check if the object is complete.
+
+        This method checks if all required attributes (`has_cif`, `has_dsp`, `has_hkl`) 
+        are present and returns True if they are all present, otherwise False.
+
+        Returns:
+            bool: True if all required attributes are present, False otherwise.
+        """
+        return np.all([self.has_cif, self.has_dsp, self.has_hkl])
+
+###############
+#   WIDGETS   #
+###############
 class SliderWidget(QtWidgets.QFrame):
     """
     SliderWidget is a custom Qt widget that provides a frame with a set of vertical sliders,
@@ -6330,6 +4963,9 @@ class SliderWidget(QtWidgets.QFrame):
         super().mouseReleaseEvent(event)
         self.startPos = None
 
+###############
+#   WINDOWS   #
+###############
 class HotkeyDialog(QtWidgets.QDialog):
     """
     HotkeyDialog is a custom dialog class that extends QtWidgets.QDialog to handle
@@ -6338,8 +4974,8 @@ class HotkeyDialog(QtWidgets.QDialog):
     Methods:
         __init__(self, parent, *args, **kwargs):
 
-        keyPressEvent(self, event):
-            Handles key press events for the widget. Calls the parent's keyPressEvent
+        keyReleaseEvent(self, event):
+            Handles key press events for the widget. Calls the parent's keyReleaseEvent
             method and checks if the pressed key is the Escape key. If the Escape key
             is pressed, the widget will be closed.
     """
@@ -6352,144 +4988,1688 @@ class HotkeyDialog(QtWidgets.QDialog):
             *args: Variable length argument list.
             **kwargs: Arbitrary keyword arguments.
         """
-        super().__init__(parent, *args, **kwargs)
+        super().__init__(parent)
 
-    def keyPressEvent(self, event):
+        self.setWindowFlags(QtCore.Qt.WindowType.Dialog)
+        #self.setWindowFlags(QtCore.Qt.WindowType.Tool)
+        #self.setWindowModality(QtCore.Qt.WindowModality.NonModal)
+
+    def show(self, keep=False):
+        """
+        Shows the dialog and sets the focus to the dialog window.
+        """
+        # Move to the last position if available
+        #if self.has_pos is not None:
+        if self.pos():
+            self.move(self.pos())
+        # Show/hide the dialog
+        if self.isVisible() and not keep:
+            self.close()
+        else:
+            super().show()
+            self.setFocus()
+
+    def update(self):
+        pass
+        
+    def keyReleaseEvent(self, event):
         """
         Handles key press events for the widget.
 
         Parameters:
         event (QKeyEvent): The key event that triggered this method.
 
-        This method calls the parent's keyPressEvent method and checks if the
+        This method calls the parent's keyReleaseEvent method and checks if the
         pressed key is the Escape key. If the Escape key is pressed, the widget
         will be closed.
         """
-        self.parent().keyPressEvent(event)
+        self.parent().keyReleaseEvent(event)
         k = event.key()
         if k == QtCore.Qt.Key.Key_Escape:
             self.close()
 
-class Ref(object):
-    """
-    Ref is a class that represents a reference object with attributes for name, dsp, hkl, and cif.
-    """
-    def __init__(self, name, dsp=None, hkl=None, cif=None):
-        """
-        Initialize a new instance of the class.
+class AboutWindow(HotkeyDialog):
+    def __init__(self, parent, *args, **kwargs):
+        super().__init__(parent, *args, **kwargs)
+        self.path_settings = kwargs.get('path_settings', None)
+        self.path_home = kwargs.get('path_home', None)
+        self.pixmap = kwargs.get('pixmap', QtGui.QPixmap())
+        self.icon = kwargs.get('icon', QtGui.QIcon())
+        self.add_content()
+        self.setFixedSize(self.sizeHint())
 
-        Parameters:
-        name (str): The name of the instance.
-        dsp (optional): The dsp value. Default is None.
-        hkl (optional): The hkl value. Default is None.
-        cif (optional): The cif value. Default is None.
-        """
-        self.name = name
-        self.dsp = dsp
-        self.hkl = hkl
-        self.cif = cif
-        self.has_dsp = False
-        self.has_hkl = False
-        self.has_cif = False
-        # set falgs
-        if dsp is not None:
-            self.has_dsp = True
-        if hkl is not None:
-            self.has_hkl = True
-        if cif is not None:
-            self.has_cif = True
+    def add_content(self):
+        # title font
+        font_title = QtGui.QFont()
+        font_title.setPointSize(48)
+        title = QtWidgets.QLabel(f'<b>xrdPlanner</b>')
+        title.setFont(font_title)
+        suptitle = QtWidgets.QLabel(f'<b>Version {xrdPlanner.__version__}</b> (released {xrdPlanner.__date__})')
+        # add information
+        github = QtWidgets.QLabel(f'<br>A tool to project X-ray diffraction cones on a detector screen at different \
+                                    geometries (tilt, rotation, offset) and X-ray energies. For more information visit \
+                                    us on <a href="https://github.com/LennardKrause/xrdPlanner">Github</a>.')
+        github.setWordWrap(True)
+        github.setOpenExternalLinks(True)
+        published = QtWidgets.QLabel(f'<br>The article is published in<br><a href="https://doi.org/10.1107/S1600577523011086">\
+                                       <i>J. Synchrotron Rad.</i> (2024). <b>31</b></a>')
+        published.setOpenExternalLinks(True)
+        authors = QtWidgets.QLabel(f'<br><b>Authors:</b><br>{"<br>".join(xrdPlanner.__authors__)}')
+        email = QtWidgets.QLabel(f'<br>Feedback? <a href="mailto:{xrdPlanner.__email__}?subject=xrdPlanner feedback">{xrdPlanner.__email__}</a>')
+        email.setOpenExternalLinks(True)
+        path = QtWidgets.QLabel(f'<br>Open settings file <a href=file:///{self.path_settings}>location</a>')
+        path.setOpenExternalLinks(True)
+        detdb = QtWidgets.QLabel(f'<br>Find <u>old</u> detector db backup file (detector_db.json.bak) <a href=file:///{self.path_home}>here</a>')
+        detdb.setOpenExternalLinks(True)
+        # add widgets to layout
+        box_layout = QtWidgets.QVBoxLayout()
+        box_layout.setSpacing(0)
+        for widget in [title, suptitle, github, published, authors, email, path, detdb]:
+            box_layout.addWidget(widget)
+        # box containing info
+        self.box = QtWidgets.QGroupBox()
+        self.box.setFlat(True)
+        self.box.setLayout(box_layout)
+        # label containing the logo
+        self.logo = QtWidgets.QLabel()
+        self.logo.setPixmap(self.pixmap.scaledToHeight(self.box.sizeHint().height(), mode=QtCore.Qt.TransformationMode.SmoothTransformation))
+        # add both to the window layout
+        layout = QtWidgets.QHBoxLayout()
+        layout.addWidget(self.logo)
+        layout.addWidget(self.box)
+        # finish the window and make it unresizable
+        self.setWindowIcon(self.icon)
+        self.setLayout(layout)
+
+    def update_logo(self, pixmap):
+        self.pixmap = pixmap
+        self.logo.setPixmap(self.pixmap.scaledToHeight(self.box.sizeHint().height(), mode=QtCore.Qt.TransformationMode.SmoothTransformation))
+
+class GeometryWindow(HotkeyDialog):
+    def __init__(self, parent, *args, **kwargs):
+        super().__init__(parent, *args, **kwargs)
+        self.setWindowTitle('Geometry conventions')
+        self.icon = kwargs.get('icon', QtGui.QIcon())
+        self.add_content()
+        self.setFixedSize(self.sizeHint())
+    
+    def add_content(self):
+        font_title = QtGui.QFont()
+        font_title.setPointSize(28)
+        title = QtWidgets.QLabel(f'<b>Geometry conventions</b>')
+        title.setFont(font_title)
+        description = QtWidgets.QLabel('<b>Translations</b> without any <b>tilt</b>/<b>rotation</b> are the horizontal and vertical distances '
+                                       'between the centre of the detector and the point of normal incidence PONI (<i>top</i>). The SDD is the distance from '
+                                       'the sample to the PONI. A <b>rotation</b> moves the detector along the goniometer circle '
+                                       '(constant SDD), keeping the PONI at the same position relative to the detector '
+                                       'surface, here the detector centre (<i>lower left</i>). A <b>tilt</b> rolls the detector surface on '
+                                       'the goniometer circle, hence the SDD is fixed, but the PONI shifts along the detector '
+                                       'face (<i>lower right</i>).')
+        description.setAlignment(QtCore.Qt.AlignmentFlag.AlignJustify)
+        description.setWordWrap(True)
+        pmap = QtGui.QPixmap(':/icons/xrdPlanner_geom').scaled(512, 512, aspectRatioMode=QtCore.Qt.AspectRatioMode.KeepAspectRatio, transformMode=QtCore.Qt.TransformationMode.SmoothTransformation)
+        icon = QtWidgets.QLabel()
+        icon.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        icon.setPixmap(pmap)
         
-    def add_cif(self, cif):
-        """
-        Adds a CIF (Crystallographic Information File) to the instance.
+        published = QtWidgets.QLabel('For more information see:<a href="https://doi.org/10.1107/S1600577523011086"> '
+                                     '<i>J. Synchrotron Rad.</i> (2024). <b>31</b></a> or <a href="https://github.com/LennardKrause/xrdPlanner">Github</a>.')
+        published.setOpenExternalLinks(True)
 
-        Parameters:
-        cif (str): The CIF data to be added.
+        box_layout = QtWidgets.QVBoxLayout()
+        box_layout.setSpacing(6)
+        box_layout.addWidget(title)
+        box_layout.addWidget(description)
+        box_layout.addWidget(icon)
+        box_layout.addWidget(published)
 
-        Sets the instance's `cif` attribute to the provided CIF data and 
-        marks `has_cif` as True.
-        """
-        self.cif = cif
-        self.has_cif = True
+        box = QtWidgets.QGroupBox()
+        box.setFlat(True)
+        box.setLayout(box_layout)
+        box.setContentsMargins(0,0,0,0)
 
-    def add_dsp(self, dsp):
-        """
-        Adds a DSP (Digital Signal Processor) to the instance.
+        layout = QtWidgets.QVBoxLayout()
+        layout.addWidget(box)
+        
+        self.setWindowIcon(self.icon)
+        self.setLayout(layout)
 
-        Parameters:
-        dsp (object): The DSP object to be added.
+class HotkeysWindow(HotkeyDialog):
+    def __init__(self, parent, *args, **kwargs):
+        super().__init__(parent, *args, **kwargs)
+        self.setWindowTitle('Hotkeys')
+        self.icon = kwargs.get('icon', QtGui.QIcon())
 
-        Sets:
-        self.dsp: The provided DSP object.
-        self.has_dsp (bool): Flag indicating that a DSP has been added, set to True.
-        """
-        self.dsp = dsp
-        self.has_dsp = True
+        self.add_content()
 
-    def add_hkl(self, hkl):
-        """
-        Adds the Miller indices (hkl) to the instance and sets the has_hkl flag to True.
+        if 'hotkey_dict' in kwargs:
+            self.add_hotkeys(kwargs['hotkey_dict'])
 
-        Parameters:
-        hkl (tuple): A tuple representing the Miller indices (h, k, l).
-        """
-        self.hkl = hkl
-        self.has_hkl = True
+    def add_hotkeys(self, hotkey_dict):
+        font_bold = QtGui.QFont()
+        font_bold.setBold(True)
+
+        self.table.setRowCount(0)
+        for i,(entry, value) in enumerate(hotkey_dict.items()):
+            self.table.insertRow(i)
+            # handle title / sections
+            if isinstance(entry, str) and not value:
+                self.table.setItem(i, 0, QtWidgets.QTableWidgetItem(entry))
+                self.table.setSpan(i, 0, 1, 2)
+                #table.item(i, 0).setBackground(self.palette().highlight().color())
+                self.table.item(i, 0).setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+                self.table.item(i, 0).setFont(font_bold)
+            else:
+                key, mod = entry
+                desc = value['dc']
+                # handle special keys
+                if key.lower() == 'left':
+                    key = '\u2190'
+                elif key.lower() == 'up':
+                    key = '\u2191'
+                elif key.lower() == 'right':
+                    key = '\u2192'
+                elif key.lower() == 'down':
+                    key = '\u2193'
+                else:
+                    key = QtGui.QKeySequence(key).toString()
+                # add modification keys
+                if mod:
+                    if mod == 'SHIFT':
+                        mod = '\u21E7'
+                    key = f'{mod}+{key}'
+                # add to table
+                self.table.setItem(i, 0, QtWidgets.QTableWidgetItem(key))
+                self.table.setItem(i, 1, QtWidgets.QTableWidgetItem(desc))
+
+        self.table.resizeColumnsToContents()
+        self.resize(self.sizeHint())
+
+    def add_content(self):
+        self.table = QtWidgets.QTableWidget()
+        self.table.setColumnCount(2)
+        self.table.setSortingEnabled(False)
+        self.table.setHorizontalHeaderLabels(['Key','Action'])
+        self.table.setAlternatingRowColors(False)
+        self.table.verticalHeader().hide()
+        self.table.setWordWrap(False)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setEditTriggers(QtWidgets.QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setSelectionMode(QtWidgets.QTableWidget.SelectionMode.NoSelection)
+        self.table.setSizeAdjustPolicy(QtWidgets.QTableWidget.SizeAdjustPolicy.AdjustToContents)
+        self.table.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+
+        layout = QtWidgets.QVBoxLayout()
+        layout.addWidget(self.table)
+
+        self.setWindowIcon(self.icon)
+        self.setLayout(layout)
+
+class AbsorptionWindow(HotkeyDialog):
+    def __init__(self, parent, *args, **kwargs):
+        super().__init__(parent, *args, **kwargs)
+        self.setWindowTitle(f'Transmission of {self.parent().geo.reference}')
+        self.icon = kwargs.get('icon', QtGui.QIcon())
+        self.threshold = kwargs.get('threshold', 2)
+        self.abs_range = kwargs.get('abs_range', None)
+        self.abs_vals = kwargs.get('abs_vals', None)
+        self.stepsize = kwargs.get('stepsize', 0.1)
+        self.scat_diam = self.parent().plo.scattering_diameter
+        self.current_keV = None
+
+        keV_lower = self.parent().lmt.ener_min
+        keV_upper = self.parent().lmt.ener_max
+        if abs(keV_upper-keV_lower) < 1:
+            self.keV_range = (np.floor(keV_lower*0.49), np.ceil(keV_lower*1.51))
+        else:
+            self.keV_range = (keV_lower, keV_upper)
+        self.add_content()
+        self.setFixedSize(self.sizeHint())
     
-    def rem_cif(self):
-        """
-        Remove the CIF (Crystallographic Information File) from the object.
+    def add_content(self):
+        layout = QtWidgets.QVBoxLayout()
 
-        This method sets the `cif` attribute to None and the `has_cif` attribute to False,
-        indicating that the object no longer has an associated CIF file.
-        """
-        self.cif = None
-        self.has_cif = False
+        self.abs_plot = pg.PlotWidget(background=self.palette().base().color())
+        self.abs_plot.setTitle(f'', color=self.palette().text().color())
+        self.abs_plot.viewport().setAttribute(QtCore.Qt.WidgetAttribute.WA_AcceptTouchEvents, False)
+        self.abs_plot.setMenuEnabled(False)
+        self.abs_plot.setLabel('left', '-log(I/I\u2080)')
+        self.abs_plot.setLabel('bottom', 'Energy', units='keV')
+        self.abs_plot.showGrid(x=True, y=True, alpha=0.5)
+        self.abs_plot.getPlotItem().getViewBox().setDefaultPadding(0.01)
+        layout.addWidget(self.abs_plot)
+        self.abs_scat = pg.ScatterPlotItem(size=5,
+                                           symbol='o',
+                                           pen=pg.mkPen('g', width=1),
+                                           brush='g')
+        self.curve_label = pg.TextItem(anchor=(0.0,1.0), color=self.palette().text().color())
 
-    def rem_hkl(self):
-        """
-        Remove the Miller indices (hkl) from the object.
+        line_threshold = pg.InfiniteLine(angle=0, movable=False)
+        line_threshold.setPen(pg.mkPen(self.parent().conic_highlight, width=1, style=QtCore.Qt.PenStyle.DashLine))
+        line_threshold.setPos(self.threshold)
+        self.line_current_kev = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen('g', width=1))
+        self.abs_curve = pg.PlotCurveItem(useCache=True)
+        # plot item order
+        self.abs_plot.addItem(self.abs_curve)
+        self.abs_plot.addItem(line_threshold)
+        self.abs_plot.addItem(self.line_current_kev)
+        self.abs_plot.addItem(self.abs_scat)
+        self.abs_plot.addItem(self.curve_label)
 
-        This method sets the `hkl` attribute to None and the `has_hkl` attribute to False,
-        indicating that the object no longer has Miller indices assigned.
-        """
-        self.hkl = None
-        self.has_hkl = False
+        self.parm_box = QtWidgets.QGroupBox('')
+        self.parm_layout = QtWidgets.QHBoxLayout()
+        self.parm_box.setLayout(self.parm_layout)
 
-    def rem_dsp(self):
-        """
-        Remove the dsp attribute from the instance.
+        self.pack_desc = QtWidgets.QLabel('Packing density')
+        self.pack_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.pack_slider.setRange(1, 100)
+        self.pack_slider.setSingleStep(1)
+        self.pack_slider.setPageStep(10)
+        self.pack_slider.setValue(100)
+        self.pack_slider.valueChanged.connect(self.update)
+        self.pack_label = QtWidgets.QLabel()
+        self.pack_label.setText(f'{self.pack_slider.value()} %')
+        self.parm_layout.addWidget(self.pack_desc)
+        self.parm_layout.addWidget(self.pack_slider)
+        self.parm_layout.addWidget(self.pack_label)
 
-        This method sets the `dsp` attribute to None and the `has_dsp` attribute to False.
-        """
-        self.dsp = None
-        self.has_dsp = False
+        self.diam_desc = QtWidgets.QLabel(f'Scattering volume \u2300: {int(self.parent().plo.scattering_diameter*1e6)} \u00B5m')
+        self.parm_layout.addWidget(self.diam_desc)
+
+        layout.addWidget(self.parm_box)
+
+        # add description
+        description = QtWidgets.QLabel('This feature is currently in <b>test phase</b>, feedback is very welcome!<br>\
+                                        The estimated FWHM (H, in degrees) is shown in the bottom right corner.')
+        description.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(description)
+
+        self.setLayout(layout)
     
-    def validate_cif(self):
-        """
-        Validates the existence of the CIF (Crystallographic Information File).
+    def calc_absorption(self, stepsize=0.1):
+        self.stepsize = stepsize
+        self.abs_range = np.arange(*self.keV_range, self.stepsize)
+        self.abs_vals = self.parent().xtl.Properties.absorption(energy_kev=self.abs_range)*1e3 # mm-1
 
-        This method checks if the CIF file specified by the `self.cif` attribute exists.
-        If the file does not exist, it calls the `rem_cif` method to handle the missing file.
+    def update(self):
+        if self.parent().xtl is None:
+            self.close()
+            return
+        # called by: mainWindow slider, update_screen
+        pack_density = self.pack_slider.value()*1e-2
+        self.pack_label.setText(f'{pack_density*100:.0f}%')
+        if self.abs_range is None or self.abs_vals is None:
+            self.calc_absorption()
+        self.abs_curve.setData(self.abs_range, self.abs_vals*pack_density*self.scat_diam*1e3)
+        if self.current_keV != self.parent().geo.ener:
+            self.update_keV(self.parent().geo.ener)
+
+    def update_keV(self, keV):
+        self.line_current_kev.setPos(keV)
+        abs_val = self.abs_curve.getData()[1][np.argmin(np.abs(self.abs_range-keV))]
+        self.curve_label.setPos(keV, abs_val)
+        self.abs_scat.setData([keV], [abs_val])
+        self.curve_label.setText(f'{np.exp(-abs_val)*100:.0f}%')
+        self.current_keV = keV
+
+    def update_scat_diameter(self, value):
+        self.diam_desc.setText(f'Scattering volume \u2300: {value*1e6} \u00B5m')
+        self.scat_diam = value
+        #self.update()
+
+    def show(self, keep=False):
+        self.update()
+        return super().show(keep)
+
+# references to parent
+class DetdbWindow(HotkeyDialog):
+    def __init__(self, parent, *args, **kwargs):
+        super().__init__(parent, *args, **kwargs)
+        self.setWindowTitle('Edit detector databank')
+        self.add_content()
+    
+    def add_content(self):
+        # set flags=QtCore.Qt.WindowType.Tool for the window
+        # to not loose focus when the FileDialog is closed
+        self.finished.connect(self.win_detdb_on_close)
+        layout_vbox = QtWidgets.QVBoxLayout()
+        layout_hbox = QtWidgets.QHBoxLayout()
+        layout_hbox.setContentsMargins(0,0,0,0)
+        frame = QtWidgets.QFrame()
+        frame.setLayout(layout_hbox)
+        self.setLayout(layout_vbox)
+
+        self.setStyleSheet('QGroupBox { font-weight: bold; } ')
+
+        # Fonts
+        font_header = QtGui.QFont()
+        font_header.setPixelSize(self.parent().plo.slider_label_size)
+        font_header.setBold(True)
+        font_normal = QtGui.QFont()
+        font_normal.setPixelSize(self.parent().plo.slider_label_size)
+        font_normal.setBold(False)
+
+        # Detector tree box
+        qbox_detbank = QtWidgets.QGroupBox()
+        qbox_detbank.setTitle('Detector bank')
+        qbox_detbank.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
+        layout_qbox_detbank = QtWidgets.QVBoxLayout()
+        qbox_detbank.setLayout(layout_qbox_detbank)
+
+        self._db_dict = self.parent().detector_db.copy()
+
+        tooltips = {'hmp' : 'Module size (horizontal) [px]',
+                    'vmp' : 'Module size (vertical) [px]',
+                    'pxs' : 'Pixel size [mm]',
+                    'hgp' : 'Module gap (horizontal) [px]',
+                    'vgp' : 'Module gap (vertical) [px]',
+                    'cbh' : 'Central beam hole [px]',
+                    'name': 'Detector size name [str]',
+                    'hmn' : 'Module number (horizontal) [int]',
+                    'vmn' : 'Module number (vertical) [int]',
+                    }
+
+        # detector bank list widget
+        self.list_db = QtWidgets.QListWidget()
+        self.list_db.setAlternatingRowColors(True)
+        self.list_db.currentItemChanged.connect(self.win_detdb_par_update)
+        self.list_db.itemChanged.connect(self.win_detdb_dict_update)
+        layout_qbox_detbank.addWidget(self.list_db)
+        for det in self._db_dict.keys():
+            item = QtWidgets.QListWidgetItem()
+            item.setData(0, det)
+            self.list_db.addItem(item)
+
+        # Detector size box
+        qbox_detsize = QtWidgets.QGroupBox()
+        qbox_detsize.setTitle('Size')
+        qbox_detsize.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
+        layout_qbox_detsize = QtWidgets.QVBoxLayout()
+        qbox_detsize.setLayout(layout_qbox_detsize)
+
+        # doubleSpinBox editor for the beamstop bank list widget
+        class itemDelegateInt(QtWidgets.QStyledItemDelegate):
+            def createEditor(self, parent, option, index):
+                if isinstance(index.data(0), int):
+                    box = QtWidgets.QSpinBox(parent)
+                    box.setSingleStep(1)
+                    box.setMinimum(1)
+                    box.setMaximum(100)
+                    return box
+                else:
+                    return super(itemDelegateInt, self).createEditor(parent, option, index)
+        
+        # detector size table widget
+        self.table_size = QtWidgets.QTableWidget(columnCount=3)
+        self.table_size.setHorizontalHeaderLabels(['name','hmn', 'vmn'])
+        self.table_size.horizontalHeaderItem(0).setToolTip(tooltips['name'])
+        self.table_size.horizontalHeaderItem(1).setToolTip(tooltips['hmn'])
+        self.table_size.horizontalHeaderItem(2).setToolTip(tooltips['vmn'])
+        self.table_size.setAlternatingRowColors(True)
+        self.table_size.verticalHeader().hide()
+        self.table_size.setSelectionBehavior(QtWidgets.QTableWidget.SelectionBehavior.SelectRows)
+        self.table_size.setSelectionMode(QtWidgets.QTableWidget.SelectionMode.SingleSelection)
+        self.table_size.setItemDelegate(itemDelegateInt())
+        self.table_size.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
+        self.table_size.cellChanged.connect(self.win_detdb_size_update)
+        self.table_size.itemSelectionChanged.connect(self.win_detdb_dim_update)
+        layout_qbox_detsize.addWidget(self.table_size)
+
+        # Detector parameter box
+        qbox_detpar = QtWidgets.QGroupBox()
+        qbox_detpar.setTitle('Parameter')
+        qbox_detpar.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
+        layout_qbox_detpar = QtWidgets.QGridLayout()
+        qbox_detpar.setLayout(layout_qbox_detpar)
+
+        # detector par table widget
+        self.detpar_items = {}
+        det = next(iter(self._db_dict.keys()))
+        for idx, (par, val) in enumerate(self._db_dict[det].items()):
+            if par == 'size':
+                pass
+            elif par == 'pxs':
+                widget_label = QtWidgets.QLabel(par)
+                widget_label.setToolTip(tooltips[par])
+                widget_value = QtWidgets.QDoubleSpinBox()
+                widget_value.setValue(val)
+                widget_value.setDecimals(4)
+                widget_value.setMinimum(0.0001)
+                widget_value.setMaximum(10)
+                widget_value.setSingleStep(0.001)
+                widget_value.setSuffix(' mm')
+                widget_value.setObjectName(par)
+                widget_value.valueChanged.connect(self.win_detdb_par_change)
+                layout_qbox_detpar.addWidget(widget_label, idx, 0)
+                layout_qbox_detpar.addWidget(widget_value, idx, 1)
+                self.detpar_items[par] = widget_value
+            else:
+                widget_label = QtWidgets.QLabel(par)
+                widget_label.setToolTip(tooltips[par])
+                widget_value = QtWidgets.QSpinBox()
+                widget_value.setValue(val)
+                widget_value.setMinimum(0)
+                widget_value.setMaximum(100000)
+                widget_value.setSuffix(' px')
+                widget_value.setObjectName(par)
+                widget_value.valueChanged.connect(self.win_detdb_par_change)
+                layout_qbox_detpar.addWidget(widget_label, idx, 0)
+                layout_qbox_detpar.addWidget(widget_value, idx, 1)
+                self.detpar_items[par] = widget_value
+
+        layout_qbox_detpar.setRowStretch(idx, 1)
+
+        # Detector dimensions box
+        qbox_detdim = QtWidgets.QGroupBox()
+        qbox_detdim.setTitle('Detector area (h \u00D7 v)')
+        qbox_detdim.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
+        layout_qbox_detdim = QtWidgets.QVBoxLayout()
+        qbox_detdim.setLayout(layout_qbox_detdim)
+        self._dim_mm = QtWidgets.QLabel()
+        self._dim_px = QtWidgets.QLabel()
+        layout_qbox_detdim.addWidget(self._dim_mm)
+        layout_qbox_detdim.addWidget(self._dim_px)
+        layout_qbox_detpar.addWidget(qbox_detdim, layout_qbox_detpar.rowCount(), 0, QtCore.Qt.AlignmentFlag.AlignCenter, 2)
+
+        # Add row to detector list widget
+        def row_add(aQListWidget):
+            new = f'CUSTOM{aQListWidget.count():>02}'
+            item = QtWidgets.QListWidgetItem()
+            item.setData(2, new)
+            item.setFlags(item.flags()|QtCore.Qt.ItemFlag.ItemIsEditable)
+
+            self._db_dict[new] = {
+                'pxs' : 100e-3, # [mm] Pixel size
+                'hmp' : 100,    # [px] Module size (horizontal)
+                'vmp' : 100,    # [px] Module size (vertical)
+                'hgp' : 0,      # [px] Gap between modules (horizontal)
+                'vgp' : 0,      # [px] Gap between modules (vertical)
+                'cbh' : 0,      # [px] Central beam hole
+                'size' : {'ONE':(1,1)},
+                }
+            
+            aQListWidget.addItem(item)
+            aQListWidget.setCurrentItem(item)
+
+        # Remove row to detector list widget
+        def rem_item(aQListWidget):
+            det = aQListWidget.takeItem(aQListWidget.currentRow())
+            self._db_dict.pop(det.text())
+
+        # Remove row to detector list widget
+        def rem_row(aQTableWidget):
+            row = aQTableWidget.currentRow()
+            det = self.list_db.currentItem().text()
+            size = self.table_size.item(row, 0).text()
+            aQTableWidget.removeRow(row)
+            self._db_dict[det]['size'].pop(size)
+
+        # Detector button box
+        qbox_detbutton = QtWidgets.QGroupBox()
+        qbox_detbutton.setTitle('')
+        layout_qbox_detbutton = QtWidgets.QHBoxLayout()
+        qbox_detbutton.setLayout(layout_qbox_detbutton)
+        # add/remove buttons detector list widget
+        button_add = QtWidgets.QToolButton()
+        button_add.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        button_add.setText('+')
+        button_add.setToolTip('Add a new entry to the list.')
+        button_add.clicked.connect(lambda: row_add(self.list_db))
+        # remove button
+        button_rem = QtWidgets.QToolButton()
+        button_rem.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        button_rem.setText('-')
+        button_rem.setToolTip('Remove the highlighted entry from the list.')
+        button_rem.clicked.connect(lambda: rem_item(self.list_db))
+        layout_qbox_detbutton.addWidget(button_add)
+        layout_qbox_detbutton.addWidget(button_rem)
+        layout_qbox_detbank.addWidget(qbox_detbutton)
+
+        # Add row to detector size list widget
+        def row_add_size(aQTableWidget, currentItem):
+            new = f'C{aQTableWidget.rowCount():>02}'
+            self._db_dict[currentItem.text()]['size'][new] = (1,1)
+            self.win_detdb_par_update(currentItem)
+
+        # Detector size button box
+        qbox_sizebutton = QtWidgets.QGroupBox()
+        qbox_sizebutton.setTitle('')
+        layout_qbox_sizebutton = QtWidgets.QHBoxLayout()
+        qbox_sizebutton.setLayout(layout_qbox_sizebutton)
+        # add/remove buttons for the beamstop bank list widget
+        button_size_add = QtWidgets.QToolButton()
+        button_size_add.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        button_size_add.setText('+')
+        button_size_add.setToolTip('Add a new entry to the list.')
+        button_size_add.clicked.connect(lambda: row_add_size(self.table_size, self.list_db.currentItem()))
+        # remove button
+        button_size_rem = QtWidgets.QToolButton()
+        button_size_rem.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        button_size_rem.setText('-')
+        button_size_rem.setToolTip('Remove the highlighted entry from the list.')
+        button_size_rem.clicked.connect(lambda: rem_row(self.table_size))
+        layout_qbox_sizebutton.addWidget(button_size_add)
+        layout_qbox_sizebutton.addWidget(button_size_rem)
+        layout_qbox_detsize.addWidget(qbox_sizebutton)
+
+        # Close button box
+        qbox_accept = QtWidgets.QGroupBox()
+        #qbox_accept.setTitle('')
+        #qbox_accept.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
+        layout_qbox_accept = QtWidgets.QHBoxLayout()
+        qbox_accept.setLayout(layout_qbox_accept)
+
+        # store button
+        button_store = QtWidgets.QToolButton()
+        button_store.setSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Fixed)
+        button_store.setText('Save')
+        button_store.setToolTip('This will overwrite the detector_db.json. Changes are saved and available upon restart of xrdPlanner.')
+        button_store.clicked.connect(self.win_detdb_overwrite)
+
+        # preview button
+        button_preview = QtWidgets.QToolButton()
+        button_preview.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        button_preview.setText('Preview')
+        button_preview.setToolTip('Show a preview of the current detector. All changes are available during this session, the data bank will not be updated.')
+        button_preview.clicked.connect(self.win_detdb_preview)
+
+        # add widgets
+        layout_hbox.addWidget(qbox_detbank)
+        layout_hbox.addWidget(qbox_detpar)
+        layout_hbox.addWidget(qbox_detsize)
+        layout_vbox.addWidget(frame)
+        layout_vbox.addWidget(qbox_accept)
+        layout_qbox_accept.addWidget(button_store)
+        layout_qbox_accept.addWidget(button_preview)
+        
+        # select detector
+        self.list_db.setCurrentRow(0)
+        # calculate detector size for given settings
+        self.win_detdb_dim_update()
+        self.list_db.setFocus()
+    
+    def win_detdb_dim_update(self):
+        """
+        Updates the detector database dimensions displayed in the UI.
+
+        This method retrieves the current detector and its dimensions from the UI elements,
+        calculates the dimensions in both millimeters and pixels, and updates the corresponding
+        UI text fields with these values.
+
+        The dimensions are calculated based on the horizontal and vertical multipliers and gaps,
+        as well as the pixel size from the detector database.
 
         Raises:
-            FileNotFoundError: If the CIF file does not exist.
+            ValueError: If the text from the table items cannot be converted to integers.
         """
-        if not os.path.exists(self.cif):
-            self.rem_cif()
+        det = self.list_db.currentItem().text()
+        size_row = self.table_size.currentRow()
+        hmn = int(self.table_size.item(size_row, 1).text())
+        vmn = int(self.table_size.item(size_row, 2).text())
+        pxs = self._db_dict[det]['pxs']
+        xdim = self._db_dict[det]['hmp'] * hmn + self._db_dict[det]['hgp'] * (hmn-1) + self._db_dict[det]['cbh']
+        ydim = self._db_dict[det]['vmp'] * vmn + self._db_dict[det]['vgp'] * (vmn-1) + self._db_dict[det]['cbh']
+        self._dim_mm.setText(f'{xdim * pxs:.1f} \u00D7 {ydim * pxs:.1f} mm\u00B2')
+        self._dim_px.setText(f'{xdim:.0f} \u00D7 {ydim:.0f} px')
     
-    def is_complete(self):
+    def win_detdb_par_change(self, val):
         """
-        Check if the object is complete.
+        Updates the detector database parameter with the given value and refreshes the display.
 
-        This method checks if all required attributes (`has_cif`, `has_dsp`, `has_hkl`) 
-        are present and returns True if they are all present, otherwise False.
+        This method retrieves the current detector from the list, identifies the parameter to be updated
+        based on the sender's object name, and updates the corresponding value in the internal database
+        dictionary. After updating the value, it calls the method to update the display dimensions.
+
+        Args:
+            val: The new value to set for the specified parameter.
+        """
+        det = self.list_db.currentItem().text()
+        par = self.sender().objectName()
+        self._db_dict[det][par] = val
+        self.win_detdb_dim_update()
+
+    def win_detdb_size_update(self):
+        """
+        Updates the 'size' entry in the detector database dictionary based on the current items in the table.
+
+        This method retrieves the currently selected detector from the list and updates its 'size' entry in the 
+        internal database dictionary (`_db_dict`). The 'size' entry is replaced with a new dictionary where each 
+        key is a size name and each value is a tuple containing horizontal and vertical measurements.
+
+        The method also calls `win_detdb_dim_update` to update the dimensions.
+
+        Note:
+            The old 'size' entry is completely replaced, and any previous data is lost.
+
+        Raises:
+            AttributeError: If the current item in the list or any item in the table is None.
+            ValueError: If the horizontal or vertical measurements cannot be converted to integers.
+        """
+        # The table is replacing the dict[det]['size'] entry on change
+        # I don't know how to properly handle the renaming of a 'size'
+        # the 'old' name, that is to be replaced be 'new', is lost
+        det = self.list_db.currentItem().text()
+        self._db_dict[det]['size'] = {}
+        for row in range(self.table_size.rowCount()):
+            size = self.table_size.item(row, 0).text()
+            hmn = int(self.table_size.item(row, 1).text())
+            vmn = int(self.table_size.item(row, 2).text())
+            self._db_dict[det]['size'][size] = (hmn, vmn)
+        self.win_detdb_dim_update()
+
+    def win_detdb_dict_update(self, QListWidgetItem):
+        """
+        Updates the detector database dictionary with the selected detector.
+
+        Args:
+            QListWidgetItem (QListWidgetItem): The item selected from the QListWidget, representing a detector.
+
+        Updates:
+            - Moves the current detector entry to the new detector key in the database dictionary.
+            - Calls the method to update the detector dimensions in the window.
+        """
+        det = QListWidgetItem.text()
+        self._db_dict[det] = self._db_dict.pop(self.current_detector)
+        self.win_detdb_dim_update()
+
+    def win_detdb_par_update(self, item):
+        """
+        Updates the detector database parameters in the UI based on the selected item.
+
+        Args:
+            item (QTableWidgetItem): The selected item from the detector database table.
+
+        This method performs the following actions:
+        - Sets the current detector to the text of the selected item.
+        - Iterates through the parameters and values of the selected detector in the database.
+        - If the parameter is 'size', it updates the size table in the UI:
+            - Blocks signals from the size table to prevent unwanted signal emissions.
+            - Clears the contents of the size table.
+            - Sets the row count of the size table to 0.
+            - Iterates through the size values and populates the size table with the new values.
+            - Sets the current cell of the size table to the first cell of each row.
+            - Unblocks signals from the size table.
+        - For other parameters, it updates the corresponding UI elements:
+            - Blocks signals from the UI element to prevent unwanted signal emissions.
+            - Sets the value of the UI element to the parameter value.
+            - Unblocks signals from the UI element.
+        - Calls the `win_detdb_dim_update` method to update the dimensions in the UI.
+        """
+        self.current_detector = item.text()
+        for par, val in self._db_dict[item.text()].items():
+            if par == 'size':
+                self.table_size.blockSignals(True)
+                self.table_size.clearContents()
+                self.table_size.setRowCount(0)
+                for i, (name, (hmn,vmn)) in enumerate(val.items()):
+                    self.table_size.insertRow(i)
+                    self.table_size.setItem(i, 0, QtWidgets.QTableWidgetItem(name))
+                    item_hmn = QtWidgets.QTableWidgetItem(hmn)
+                    item_hmn.setData(QtCore.Qt.ItemDataRole.EditRole, int(hmn))
+                    item_vmn = QtWidgets.QTableWidgetItem(vmn)
+                    item_vmn.setData(QtCore.Qt.ItemDataRole.EditRole, int(vmn))
+                    self.table_size.setItem(i, 1, item_hmn)
+                    self.table_size.setItem(i, 2, item_vmn)
+                    self.table_size.setCurrentCell(i, 0)
+                self.table_size.blockSignals(False)
+            else:
+                self.detpar_items[par].blockSignals(True)
+                self.detpar_items[par].setValue(val)
+                self.detpar_items[par].blockSignals(False)
+        self.win_detdb_dim_update()
+    
+    def win_detdb_on_close(self):
+        """
+        Handles the event when the detector database window is closed.
+
+        This method performs the following actions:
+        1. Copies the current state of the detector database to a backup dictionary.
+        2. Reinitializes the menu with a reset option.
 
         Returns:
-            bool: True if all required attributes are present, False otherwise.
+            None
         """
-        return np.all([self.has_cif, self.has_dsp, self.has_hkl])
+        self.parent().detector_db = self._db_dict.copy()
+        self.parent().menu_init(reset=True)
 
+    def win_detdb_preview(self):
+        """
+        Updates the detector database and changes the detector.
+
+        This method copies the current detector database to `self.detector_db`, 
+        retrieves the selected detector and its size from the UI, and then 
+        updates the detector configuration using the `change_detector` method.
+
+        Steps:
+        1. Copies the current detector database to `self.detector_db`.
+        2. Retrieves the selected detector from `self.list_db`.
+        3. Retrieves the size of the selected detector from `self.table_size`.
+        4. Calls `self.change_detector` with the selected detector and size.
+
+        Note:
+            This method assumes that `self.list_db` and `self.table_size` are 
+            properly initialized and populated with the relevant data.
+
+        """
+        # add new detectors to
+        # -> self.geo.det_bank
+        # if it is not empty!
+        self.parent().detector_db = self._db_dict.copy()
+        detector = self.list_db.currentItem().text()
+        size = self.table_size.item(self.table_size.currentRow(), 0).text()
+        self.parent().change_detector(detector, size)
+
+    def win_detdb_overwrite(self):
+        """
+        Overwrites the detector database file with the current detector database.
+
+        This method first previews the detector database changes by calling 
+        `win_detdb_preview`. Then, it writes the current state of `self.detector_db` 
+        to the file specified by `self.path_detdb` in JSON format with an indentation 
+        of 4 spaces. Finally, it closes the detector database window.
+
+        Returns:
+            None
+        """
+        self.win_detdb_preview()
+        with open(self.parent().path_detdb, 'w') as wf:
+            json.dump(self.parent().detector_db, wf, indent=4)
+        self.close()
+
+# references to parent
+class ExportWindow(HotkeyDialog):
+    def __init__(self, parent, *args, **kwargs):
+        super().__init__(parent, *args, **kwargs)
+        self.setWindowTitle('Export current settings to file')
+        self.add_content()
+    
+    def add_content(self):
+        # set flags=QtCore.Qt.WindowType.Tool for the window
+        # to not loose focus when the FileDialog is closed
+        layout_vbox = QtWidgets.QVBoxLayout()
+        layout_hbox = QtWidgets.QHBoxLayout()
+        layout_hbox.setContentsMargins(0,0,0,0)
+        frame = QtWidgets.QFrame()
+        frame.setLayout(layout_hbox)
+
+        self.setLayout(layout_vbox)
+
+        # Fonts
+        font_header = QtGui.QFont()
+        font_header.setPixelSize(self.parent().plo.slider_label_size)
+        font_header.setBold(True)
+        font_normal = QtGui.QFont()
+        font_normal.setPixelSize(self.parent().plo.slider_label_size)
+        font_normal.setBold(False)
+
+        # Detector tree box
+        qbox_det = QtWidgets.QGroupBox()
+        qbox_det.setTitle('Detector bank')
+        qbox_det.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
+        qbox_det.setFont(font_header)
+        layout_qbox_det = QtWidgets.QVBoxLayout()
+        qbox_det.setLayout(layout_qbox_det)
+
+        # Detector tree
+        self.tree_det = QtWidgets.QTreeWidget()
+        self.tree_det.setToolTip('Add detectors and models to the detector bank.\nSelect none to make all detectors and models available.')
+        self.tree_det.setColumnCount(1)
+        self.tree_det.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.MultiSelection)
+        self.tree_det.setHeaderLabels(['Detector type / size'])
+        self.tree_det.header().setFont(font_header)
+        self.tree_det.setAlternatingRowColors(True)
+        _cur_det_type = None
+        _cur_det_size = None
+        for det, specs in self.parent().get_det_library(update=False, reset=False).items():
+            item = QtWidgets.QTreeWidgetItem([str(det)])
+            item.setFont(0, font_header)
+            if self.parent().geo.det_type == str(det):
+                _cur_det_type = item
+            for val in specs['size'].keys():
+                child = QtWidgets.QTreeWidgetItem([str(val)])
+                child.setFont(0, font_normal)
+                if self.parent().geo.det_size == str(val) and self.parent().geo.det_type == str(det):
+                    _cur_det_size = child
+                item.addChild(child)
+            self.tree_det.addTopLevelItem(item)
+        self.tree_det.expandAll()
+        self.tree_det.itemClicked.connect(self.win_export_ghost_select)
+
+        # highlight current detector type/size
+        if _cur_det_type is not None:
+            _cur_det_type.setSelected(True)
+        if _cur_det_size is not None:
+            _cur_det_size.setSelected(True)
+
+        # Beamstop list tree box
+        qbox_bsb = QtWidgets.QGroupBox()
+        qbox_bsb.setTitle('Beamstop bank')
+        qbox_bsb.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
+        qbox_bsb.setFont(font_header)
+        layout_qbox_bsb = QtWidgets.QVBoxLayout()
+        layout_qbox_bsb.setSpacing(0)
+        qbox_bsb.setLayout(layout_qbox_bsb)
+
+        # doubleSpinBox editor for the beamstop bank list widget
+        class itemDelegateFloat(QtWidgets.QStyledItemDelegate):
+            def displayText(self, value, locale):
+                return f'{value:.1f}'
+            
+            def createEditor(self, parent, option, index):
+                box = QtWidgets.QDoubleSpinBox(parent)
+                box.setDecimals(1)
+                box.setSingleStep(0.1)
+                box.setMinimum(0)
+                box.setMaximum(100)
+                return box
+
+        # Beamstop bank list widget
+        self.tree_bsb = QtWidgets.QListWidget()
+        self.tree_bsb.setAlternatingRowColors(True)
+        self.tree_bsb.setItemDelegate(itemDelegateFloat())
+        self.tree_bsb.setToolTip('Specify the available beamstop sizes.')
+        self.tree_bsb.itemChanged.connect(self.tree_bsb.sortItems)
+        for bs_size in self.parent().geo.bs_list:
+            item = QtWidgets.QListWidgetItem()
+            item.setData(2, bs_size)
+            item.setFont(font_normal)
+            item.setFlags(item.flags()|QtCore.Qt.ItemFlag.ItemIsEditable)
+            self.tree_bsb.addItem(item)
+
+        # Add row to beamstop bank list widget
+        def row_add(aQListWidget, font):
+            vmax = 0
+            for i in range(aQListWidget.count()):
+                if aQListWidget.item(i).data(0) > vmax:
+                    vmax = aQListWidget.item(i).data(0)
+            item = QtWidgets.QListWidgetItem()
+            item.setData(2, vmax + 1)
+            item.setFont(font)
+            item.setFlags(item.flags()|QtCore.Qt.ItemFlag.ItemIsEditable)
+            aQListWidget.addItem(item)
+
+        # Remove row to beamstop bank list widget
+        def row_rem(aQListWidget):
+            _ = aQListWidget.takeItem(aQListWidget.currentRow())
+
+        # add/remove buttons for the beamstop bank list widget
+        button_add = QtWidgets.QToolButton()
+        button_add.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        button_add.setText('+')
+        button_add.setFont(font_header)
+        button_add.setToolTip('Add a new entry to the list.')
+        button_add.clicked.connect(lambda: row_add(self.tree_bsb, font_normal))
+        # remove button
+        button_rem = QtWidgets.QToolButton()
+        button_rem.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        button_rem.setText('-')
+        button_rem.setFont(font_header)
+        button_rem.setToolTip('Remove the highlighted entry from the list.')
+        button_rem.clicked.connect(lambda: row_rem(self.tree_bsb))
+        # button in layout
+        layout_hbox_but = QtWidgets.QHBoxLayout()
+        layout_hbox_but.addWidget(button_add)
+        layout_hbox_but.addWidget(button_rem)
+        qbox_buttons = QtWidgets.QGroupBox()
+        qbox_buttons.setLayout(layout_hbox_but)
+
+        # Parameter tree box
+        qbox_par = QtWidgets.QGroupBox()
+        qbox_par.setTitle('Review parameters')
+        qbox_par.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
+        qbox_par.setFont(font_header)
+        layout_qbox_par = QtWidgets.QVBoxLayout()
+        qbox_par.setLayout(layout_qbox_par)
+
+        # Make only one column editable
+        # Specify the editors for different data types
+        class genericItemDelegate(QtWidgets.QItemDelegate):
+            def createEditor(self, parent, option, index):
+                if index.column() == 1:
+                    # bool needs to be evaluated before int as True and False
+                    # will be interpreted as integers
+                    if isinstance(index.data(0), bool):
+                        return super(genericItemDelegate, self).createEditor(parent, option, index)
+                    elif isinstance(index.data(0), int):
+                        box = QtWidgets.QSpinBox(parent)
+                        box.setSingleStep(1)
+                        box.setMinimum(int(-1e9))
+                        box.setMaximum(int(1e9))
+                        return box
+                    elif isinstance(index.data(0), float):
+                        box = QtWidgets.QDoubleSpinBox(parent)
+                        box.setDecimals(2)
+                        box.setSingleStep(0.01)
+                        box.setMinimum(-1e9)
+                        box.setMaximum(1e9)
+                        return box
+                    elif isinstance(index.data(0), str) and index.data(0).startswith('#'):
+                        current_color = QtGui.QColor(index.data(0))
+                        box = QtWidgets.QColorDialog(current_color, parent)
+                        box.setOption(QtWidgets.QColorDialog.ColorDialogOption.ShowAlphaChannel, on=True)
+                        return box
+                    else:
+                        return super(genericItemDelegate, self).createEditor(parent, option, index)
+                return None
+            
+            def setModelData(self, editor, model, index):
+                if isinstance(editor, QtWidgets.QColorDialog):
+                    if editor.result():
+                        model.setData(index, editor.selectedColor().name(format=QtGui.QColor.NameFormat.HexArgb))
+                        model.setData(index.siblingAtColumn(2), QtGui.QBrush(editor.selectedColor()), QtCore.Qt.ItemDataRole.BackgroundRole)
+                else:
+                    return super(genericItemDelegate, self).setModelData(editor, model, index)
+
+        # Parameter tree widget
+        self.tree_par = QtWidgets.QTreeWidget()
+        self.tree_par.setColumnCount(3)
+        #self.tree_par.setHeaderLabels(['Parameter', 'Value', '#'])
+        #self.tree_par.header().setFont(font_header)
+        self.tree_par.setHeaderHidden(True)
+        self.tree_par.setAlternatingRowColors(True)
+        self.tree_par.setItemDelegate(genericItemDelegate())
+
+        # det_bank and bs_list need some special treatment
+        # to facilitate their editing
+        dont_show = ['det_bank', 'bs_list']
+        # detailed header
+        translation = {'geo':'Geometry',
+                       'plo':'Plot layout',
+                       'thm':'Theme',
+                       'lmt':'Limits'}
+        for section, values in {'geo':self.parent().geo.__dict__,
+                                'plo':self.parent().plo.__dict__,
+                                'thm':self.parent().thm.__dict__,
+                                'lmt':self.parent().lmt.__dict__}.items():
+            item = QtWidgets.QTreeWidgetItem([translation[section]])
+            item.setFont(0, font_header)
+            item.setText(1, section)
+            #item.setFlags(QtCore.Qt.ItemFlag.ItemIsSelectable|QtCore.Qt.ItemFlag.ItemIsEnabled)
+            for par, val in values.items():
+                if par in dont_show:
+                    continue
+                child = QtWidgets.QTreeWidgetItem()
+                child.setData(0, 0, str(par))
+                if section in self.parent().tooltips and par in self.parent().tooltips[section]:
+                    child.setToolTip(0, self.parent().tooltips[section][par])
+                    child.setToolTip(1, self.parent().tooltips[section][par])
+                child.setData(1, 2, val)
+                if isinstance(val, str) and val.startswith('#'):
+                    child.setBackground(2, QtGui.QBrush(QtGui.QColor(val)))
+                child.setFont(0, font_normal)
+                child.setFont(1, font_normal)
+                child.setFlags(item.flags()|QtCore.Qt.ItemFlag.ItemIsEditable)
+                item.addChild(child)
+            self.tree_par.addTopLevelItem(item)
+        self.tree_par.expandAll()
+        self.tree_par.resizeColumnToContents(0)
+        self.tree_par.resizeColumnToContents(1)
+
+        button_export = QtWidgets.QToolButton()
+        button_export.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        button_export.setText('Export settings to file')
+        button_export.setFont(font_header)
+        button_export.clicked.connect(self.win_export_to)
+
+        qbox_btn = QtWidgets.QGroupBox()
+        layout_qbox_btn = QtWidgets.QVBoxLayout()
+        qbox_btn.setLayout(layout_qbox_btn)
+        
+        layout_vbox.addWidget(frame)
+        layout_hbox.addWidget(qbox_det, stretch=2)
+        layout_hbox.addWidget(qbox_bsb, stretch=1)
+        layout_hbox.addWidget(qbox_par, stretch=3)
+        layout_vbox.addWidget(qbox_btn)
+        layout_qbox_det.addWidget(self.tree_det)
+        layout_qbox_bsb.addWidget(self.tree_bsb)
+        layout_qbox_bsb.addWidget(qbox_buttons)
+        layout_qbox_par.addWidget(self.tree_par)
+        layout_qbox_btn.addWidget(button_export)
+
+    def win_export_ghost_select(self, item):
+        """
+        Handles the selection logic for a tree-like structure in a GUI.
+
+        Parameters:
+        item (QTreeWidgetItem): The item whose selection state has changed.
+
+        Behavior:
+        - If the item is a top-level item (i.e., it has no parent), selecting it will select all its children,
+          and deselecting it will deselect all its children.
+        - If the item is a child item (i.e., it has a parent), selecting any child will select the parent,
+          and deselecting all children will deselect the parent.
+        """
+        parent = item.parent()
+        # toplevel -> multiselect
+        if parent == None:
+            if item.isSelected():
+                [item.child(i).setSelected(True) for i in range(item.childCount())]
+            else:
+                [item.child(i).setSelected(False) for i in range(item.childCount())]
+        # sublevel -> single + top select
+        else:
+            if any([parent.child(i).isSelected() for i in range(parent.childCount())]):
+                parent.setSelected(True)
+            else:
+                parent.setSelected(False)
+
+    def win_export_to(self):
+        """
+        Exports the current detector and beamstop settings to a JSON file.
+        This method performs the following steps:
+        1. Collects selected detector items from the tree widget and organizes them into a dictionary.
+        2. Retrieves beamstop values from a list widget and rounds them to 5 decimal places.
+        3. Constructs a settings dictionary from the tree widget, rounding float values to 5 decimal places.
+        4. Prompts the user to select a file location to save the settings as a JSON file.
+        5. Adds the detector bank and beamstop list to the settings dictionary.
+        6. Writes the settings dictionary to the selected JSON file.
+        7. Closes the export window if it is open.
+        8. Activates the newly exported settings file.
+        9. Adds the new settings file to the custom settings menu and checks it if it is not already in the list.
+        Returns:
+            None
+        """
+        # make detector bank/dict from selection
+        det_bank = {}
+        for item in self.tree_det.selectedItems():
+            if item.parent() == None:
+                det_name = item.text(0)
+                det_types = [item.child(i).text(0) for i in range(item.childCount()) if item.child(i).isSelected()]
+                det_bank.update({det_name:det_types})
+
+        # get beamstop list from listwidget
+        bs_list = [round(self.tree_bsb.item(i).data(0), 5) for i in range(self.tree_bsb.count())]
+
+        # make settings dict from treewidget
+        settings = dict()
+        for i in range(self.tree_par.topLevelItemCount()):
+            top = self.tree_par.topLevelItem(i)
+            key = top.data(1, 0)
+            settings[key] = dict()
+            for j in range(top.childCount()):
+                k = top.child(j).data(0, 0)
+                v = top.child(j).data(1, 0)
+                if isinstance(v, float):
+                    v = round(v, 5)
+                settings[key][k] = v
+
+        # save parameters to settings file
+        target, filter = QtWidgets.QFileDialog.getSaveFileName(self, 'Export settings file', self.parent().path_settings_current, "Settings files (*.json)")
+        if not target:
+            return
+        
+        # add det_bank and bs_list to settings
+        settings['geo']['det_bank'] = det_bank
+        settings['geo']['bs_list'] = bs_list
+        with open(target, 'w') as wf:
+            json.dump(settings, wf, indent=4)
+        
+        # close the window
+        if self.isVisible():
+            self.close()
+
+        # activate exported settings file
+        basename = os.path.basename(target)
+        self.parent().settings_change_file(basename)
+
+        # add new settings file to menu and check it
+        # add if not in list
+        if basename not in [action.text() for action in self.parent().menu_custom_settings.actions()]:
+            cset_action = QtGui.QAction(basename, self, checkable=True)
+            self.parent().menu_set_action(cset_action, self.parent().settings_change_file, basename)
+            self.parent().menu_custom_settings.addAction(cset_action)
+            self.parent().group_cset.addAction(cset_action)
+            cset_action.setChecked(True)
+        # check if in list
+        else:
+            for action in self.parent().menu_custom_settings.actions():
+                if action.text() == basename:
+                    action.setChecked(True)
+
+    ###############
+    #  UNIT CELL  #
+    ###############
+
+# references to parent
+class UnitCellWindow(HotkeyDialog):
+    def __init__(self, parent, *args, **kwargs):
+        super().__init__(parent, *args, **kwargs)
+        self.setWindowTitle('Custom unit cell')
+        self.add_content()
+    
+    def add_content(self):
+        layout = QtWidgets.QVBoxLayout()
+        layout.setSpacing(0)
+
+        box = QtWidgets.QGroupBox(title='Enter unit cell parameters')
+        box.setStyleSheet('QGroupBox { font-weight: bold; }')
+        box_layout = QtWidgets.QVBoxLayout()
+        box_layout.setSpacing(0)
+        box_layout.setContentsMargins(0,0,0,0)
+        self.uc_dict_change = {}
+        self.uc_check_boxes = {}
+        self.linked_axes = True
+        #              label,        unit,  link, min, max
+        uc_widgets = [('a',     ' \u212b', [1,2],   1,  99, 2),
+                      ('b',     ' \u212b',  True,   1,  99, 2),
+                      ('c',     ' \u212b',  True,   1,  99, 2),
+                      ('\u03b1', '\u00b0', False,  60, 150, 1),
+                      ('\u03b2', '\u00b0', False,  60, 150, 1),
+                      ('\u03b3', '\u00b0', False,  60, 150, 1),
+                      ('Centring',  False, False,   0,   0, 0),
+                      ('Sampling',   True, False,   0,   0, 0),
+                      ('Name',       None, False,   0,   0, 0)]
+        for idx, (label, unit, link, minval, maxval, decimals) in enumerate(uc_widgets):
+            entry_box = QtWidgets.QFrame()
+            entry_layout = QtWidgets.QHBoxLayout()
+            entry_layout.setSpacing(6)
+            entry_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            entry_label = QtWidgets.QLabel(label)
+            entry_layout.addWidget(entry_label)
+            if unit is None:
+                box_widget = QtWidgets.QLineEdit(text=f'Custom {len(self.parent().ref_cell)+1:>02}')
+                entry_layout.addWidget(box_widget)
+            elif unit is False:
+                box_widget = QtWidgets.QComboBox()
+                box_widget.addItems(['P','F','I','C','A','B'])
+                entry_layout.addWidget(box_widget)
+            elif unit is True:
+                box_widget = QtWidgets.QComboBox()
+                box_widget.addItems(['1','2','3','4','5'])
+                box_widget.setCurrentIndex(2)
+                entry_layout.addWidget(box_widget)
+            else:
+                box_widget = QtWidgets.QDoubleSpinBox(decimals=decimals, singleStep=10**(-decimals), minimum=minval, maximum=maxval, value=self.parent().default_custom_cell[idx], suffix=unit)
+                box_widget.setProperty('linked', link)
+                box_widget.setProperty('index', idx)
+                #box_widget.setStepType(QtWidgets.QDoubleSpinBox.StepType.AdaptiveDecimalStepType)
+                entry_layout.addWidget(box_widget)
+                box_check = QtWidgets.QCheckBox()
+                box_check.setProperty('index', idx)
+                self.uc_check_boxes[idx] = box_check
+                if link is True:
+                    box_check.setChecked(True)
+                else:
+                    box_check.setChecked(False)
+                    box_check.setEnabled(False)
+                entry_layout.addWidget(box_check)
+            
+            entry_box.setLayout(entry_layout)
+            box_layout.addWidget(entry_box)
+            self.uc_dict_change[idx] = box_widget
+        
+        for idx in range(6):
+            self.uc_dict_change[idx].valueChanged.connect(self.win_uc_set_link_sbox)
+            self.uc_check_boxes[idx].stateChanged.connect(self.win_uc_set_link_cbox)
+
+        box.setLayout(box_layout)
+        layout.addWidget(box)
+
+        button_box = QtWidgets.QFrame()
+        button_layout = QtWidgets.QHBoxLayout()
+        # Add the apply button
+        button_apply = QtWidgets.QDialogButtonBox()
+        button_apply.addButton(QtWidgets.QDialogButtonBox.StandardButton.Apply)
+        button_apply.setCenterButtons(True)
+        button_apply.clicked.connect(lambda: self.win_uc_apply(self.uc_dict_change))
+        button_layout.addWidget(button_apply)
+        # Add the OK button
+        button_ok = QtWidgets.QDialogButtonBox()
+        button_ok.addButton(QtWidgets.QDialogButtonBox.StandardButton.Ok)
+        button_ok.setCenterButtons(True)
+        button_ok.clicked.connect(self.win_uc_accept)
+        button_layout.addWidget(button_ok)
+        # Set the button box layout
+        button_box.setLayout(button_layout)
+        layout.addWidget(button_box)
+
+        self.setWindowIcon(self.parent().icon)
+        self.setWindowTitle('Add custom unit cell')
+        self.setLayout(layout)
+        self.setFixedSize(self.sizeHint())
+        self.accepted.connect(self.win_uc_accept)
+        self.rejected.connect(self.close)
+    
+    def win_uc_apply(self, dict):
+        """
+        Applies the unit cell parameters from the given dictionary to the current object.
+        Parameters:
+        dict (dict): A dictionary containing unit cell parameters and other settings. 
+                 Expected keys and their corresponding values:
+                 - 0 to 5: Objects with a `value()` method returning unit cell parameters.
+                 - 6: Object with a `currentText()` method returning the center.
+                 - 7: Object with a `currentText()` method returning the decimal precision.
+                 - 8: Object with a `text()` method returning the reference name.
+        This method performs the following actions:
+        1. Extracts unit cell parameters from the dictionary and stores them in `self.default_custom_cell`.
+        2. Calculates the hkl values and stores them in `self.cont_ref_dsp` and `self.cont_ref_hkl`.
+        3. Updates the reference name in `self.geo.reference`.
+        4. Creates a `Ref` object with the reference name, dsp values, and hkl values, and stores it in `self.ref_cell`.
+        5. Updates the window title and draws the reference.
+        """
+        uc = []
+        for i in range(6):
+            uc.append(dict[i].value())
+        hkld = self.parent().calc_hkld(uc, dec=int(dict[7].currentText()), cen=dict[6].currentText())
+        self.parent().default_custom_cell = uc
+
+        self.parent().cont_ref_dsp = hkld[:,3]
+        # hkl -> integer
+        # cast hkl array to list of tuples (for easy display)
+        _zeros = np.zeros(hkld.shape[0])
+        self.parent().cont_ref_hkl = list(zip(hkld[:,0], hkld[:,1], hkld[:,2], _zeros, _zeros))
+
+        self.parent().geo.reference = dict[8].text()
+        reference = Ref(name=self.parent().geo.reference, dsp=self.parent().cont_ref_dsp, hkl=self.parent().cont_ref_hkl)
+        self.parent().ref_cell[self.parent().geo.reference] = reference
+        
+        # update window title
+        self.parent().set_win_title()
+        self.parent().draw_reference()
+
+    def win_uc_accept(self):
+        """
+        Applies changes to the unit cell, updates the reference, and manages the UI actions accordingly.
+
+        This method performs the following steps:
+        1. Applies changes to the unit cell dictionary.
+        2. Updates the reference geometry.
+        3. Creates a new QAction for the updated reference.
+        4. Adds the new QAction to the relevant menu and action group.
+        5. Sets the new QAction as checked.
+        6. Closes the unit cell window.
+        """
+        self.win_uc_apply(self.uc_dict_change)
+        self.parent().change_reference(self.parent().geo.reference)
+        self.win_uc_add_to_menu(self.parent().geo.reference)
+        self.close()
+    
+    def win_uc_set_link_sbox(self):
+        """
+        Handles the state change of a widget's 'linked' property and updates associated checkboxes and child widgets.
+
+        If the 'linked' property of the sender widget is True, it sets the property to False and unchecks the associated checkbox.
+        If the 'linked' property is a list, it iterates through the list, and for each index, if the corresponding checkbox is checked,
+        it updates the value of the associated child widget without emitting signals.
+
+        The sender widget is expected to have the following properties:
+        - 'linked': A boolean or a list of indices.
+        - 'index': An index to identify the associated checkbox.
+
+        The method interacts with the following attributes of the class:
+        - self.uc_check_boxes: A list of checkboxes.
+        - self.uc_dict_change: A dictionary of child widgets.
+
+        Returns:
+            None
+        """
+        widget = self.sender()
+        linked = widget.property('linked')
+        if linked is True:
+            widget.setProperty('linked', False)
+            self.uc_check_boxes[widget.property('index')].setChecked(False)
+        elif isinstance(linked, list):
+            for idx in linked:
+                checkbox = self.uc_check_boxes[idx]
+                child = self.uc_dict_change[idx]
+                if checkbox.isChecked():
+                    child.blockSignals(True)
+                    child.setValue(widget.value())
+                    child.blockSignals(False)
+    
+    def win_uc_set_link_cbox(self):
+        """
+        Updates the 'linked' property of an item in the uc_dict_change dictionary based on the state of a checkbox.
+
+        This method retrieves the sender of the signal (assumed to be a checkbox), gets its 'index' property, and updates
+        the corresponding item in the uc_dict_change dictionary by setting its 'linked' property to the checked state of the checkbox.
+
+        Attributes:
+            self.uc_dict_change (dict): A dictionary where the keys are indices and the values are objects with a 'linked' property.
+        """
+        check = self.sender()
+        self.uc_dict_change[check.property('index')].setProperty('linked', check.isChecked())
+
+    def win_uc_add_to_menu(self, name):
+        # Doesn't work on windows, menus won't show up!
+        ref_action = QtGui.QAction(name, self, checkable=True)
+        self.parent().menu_set_action(ref_action, self.parent().change_reference, name)
+        self.parent().sub_menu_cell.addAction(ref_action)
+        self.parent().group_ref.addAction(ref_action)
+        ref_action.setChecked(True)
+        self.parent().sub_menu_cell.setDisabled(self.parent().sub_menu_cell.isEmpty())
+
+    ##########
+    #  FWHM  #
+    ##########
+
+# references to parent
+class FwhmWindow(HotkeyDialog):
+    def __init__(self, parent, *args, **kwargs):
+        super().__init__(parent, *args, **kwargs)
+        self.setWindowTitle('Setup calculation of the instrumental broadening')
+        self.add_content()
+    
+    def add_content(self):
+        # dict: index: needed to identify the vars upon reassignment (accept) and to link it to the tooltips
+        #       name: Display string
+        #       variable: the variable to use
+        #       exponent: exponent to display the value more intuitive
+        #       decimals: how many decimals to display
+        #       stepsize: single step size
+        #       unit: unit to display
+        self.param_dict = {'Detector':[(0, 'Sensor thickness', self.parent().plo.sensor_thickness, 1e-6, 0, 1, '\u00B5m'),
+                                       (1, 'Sensor material', self.parent().plo.sensor_material, 0, 0, 1, '')],
+                               'Beam':[(2, 'Divergence', self.parent().plo.beam_divergence, 1e-6, 0, 1, '\u00B5rad'),
+                                       (3, 'Energy resolution \u0394E/E', self.parent().plo.energy_resolution, 1e-4, 2, 0.1, '\u00B710\u207b\u2074')],
+                             'Sample':[(4, 'Scattering volume \u2300', self.parent().plo.scattering_diameter, 1e-6, 0, 5, '\u00B5m')],}
+                           #'Display':[(5, 'FWHM threshold', self.plo.funct_fwhm_thresh, 1e-3, 'FWHM [m\u00B0]')]}
+        self.param_dict_change = {}
+
+        # dict needed to update the preview plot in the setup window
+        self.param_dict_tr = {'0':self.parent().plo.sensor_thickness,
+                              '1':self.parent().plo.sensor_material,
+                              '2':self.parent().plo.beam_divergence,
+                              '3':self.parent().plo.energy_resolution,
+                              '4':self.parent().plo.scattering_diameter}
+        self.setStyleSheet('QGroupBox { font-weight: bold; }')
+
+        # tooltip dictionary
+        tooltips = {0:'Estimated effective thickness of the detector absorption layer depending on sensor material and incident wavelength.',
+                    1:'Detector sensor layer material.',
+                    2:'Estimated beam divergence.',
+                    3:'Expected bandwidth of the incident X-ray beam.',
+                    4:'Intersection of the sample size and the beam size as the diameter.'}
+        # add user input spinboxes for the variables
+        #  - it uses doublespinboxes for all floats
+        #    and a combobox to choose the sensor material.
+        #    Distinction is made by setting the divisor to 0.
+        layout = QtWidgets.QVBoxLayout()
+        for title, entry in self.param_dict.items():
+            box = QtWidgets.QGroupBox(title=title)
+            box_layout = QtWidgets.QVBoxLayout()
+            box_layout.setContentsMargins(0,0,0,0)
+            for idx, label, value, div, decimals, step, unit in entry:
+                entry_box = QtWidgets.QFrame()
+                entry_layout = QtWidgets.QHBoxLayout()
+                entry_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+                if div > 0:
+                    box_combobox = QtWidgets.QDoubleSpinBox(decimals=decimals, singleStep=step, minimum=step, maximum=100000, value=value/div)
+                    box_combobox.valueChanged.connect(self.update)
+                    box_combobox.setObjectName(f'{idx} {div}')
+                else:
+                    box_combobox = QtWidgets.QComboBox()
+                    box_combobox.addItems(self.parent().att_lengths.keys())
+                    box_combobox.setCurrentIndex(box_combobox.findText(self.parent().plo.sensor_material))
+                    box_combobox.currentTextChanged.connect(self.update)
+                    box_combobox.setObjectName(f'{idx} {div}')
+                box_combobox.setToolTip(tooltips[idx])
+                entry_label = QtWidgets.QLabel(label)
+                entry_label.setToolTip(tooltips[idx])
+                entry_layout.addWidget(entry_label)
+                entry_layout.addWidget(box_combobox)
+                entry_unit = QtWidgets.QLabel(unit)
+                entry_unit.setToolTip(tooltips[idx])
+                entry_layout.addWidget(entry_unit)
+                entry_box.setLayout(entry_layout)
+                box_layout.addWidget(entry_box)
+                self.param_dict_change[idx] = [box_combobox, div]
+            box.setLayout(box_layout)
+            layout.addWidget(box)
+
+        # preview plot
+        preview_box = QtWidgets.QGroupBox('Preview')
+        preview_box_layout = QtWidgets.QVBoxLayout()
+        preview_box_layout.setContentsMargins(6,6,6,6)
+        preview_box.setLayout(preview_box_layout)
+        self.fwhm_curve = pg.PlotCurveItem()
+        self.fwhm_curve.setPen(pg.mkPen(color=self.palette().text().color(), width=3))
+        self.fwhm_plot = pg.PlotWidget(background=self.palette().base().color())
+        self.fwhm_plot.viewport().setAttribute(QtCore.Qt.WidgetAttribute.WA_AcceptTouchEvents, False)
+        self.fwhm_plot.setMenuEnabled(False)
+        self.fwhm_plot.setTitle('FWHM = A\u00D7X\u2074 + B\u00D7X\u00B2 + C + M', color=self.palette().text().color())
+        self.fwhm_plot.setLabel(axis='bottom', text='2\u03B8 [\u00B0]', color=self.palette().text().color())
+        self.fwhm_plot.setLabel(axis='left', text='FWHM [\u00B0]', color=self.palette().text().color())
+        self.fwhm_plot.scale(sx=2, sy=3)
+        self.fwhm_plot.addItem(self.fwhm_curve)
+        # Thomas-Cox-Hastings curve
+        self.tch_curve = pg.PlotCurveItem()
+        self.tch_curve.setPen(pg.mkPen(color=self.palette().highlight().color(), width=6))
+        self.fwhm_plot.addItem(self.tch_curve)
+        self.fwhm_line = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen(None))
+        self.fwhm_plot.addItem(self.fwhm_line)
+        preview_box_layout.addWidget(self.fwhm_plot)
+        layout.addWidget(preview_box)
+
+        # Thomas-Cox-Hastings
+        tch_box = QtWidgets.QGroupBox('Estimate Thomas-Cox-Hastings parameters')
+        tch_box_layout = QtWidgets.QHBoxLayout()
+        tch_box.setLayout(tch_box_layout)
+        tch_btn_est = QtWidgets.QPushButton('Estimate')
+        tch_btn_est.clicked.connect(self.estimate_tch)
+        tch_box_layout.addWidget(tch_btn_est)
+        tch_box_layout.addSpacing(20)
+        tch_label_U = QtWidgets.QLabel('U:', alignment=QtCore.Qt.AlignmentFlag.AlignRight|QtCore.Qt.AlignmentFlag.AlignVCenter)
+        tch_box_layout.addWidget(tch_label_U)
+        self.tch_value_U = QtWidgets.QLabel()
+        tch_box_layout.addWidget(self.tch_value_U)
+        tch_label_V = QtWidgets.QLabel('V:', alignment=QtCore.Qt.AlignmentFlag.AlignRight|QtCore.Qt.AlignmentFlag.AlignVCenter)
+        tch_box_layout.addWidget(tch_label_V)
+        self.tch_value_V = QtWidgets.QLabel()
+        tch_box_layout.addWidget(self.tch_value_V)
+        tch_label_W = QtWidgets.QLabel('W:', alignment=QtCore.Qt.AlignmentFlag.AlignRight|QtCore.Qt.AlignmentFlag.AlignVCenter)
+        tch_box_layout.addWidget(tch_label_W)
+        self.tch_value_W = QtWidgets.QLabel()
+        tch_box_layout.addWidget(self.tch_value_W)
+        layout.addWidget(tch_box)
+
+        # add description
+        description = QtWidgets.QLabel('This feature is currently in <b>test phase</b>, feedback is very welcome!<br>\
+                                        The estimated FWHM (H, in degrees) is shown in the bottom right corner.')
+        description.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(description)
+        # Add the apply & reset buttons
+        button_box = QtWidgets.QGroupBox()
+        button_box_layout = QtWidgets.QHBoxLayout()
+        button_box.setLayout(button_box_layout)
+        button_apply = QtWidgets.QPushButton('Apply')
+        button_apply.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        button_apply.clicked.connect(lambda: self.accept(self.param_dict_change))
+        button_box_layout.addWidget(button_apply)
+        layout.addWidget(button_box)
+        # Disclimer box info
+        citation_box = QtWidgets.QGroupBox()
+        citation_box.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        citation_box_layout = QtWidgets.QVBoxLayout()
+        citation_box_layout.setContentsMargins(6,6,6,6)
+        citation_box.setLayout(citation_box_layout)
+        citation = QtWidgets.QLabel('The interested user is referred to the article:<br>\
+                                      <b>On the resolution function for powder diffraction with area detectors</b><br>\
+                                      <a href="https://doi.org/10.1107/S2053273321007506">\
+                                      D. Chernyshov <i> et al., Acta Cryst.</i> (2021). <b>A77</b>, 497-505</a>')
+        citation.setOpenExternalLinks(True)
+        citation.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        citation_box_layout.addWidget(citation)
+        layout.addWidget(citation_box)
+
+        self.setWindowIcon(self.parent().icon)
+        self.setLayout(layout)
+        self.setFixedSize(self.sizeHint())
+        #self.update()
+    
+    def update(self, val=None):
+        """
+        Updates the Full Width at Half Maximum (FWHM) plot based on the current parameters and theme settings.
+
+        Parameters:
+        val (optional): A value to update the parameter dictionary. If provided, it should be a numerical value.
+
+        Description:
+        - Updates the pen color and background of the FWHM plot based on the current theme.
+        - If `val` is provided, updates the parameter dictionary `param_dict_tr` with the new value.
+        - Calculates the FWHM using the current parameters:
+            - Sensor thickness
+            - Sensor material
+            - Beam divergence
+            - Energy resolution
+            - Scattering diameter
+        - Updates the FWHM plot with the calculated values.
+        - Calls `win_pxrd_update` to refresh the plot with the updated parameters.
+        """
+        # change color if theme was changed
+        self.fwhm_curve.setPen(pg.mkPen(color=self.palette().text().color(), width=3))
+        self.fwhm_plot.setBackground(self.palette().base().color())
+
+        # Crude calculation of the FWHM
+        # 
+        # get updated values from param_dict_tr
+        # 0, self.plo.sensor_thickness
+        # 1, self.plo.sensor_material
+        # 2, self.plo.beam_divergence
+        # 3, self.plo.energy_resolution
+        # 4, self.plo.scattering_diameter
+        if val is not None:
+            idx, div = self.sender().objectName().split()
+            div = float(div)
+            if div > 0:
+                self.param_dict_tr[idx] = val * div
+            else:
+                self.param_dict_tr[idx] = val
+            #if idx == '4' and hasattr(self.parent(), 'abs_win'):
+            #    self.parent().abs_win.update_scat_diameter(val*div)
+
+        if len(self.parent().att_lengths[self.param_dict_tr['1']]) > int(self.parent().geo.ener):
+            t = min(self.param_dict_tr['0'], self.parent().att_lengths[self.param_dict_tr['1']][int(self.parent().geo.ener)])
+        else:
+            t = self.param_dict_tr['0']
+        p = self.parent().det.pxs * 1e-3
+        phi = self.param_dict_tr['2']
+        dE_E = self.param_dict_tr['3']
+        c = self.param_dict_tr['4']
+
+        dist = self.parent().geo.dist * 1e-3
+        tth = np.linspace(0, np.pi/2, 180)
+        # or use:
+        # _current_tth_max = self.calc_tth_max()
+        # to get max tth for the current setup
+
+        # H2, FWHM
+        A = 2*np.log(2) / dist**2 * (p**2-2*t**2-c**2)
+        B = 2*np.log(2) / dist**2 * (2*t**2 + 2*c**2)
+        C = 2*np.log(2) * phi**2
+        M = (4*np.sqrt(2*np.log(2)) * dE_E)**2 * ((1-np.cos(tth))/(1+np.cos(tth)))
+        X = np.cos(tth)
+        H2 = A*X**4 + B*X**2 + C + M
+        fwhm = np.sqrt(H2) * 180 / np.pi
+        self.fwhm_curve.setData(np.rad2deg(tth), fwhm)
+        # update pxrd plot if exists and visible
+        if hasattr(self.parent(), 'pxrd_win') and self.parent().pxrd_win is not None and self.parent().pxrd_win.isVisible():
+            self.parent().win_pxrd_update(update_dict=self.param_dict_tr)
+
+    def accept(self, udict):
+        """
+        Updates the properties of the `plo` object based on the values from the provided dictionary
+        and closes the given window.
+
+        Parameters:
+        udict (dict): A dictionary where each key corresponds to an index and each value is a list
+                      containing a widget and a divisor. The widget's value is used to update the 
+                      properties of the `plo` object after being multiplied by the divisor.
+        win (QWidget): The window that will be closed after updating the properties.
+
+        Updates:
+        - self.plo.sensor_thickness: Rounded value from udict[0].
+        - self.plo.sensor_material: Text from udict[1].
+        - self.plo.beam_divergence: Rounded value from udict[2].
+        - self.plo.energy_resolution: Rounded value from udict[3].
+        - self.plo.scattering_diameter: Rounded value from udict[4].
+
+        Additional Actions:
+        - Enables the action to show FWHM.
+        - Sets `self.plo.show_fwhm` to False.
+        - Calls `self.toggle_fwhm()` to toggle the FWHM display.
+        - Closes the provided window.
+        """
+        # assign combo/spinbox values
+        # Index:[combo/spinbox widget, divisor]
+        self.parent().plo.sensor_thickness = round(udict[0][0].value() * udict[0][1], 6)
+        self.parent().plo.sensor_material = str(udict[1][0].currentText())
+        self.parent().plo.beam_divergence = round(udict[2][0].value() * udict[2][1], 6)
+        self.parent().plo.energy_resolution = round(udict[3][0].value() * udict[3][1], 6)
+        self.parent().plo.scattering_diameter = round(udict[4][0].value() * udict[4][1], 6)
+        #self.parent().plo.funct_fwhm_thresh = round(udict[5][0].value() * udict[5][1], 6)
+        self.parent().action_funct_fwhm_show.setEnabled(True)
+        self.parent().action_funct_fwhm_export.setEnabled(True)
+        self.parent().plo.show_fwhm = False
+        self.parent().toggle_fwhm()
+        self.close()
+    
+    def export_grid(self):
+        # calculate the FWHM grid
+        # res = None -> use the current detector pixel dimensions
+        _fwhm_grid = self.parent().calc_overlays(omega=0, res=None, pol=self.parent().plo.polarisation_fac)[-1]
+        # find target file
+        default_path = os.path.join(os.path.expanduser('~'), f"{self.parent().det.name.replace(' ', '_')}_FWHM")
+        target, filter = QtWidgets.QFileDialog.getSaveFileName(self, 'Export FWHM grid', default_path, "Compressed numpy array (*.npz)")
+        if not target:
+            return
+        # save compressed array to target
+        np.savez_compressed(target, fwhm=np.flipud(_fwhm_grid))
+    
+    def estimate_tch(self):
+        tth_max_rad = self.parent().calc_tth_max()
+        tth_min = 0.0
+        tth_max = np.rad2deg(tth_max_rad)
+        tth, fwhm = self.fwhm_curve.getData()
+        tch_cond = (tth > tth_min) & (tth < tth_max)
+        tch_tth = tth[tch_cond]
+        instr_fwhm = fwhm[tch_cond]
+
+        def TCH_pv_fit(tth,*UVW):
+            """parser for the TCH pseudo-Voigt function"""
+            fwhm,_ = self.calc_TCH_pV(tth,*UVW,0,0)
+            return fwhm
+        
+        UVW = 0, 0, instr_fwhm[0]**2
+        [u,v,w], _ = curve_fit(TCH_pv_fit, tch_tth, instr_fwhm, p0=UVW, maxfev=10000)
+        tch_fwhm,_ = self.calc_TCH_pV(tch_tth, u, v, w, 0, 0)
+        self.tch_curve.setData(tch_tth, tch_fwhm)
+        self.tch_value_U.setText(f'{u:.6f}')
+        self.tch_value_V.setText(f'{v:.6f}')
+        self.tch_value_W.setText(f'{w:.6f}')
+
+    def calc_TCH_pV(self, tth, U, V, W, X, Y):
+        """
+        Thompson-Cox-Hastings pseudo-Voigt
+        Gaussian FWHM: U*tan(theta)^2 + V*tan(theta) + W
+        Lorentzian FWHM: X*tan(theta) + Y/cos(theta)
+        return pseudo Voigt FWHM
+        """
+        theta = tth*np.pi/360
+        tt = np.tan(theta)
+        ct = np.cos(theta)
+        G = np.sqrt(U*tt**2 + V*tt + W)
+        L = X*tt + Y/ct
+
+        H = (G**5 + 2.69269*G**4*L + 2.42843*G**3*L**2 \
+                + 4.47163*G**2*L**3 + 0.07842*G*L**4 + L**5)**(1/5)
+        # notice that the eta is defined differently in the FullProf manual
+        # such that eta = 1-eta_FullProf
+        eta = 1-(1.36603*L/H - 0.47719*(L/H)**2 + 0.11116*(L/H)**3)
+        return H, eta
+
+    def highlight(self, index):
+        # called by HoverableCurveItem:highlight
+        self.fwhm_line.setPen(pg.mkPen(self.parent().conic_highlight))
+        self.fwhm_line.setPos(float(np.rad2deg(self.parent().dsp2tth(self.parent().cont_ref_dsp[index])[0])))
+
+    def lowlight(self):
+        # called by HoverableCurveItem:lowlight
+        self.fwhm_line.setPen(pg.mkPen(None))
+
+##################
+#   PLOT ITEMS   #
+##################
 class HoverableCurveItem(pg.PlotCurveItem):
     def __init__(self, parent=None, hoverable=True, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -6507,6 +6687,7 @@ class HoverableCurveItem(pg.PlotCurveItem):
     def highlight(self, pos=None):
         self.parent.patches['ref_hl_curve'].setData(self.xData, self.yData)
         self.parent.patches['ref_hl_curve'].setVisible(True)
+        self.parent.patches['ref_hl_curve'].index = self.index
         self.parent.patches['ref_hl_label'].setText(str(self.name))
         self.parent.patches['ref_hl_label'].setVisible(True)
         if pos is None:
@@ -6514,14 +6695,15 @@ class HoverableCurveItem(pg.PlotCurveItem):
         else:
             self.parent.patches['ref_hl_label'].setPos(pos)
 
-        if self.parent.pxrd_win is not None and self.parent.pxrd_win.isVisible():
-            self.parent.win_pxrd_highlight(self.index)
+        self.parent.win_pxrd_highlight(self.index)
+        self.parent.fwhm_win.highlight(self.index)
 
     def lowlight(self):
         self.setPen(self.basePen)
         self.parent.patches['ref_hl_label'].setVisible(False)
         self.parent.patches['ref_hl_curve'].setVisible(False)
         self.parent.win_pxrd_lowlight()
+        self.parent.fwhm_win.lowlight()
 
     def hoverEvent(self, ev):
         if self.hoverable and not ev.isExit() and ev.buttons() == QtCore.Qt.MouseButton.LeftButton:
@@ -6543,7 +6725,13 @@ class ClickableScatterPlotItem(pg.ScatterPlotItem):
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.offset_y = 0
     
+    def setData(self, *args, **kargs):
+        super().setData(*args, **kargs)
+        if len(self.data['y']) > 0:
+            self.offset_y = self.data['y'][0]
+
     def mouseClickEvent(self, ev):
         if not ev.button() == QtCore.Qt.MouseButton.NoButton:
             pts = self.pointsAt(ev.pos())
