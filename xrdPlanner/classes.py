@@ -15,8 +15,7 @@ import xrdPlanner.resources
 # change pxrd scatterplot highlight to use dedicated highlighter (scatterplot)
 # check what windows need update on theme change
 # out-class pxrd window
-
-# work out how to update fwhm window only in visible
+# pxrd viewer prevent using 'd'?
 
 # debug fn to show who is calling what and when to find out why.
 #import inspect
@@ -164,13 +163,13 @@ class MainWindow(QtWidgets.QMainWindow):
         # initialize hotkey window
         self.hotkeys_win = HotkeysWindow(parent=self)
         # initialize detdb window
-        self.detdb_win = DetdbWindow(parent=self)
+        self.detdb_win = DetdbWindow(parent=self, hotkeys=False)
         # initialize export window
-        self.export_win = ExportWindow(parent=self)
+        self.export_win = ExportWindow(parent=self, hotkeys=False)
         # initialize fwhm parameter window
         self.fwhm_win = FwhmWindow(parent=self)
         # initialize unit cell window
-        self.uc_win = UnitCellWindow(parent=self)
+        self.uc_win = UnitCellWindow(parent=self, hotkeys=False)
         # initialize absorption window
         #self.abs_win = AbsorptionWindow(parent=self)
 
@@ -2596,10 +2595,10 @@ class MainWindow(QtWidgets.QMainWindow):
                                             'dc':'Change to sin(\u03B8)/\u03BB'},
                             
                             ('Label position'):None,
-                            ('Up', None):  {'fn':(self.label_set_position, 'top'),
-                                            'dc':'Top left'},
-                            ('Down', None):{'fn':(self.label_set_position, 'bottom'),
-                                            'dc':'Bottom left'},
+                            ('Up', 'SHIFT'):  {'fn':(self.label_set_position, 'top'),
+                                               'dc':'Top left'},
+                            ('Down', 'SHIFT'):{'fn':(self.label_set_position, 'bottom'),
+                                               'dc':'Bottom left'},
                             
                             ('Toggles'):None,
                             ('P', None):   {'fn':(self.toggle_overlay_polarisation, None),
@@ -4360,12 +4359,14 @@ class MainWindow(QtWidgets.QMainWindow):
         # set m to None if no modifier or only keypad modifier is pressed
         if m == QtCore.Qt.KeyboardModifier.NoModifier or m == QtCore.Qt.KeyboardModifier.KeypadModifier:
             m = None
-        elif m == QtCore.Qt.KeyboardModifier.AltModifier:
+        elif QtCore.Qt.KeyboardModifier.AltModifier in m:
             m = 'ALT'
-        elif m == QtCore.Qt.KeyboardModifier.ShiftModifier:
+        elif QtCore.Qt.KeyboardModifier.ShiftModifier in m:
             m = 'SHIFT'
-        elif m == QtCore.Qt.KeyboardModifier.ControlModifier:
+        elif QtCore.Qt.KeyboardModifier.ControlModifier in m:
             m = 'CTRL'
+        else:
+            print('Unrecognized modifier', m)
         
         # check if key and modifier combination exists in hotkey_dict
         k = QtGui.QKeySequence(k).toString()
@@ -4781,7 +4782,7 @@ class SliderWidget(QtWidgets.QFrame):
         """
         self.move(int((self.parent().size().width()-self.box_width_dynamic)/2), self.parent().offset_win32)
 
-    def update_slider_label(self, label, value):
+    def update_slider_value(self, label, value):
         """
         Updates the text of a given label to reflect the provided slider value.
 
@@ -4792,7 +4793,8 @@ class SliderWidget(QtWidgets.QFrame):
         Returns:
             None
         """
-        label.setText(str(int(value)))
+        label.setValue(int(value))
+        self.box_toggle = True
 
     def update_slider_limits(self, slider, lmin, lmax):
         """
@@ -4823,10 +4825,10 @@ class SliderWidget(QtWidgets.QFrame):
         font = QtGui.QFont()
         font.setPixelSize(self.parent().plo.slider_label_size)
 
-        label_name = QtWidgets.QLabel(label)
-        label_name.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        label_name.setFont(font)
-        label_name.setStyleSheet(f'''
+        slider_name = QtWidgets.QLabel(label)
+        slider_name.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        slider_name.setFont(font)
+        slider_name.setStyleSheet(f'''
             QLabel {{
                 color: {self.parent().slider_label_color.name(format=QtGui.QColor.NameFormat.HexArgb)};
                 border: 0px solid none;
@@ -4834,11 +4836,13 @@ class SliderWidget(QtWidgets.QFrame):
             }}
         ''')
         
-        label_value = QtWidgets.QLabel()
-        label_value.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        label_value.setFont(font)
-        label_value.setText(str(int(lval)))
-        label_value.setStyleSheet(f'''
+        slider_value = QtWidgets.QSpinBox()
+        slider_value.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        slider_value.setRange(int(lmin), int(lmax))
+        slider_value.setButtonSymbols(QtWidgets.QAbstractSpinBox.ButtonSymbols.NoButtons)
+        slider_value.setFont(font)
+        slider_value.setValue(int(lval))
+        slider_value.setStyleSheet(f'''
             QLabel {{
                 color: {self.parent().slider_label_color.name(format=QtGui.QColor.NameFormat.HexArgb)};
                 border: 0px solid transparent;
@@ -4851,14 +4855,16 @@ class SliderWidget(QtWidgets.QFrame):
         slider.setSingleStep(int(lstp))
         slider.setPageStep(int(lstp))
         slider.setValue(int(lval))
+
         slider.valueChanged.connect(self.parent().update_screen)
-        slider.valueChanged.connect(lambda value: self.update_slider_label(label_value, value))
+        slider.valueChanged.connect(lambda value: self.update_slider_value(slider_value, value))
+        slider_value.valueChanged.connect(lambda value: self.update_slider_value(slider, value))
 
-        layout.addWidget(label_name, 0, idx, QtCore.Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(slider_name, 0, idx, QtCore.Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(slider, 1, idx, QtCore.Qt.AlignmentFlag.AlignHCenter)
-        layout.addWidget(label_value, 2, idx, QtCore.Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(slider_value, 2, idx, QtCore.Qt.AlignmentFlag.AlignCenter)
 
-        return slider#(slider, label_name, label_value)
+        return slider#(slider, slider_name, slider_value)
 
     def toggle_panel(self, event):
         """
@@ -4989,7 +4995,7 @@ class HotkeyDialog(QtWidgets.QDialog):
             **kwargs: Arbitrary keyword arguments.
         """
         super().__init__(parent)
-
+        self.hotkeys = kwargs.get('hotkeys', True)
         self.setWindowFlags(QtCore.Qt.WindowType.Dialog)
         #self.setWindowFlags(QtCore.Qt.WindowType.Tool)
         #self.setWindowModality(QtCore.Qt.WindowModality.NonModal)
@@ -5023,7 +5029,9 @@ class HotkeyDialog(QtWidgets.QDialog):
         pressed key is the Escape key. If the Escape key is pressed, the widget
         will be closed.
         """
-        self.parent().keyReleaseEvent(event)
+        if self.hotkeys:
+            self.parent().keyReleaseEvent(event)
+        
         k = event.key()
         if k == QtCore.Qt.Key.Key_Escape:
             self.close()
