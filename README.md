@@ -1,5 +1,5 @@
 # xrdPlanner
-## Version 2.4.0 (released 04.03.2025)
+## Version 2.4.1 (released 05.03.2025)
 #### A tool to project X-ray diffraction cones on a detector screen at different geometries (tilt, rotation, offset) and X-ray energies
  - Article published in [_J. Synchrotron Rad._ (2024). **31**](https://doi.org/10.1107/S1600577523011086).
  - Main application is to visualize the maximum achievable resolution at a given geometry.
