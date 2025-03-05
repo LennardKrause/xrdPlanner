@@ -99,6 +99,8 @@ where $SDD$ is the sample to detector distance.
 > - A new parameter was added to allow for detector screen padding (plo.plot_padding), default is 0.
 
 ## Latest updates:
+  - 2025-03-05 Update: The slider values now accept input (thanks Clemens and Guðrún).
+  - 2025-03-05 Bugfix: Windows that allow typing will now disregard hotkeys.
   - 2025-03-04 Update: Allowed smaller pixels in the detector-db editor (thanks tjalb).
   - 2025-03-04 Update: Added pxrd ghost lines to play with and compare the scattering using different parameters (they are not perfect, don't scare them away!).
   - 2025-03-04 Update: Made some improvements to the highlighting.
