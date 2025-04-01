@@ -1,5 +1,5 @@
 # xrdPlanner
-## Version 2.4.1 (released 05.03.2025)
+## Version 2.4.2 (released 01.04.2025)
 #### A tool to project X-ray diffraction cones on a detector screen at different geometries (tilt, rotation, offset) and X-ray energies
  - Article published in [_J. Synchrotron Rad._ (2024). **31**](https://doi.org/10.1107/S1600577523011086).
  - Main application is to visualize the maximum achievable resolution at a given geometry.
@@ -99,6 +99,9 @@ where $SDD$ is the sample to detector distance.
 > - A new parameter was added to allow for detector screen padding (plo.plot_padding), default is 0.
 
 ## Latest updates:
+  - 2025-04-01 Update: Settings files (.json) can now be dropped on the window.
+  - 2025-04-01 Update: The pxrd ghosts stay a little longer now.
+  - 2025-04-01 Update: Added the option to set the environmental variable 'XRDPLANNER' to specify the xrdPlanner home path.
   - 2025-03-05 Update: The slider values now accept input (thanks Clemens and Guðrún).
   - 2025-03-05 Bugfix: Windows that allow typing will now disregard hotkeys.
   - 2025-03-04 Update: Allowed smaller pixels in the detector-db editor (thanks tjalb).
