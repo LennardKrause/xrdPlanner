@@ -34,7 +34,7 @@ class MainWindow(QtWidgets.QMainWindow):
         super().__init__(*args, **kwargs)
 
         # set path home
-        self.path_home = os.path.dirname(__file__)
+        self.path_home = os.getenv('XRDPLANNER', os.path.dirname(__file__))
         #self.setMouseTracking(True)
 
         # enable antialiasing
@@ -2767,7 +2767,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.pxrd_line = pg.InfiniteLine(pos=0, angle=0, pen=pg.mkPen(None))
         self.pxrd_plot.addItem(self.pxrd_line)
         
-
         self.pxrd_ghost_curves = [] # list to store ghost lines
         self.pxrd_ghost_bank = [('blinky', '#fb0009'), ('pinky', '#fc60ff'), ('inky', '#22ffff'),
                                 ('clyde', '#f27a10'), ('sue', '#9208ff'), ('dinky', '#e1e1e1'),
@@ -3032,18 +3031,22 @@ class MainWindow(QtWidgets.QMainWindow):
             pxrd_ghost_bank (list): List to store removed ghost curves with their 
                                     name and pen color.
         """
+        # find all invisible ghosts
         remove_later = []
         for ghost in self.pxrd_ghost_curves:
             if not ghost.isVisible():
                 remove_later.append(ghost)
+        # remove them, append to ghost bank
         for ghost in remove_later:
             self.pxrd_plot.getPlotItem().removeItem(ghost)
             self.pxrd_ghost_curves.remove(ghost)
             self.pxrd_ghost_bank.insert(0, (ghost.name(), ghost.opts['pen'].color().name()))
+        # if nothing was flagged, remove the last, append to ghost bank
         if len(remove_later) == 0 and len(self.pxrd_ghost_curves) > 0:
                 ghost = self.pxrd_ghost_curves[-1]
                 self.pxrd_plot.getPlotItem().removeItem(ghost)
                 self.pxrd_ghost_curves.remove(ghost)
+                self.pxrd_ghost_bank.insert(0, (ghost.name(), ghost.opts['pen'].color().name()))
 
     #######
     # CIF #
@@ -4240,7 +4243,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.path_settings_current = os.path.join(self.path_settings, name)
         self.settings_reload()
     
-    def settings_import_win(self):
+    def settings_import_win(self, fname=None):
         """
         Opens a file dialog to import a settings file in JSON format. If a file is selected,
         it copies the file to the settings folder, adds it to the custom settings menu, 
@@ -4255,7 +4258,9 @@ class MainWindow(QtWidgets.QMainWindow):
         Returns:
             None
         """
-        fname, filter = QtWidgets.QFileDialog.getOpenFileName(self, 'Import settings file', '', "Settings files (*.json)")
+        if fname is None:
+            fname, filter = QtWidgets.QFileDialog.getOpenFileName(self, 'Import settings file', '', "Settings files (*.json)")
+    
         if fname:
             # copy to settings folder
             shutil.copy(fname, self.path_settings)
@@ -4334,8 +4339,12 @@ class MainWindow(QtWidgets.QMainWindow):
             None
         """
         fpath = event.mimeData().urls()[0].toLocalFile()
+        
         if os.path.splitext(fpath)[1] == '.cif':
             self.calc_ref_from_cif(fpath, open_pxrd=True)
+        
+        if os.path.splitext(fpath)[1] == '.json':
+            self.settings_import_win(fname=fpath)
 
     def keyReleaseEvent(self, event):
         """
