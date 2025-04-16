@@ -1,4 +1,5 @@
 import os
+import pwd
 import sys
 import json
 import glob
@@ -56,7 +57,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # set path to settings folder
         self.path_settings = os.path.join(self.path_home, 'settings',)
         # set path to active settings token
-        self.path_settings_token = os.path.join(self.path_settings, '.active',)
+        self.path_settings_token = os.path.join(self.path_settings, f'.active_{pwd.getpwuid(os.getuid())[0]}',)
         # set path to default settings file
         self.path_settings_default = os.path.join(self.path_settings, 'default.json')
         # set path to current settings file
