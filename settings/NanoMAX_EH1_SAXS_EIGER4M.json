@@ -10,7 +10,7 @@
         "tilt": 0,
         "bssz": "None",
         "bsdx": 40,
-        "unit": 1,
+        "unit": 4,
         "reference": "None",
         "darkmode": true,
         "colormap": "viridis",
@@ -140,7 +140,7 @@
         "ener_max": 100,
         "ener_stp": 1,
         "dist_min": 40,
-        "dist_max": 1000,
+        "dist_max": 10000,
         "dist_stp": 1,
         "hoff_min": -150,
         "hoff_max": 150,
@@ -155,7 +155,7 @@
         "tilt_max": 40,
         "tilt_stp": 1,
         "bsdx_min": 5,
-        "bsdx_max": 1000,
+        "bsdx_max": 10000,
         "bsdx_stp": 1
     }
 }

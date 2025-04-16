@@ -238,7 +238,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.unit_names = ['2\u03B8 [\u00B0]',
                            'd [\u212B]',
                            'Q [\u212B\u207B\u00B9]',
-                           'sin(\u03B8)/\u03BB [\u212B\u207B\u00B9]']
+                           'sin(\u03B8)/\u03BB [\u212B\u207B\u00B9]',
+                           'd [nm]']
         if self.geo.unit >= len(self.unit_names):
             print(f'Error: Valid geo.unit range is from 0 to {len(self.unit_names)-1}, geo.unit={self.geo.unit}')
             raise SystemExit
@@ -2037,7 +2038,7 @@ class MainWindow(QtWidgets.QMainWindow):
         lmt.ener_stp =  1    # [int] Energy step size [keV]
 
         lmt.dist_min =  40   # [int] Distance minimum [mm]
-        lmt.dist_max =  1e4  # [int] Distance maximum [mm]
+        lmt.dist_max =  1000 # [int] Distance maximum [mm]
         lmt.dist_stp =  1    # [int] Distance step size [mm]
 
         lmt.hoff_min = -150  # [int] Horizontal offset minimum [mm]
@@ -3306,6 +3307,7 @@ class MainWindow(QtWidgets.QMainWindow):
                - 1: d-spacing in Angstroms
                - 2: sin(Theta)/lambda multiplied by 4π
                - 3: sin(Theta)/lambda
+               - 4: ptycho pixel size in nm
         """
         # calc_unit expects 2-Theta in radians
 
@@ -3314,7 +3316,7 @@ class MainWindow(QtWidgets.QMainWindow):
         stl = np.sin(tth/2)/(12.398/self.geo.ener)
         # d-spacing: l = 2 d sin(t) -> 1/2(sin(t)/l)
         dsp = 1/(2*stl)
-        units = {0:np.rad2deg(tth), 1:dsp, 2:stl*4*np.pi, 3:stl}
+        units = {0:np.rad2deg(tth), 1:dsp, 2:stl*4*np.pi, 3:stl, 4: 0.5*0.1*dsp}
         return units[self.geo.unit]
 
     def calc_tth_max(self, scale=1.0):
