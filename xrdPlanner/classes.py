@@ -2037,7 +2037,7 @@ class MainWindow(QtWidgets.QMainWindow):
         lmt.ener_stp =  1    # [int] Energy step size [keV]
 
         lmt.dist_min =  40   # [int] Distance minimum [mm]
-        lmt.dist_max =  1000 # [int] Distance maximum [mm]
+        lmt.dist_max =  1e4  # [int] Distance maximum [mm]
         lmt.dist_stp =  1    # [int] Distance step size [mm]
 
         lmt.hoff_min = -150  # [int] Horizontal offset minimum [mm]
@@ -2210,10 +2210,11 @@ class MainWindow(QtWidgets.QMainWindow):
             'hgp' : 12,     # [px] Module gap (horizontal)
             'vgp' : 38,     # [px] Module gap (vertical)
             'cbh' : 0,      # [px] Central beam hole
-            'size' : { '1M':(1,2),
-                       '4M':(2,4),
-                       '9M':(3,6),
-                      '16M':(4,8)},
+            'size' : {'500K':(1,2),
+                        '1M':(1,2),
+                        '4M':(2,4),
+                        '9M':(3,6),
+                       '16M':(4,8)},
             }
         
         #############################
