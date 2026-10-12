@@ -100,10 +100,11 @@ where $SDD$ is the sample to detector distance.
 > - A new parameter was added to allow for detector screen padding (plo.plot_padding), default is 0.
 
 ## Latest updates:
+  - 2026-10-12 Update: Added a correction factor to calculate the instrumental FWHM (effective sample diameter).
   - 2026-10-12 Update: Added the environmental variable 'XRDPLANNER' to specify the settings file directory.
   - 2026-10-12 Update: Added the effective sample to detector distance (D) to the hover overlay. 
-  - 2026-10-12 Update: Added a new window to show the absorption spectrum of the cif file.
-  - 2026-10-12 Update: pyFAI is no longer required (calibrants are only available if pyFAI is installed).
+  - 2026-10-12 Update: Added a new window to show the [absorption](#absorption,-transmission-and-fluorescence) spectrum of the cif file (requires xraydb).
+  - 2026-10-12 Update: pyFAI is now optional (calibrants are only available if pyFAI is installed).
   - 2025-04-01 Update: Settings files (.json) can now be dropped on the window.
   - 2025-04-01 Update: The pxrd ghosts stay a little longer now.
   - 2025-04-01 Update: Added the option to set the environmental variable 'XRDPLANNER' to specify the xrdPlanner home path.
@@ -226,6 +227,7 @@ where $SDD$ is the sample to detector distance.
  - Estimated beam divergence
  - Expected bandwidth of the incident X-ray beam
  - Intersection of the sample size and the beam size as the diameter
+ - Added a correction factor of 2/3 to the sample diameter to reflect the average distance from any point on a disc to the center of the disc.
 
 > **The interested user is referred to the article:<br>**
 >  <i>On the resolution function for powder diffraction with area detectors</i><br>
