@@ -26,6 +26,7 @@
 > - Hover over the grey line at the top to show the sliders. Click it to make it stay open.
 > - Drag the sliders to change energy and geometry.
 > - Use [hotkeys](#hotkeys) to streamline your experience.
+> - Set the environmental variable 'XRDPLANNER' to specify the settings file directory.
 >
 >## Customisation:
 >  - Use the [export window](#export-window) from the settings menu.
@@ -99,6 +100,7 @@ where $SDD$ is the sample to detector distance.
 > - A new parameter was added to allow for detector screen padding (plo.plot_padding), default is 0.
 
 ## Latest updates:
+  - 2026-10-12 Update: Added the environmental variable 'XRDPLANNER' to specify the settings file directory.
   - 2026-10-12 Update: Added the effective sample to detector distance (D) to the hover overlay. 
   - 2026-10-12 Update: Added a new window to show the absorption spectrum of the cif file.
   - 2026-10-12 Update: pyFAI is no longer required (calibrants are only available if pyFAI is installed).
