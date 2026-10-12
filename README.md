@@ -103,7 +103,7 @@ where $SDD$ is the sample to detector distance.
   - 2026-10-12 Update: Added a correction factor to calculate the instrumental FWHM (effective sample diameter).
   - 2026-10-12 Update: Added the environmental variable 'XRDPLANNER' to specify the settings file directory.
   - 2026-10-12 Update: Added the effective sample to detector distance (D) to the hover overlay. 
-  - 2026-10-12 Update: Added a new window to show the [absorption](#absorption,-transmission-and-fluorescence) spectrum of the cif file (requires xraydb).
+  - 2026-10-12 Update: Added a new window to show the [absorption](#absorption-transmission-and-fluorescence) spectrum of the cif file (requires xraydb).
   - 2026-10-12 Update: pyFAI is now optional (calibrants are only available if pyFAI is installed).
   - 2025-04-01 Update: Settings files (.json) can now be dropped on the window.
   - 2025-04-01 Update: The pxrd ghosts stay a little longer now.
