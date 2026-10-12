@@ -1,5 +1,5 @@
 # xrdPlanner
-## Version 2.4.2 (released 01.04.2025)
+## Version 2.5.0 (released 12.10.2026)
 #### A tool to project X-ray diffraction cones on a detector screen at different geometries (tilt, rotation, offset) and X-ray energies
  - Article published in [_J. Synchrotron Rad._ (2024). **31**](https://doi.org/10.1107/S1600577523011086).
  - Main application is to visualize the maximum achievable resolution at a given geometry.
@@ -99,6 +99,9 @@ where $SDD$ is the sample to detector distance.
 > - A new parameter was added to allow for detector screen padding (plo.plot_padding), default is 0.
 
 ## Latest updates:
+  - 2026-10-12 Update: Added the effective sample to detector distance (D) to the hover overlay. 
+  - 2026-10-12 Update: Added a new window to show the absorption spectrum of the cif file.
+  - 2026-10-12 Update: pyFAI is no longer required (calibrants are only available if pyFAI is installed).
   - 2025-04-01 Update: Settings files (.json) can now be dropped on the window.
   - 2025-04-01 Update: The pxrd ghosts stay a little longer now.
   - 2025-04-01 Update: Added the option to set the environmental variable 'XRDPLANNER' to specify the xrdPlanner home path.
@@ -235,6 +238,7 @@ where $SDD$ is the sample to detector distance.
 | F2         | Show Geometry conventions |
 | F3         | Show Hotkeys              |
 | x          | Show PXRD pattern         |
+| b          | Show Absorption window    |
 | f          | Show FWHM window          |
 | #          | *Display units*           |
 | t          | 2-Theta                   |
