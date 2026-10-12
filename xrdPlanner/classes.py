@@ -9,14 +9,22 @@ from scipy.optimize import curve_fit
 import pyqtgraph as pg
 import Dans_Diffraction as dif
 from PyQt6 import QtWidgets, QtCore, QtGui
-from pyFAI import calibrant
+from copy import deepcopy
 import xrdPlanner.resources
+import xraydb
+# remove pyFAI dependency if not available
+try:
+    from pyFAI import calibrant
+except ImportError:
+    calibrant = None
+# numpy changed the name of the trapezoid
+# integration function from trapz to trapezoid
+try:
+  from numpy import trapezoid as _trapz
+except ImportError:
+  from numpy import trapz as _trapz
 
-# Add the Absorption window and connect scattering diameter slider (from FWHM)
-# change pxrd scatterplot highlight to use dedicated highlighter (scatterplot)
-# check what windows need update on theme change
 # out-class pxrd window
-# pxrd viewer prevent using 'd'?
 
 # debug fn to show who is calling what and when to find out why.
 #import inspect
@@ -74,11 +82,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ref_cell = {}
         self.cont_ref_dsp = None
         self.cont_ref_hkl = None
-        self.xtl = None
+        self.cont_ref_xtl = None
         # What standards should be available as reference
         # The d spacings will be imported from pyFAI
-        self.ref_pyfai = calibrant.names()
-
+        if calibrant is not None:
+            self.ref_pyfai = calibrant.names()
+        else:
+            self.ref_pyfai = []
         # move settings file from old location
         _old_settings_file = os.path.join(self.path_home, 'settings.json')
         if os.path.exists(_old_settings_file):
@@ -134,7 +144,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # add the plot to the layout
         self.ax = pg.plot()
-        #self.ax.scene().sigMouseMoved.connect(print)
         
         # added to avoid the error:
         # qt.pointer.dispatch: skipping QEventPoint(id=0 ts=0 pos=0,0 scn=482.023,246.011
@@ -172,7 +181,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # initialize unit cell window
         self.uc_win = UnitCellWindow(parent=self, hotkeys=False)
         # initialize absorption window
-        #self.abs_win = AbsorptionWindow(parent=self)
+        self.abs_win = AbsorptionWindow(parent=self)
 
         # get the hotkeys
         # self.hotkey_desc: list of tuples [(hotkey, description)]
@@ -239,8 +248,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.unit_names = ['2\u03B8 [\u00B0]',
                            'd [\u212B]',
                            'Q [\u212B\u207B\u00B9]',
-                           'sin(\u03B8)/\u03BB [\u212B\u207B\u00B9]',
-                           'd [nm]']
+                           'sin(\u03B8)/\u03BB [\u212B\u207B\u00B9]']
         if self.geo.unit >= len(self.unit_names):
             print(f'Error: Valid geo.unit range is from 0 to {len(self.unit_names)-1}, geo.unit={self.geo.unit}')
             raise SystemExit
@@ -277,6 +285,7 @@ class MainWindow(QtWidgets.QMainWindow):
             for name in self.ref_cif.keys():
                 self.add_cif_to_menu(name)
 
+        # update the sub windows (fwhm, pxrd, unit cell, absorption)
         self.update_win_generic()
 
         # init the hkl tooltip
@@ -397,9 +406,11 @@ class MainWindow(QtWidgets.QMainWindow):
                                                    pen=pg.mkPen(self.beamstop_edge_color,
                                                                 width=self.plo.conic_linewidth),
                                                    brush=pg.mkBrush(self.beamstop_color),
-                                                   fillOutline=True)
+                                                   fillOutline=False)
         self.ax.addItem(self.patches['beamstop'])
 
+        # initialize the reference contours
+        self.change_reference(self.geo.reference)
         # add empty plot per reference contour line
         for i in range(self.plo.conic_ref_num):
             ref = HoverableCurveItem(self, useCache=True, mouseWidth=1)
@@ -556,7 +567,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cor_label.setFont(font)
         self.ax.addItem(self.cor_label)
         self.cor_label.hide()
-        self.cor_label.setToolTip('P: Polarisation\nS: Solid angle\nF: FWHM [\u00B0]')
+        self.cor_label.setToolTip('D: Sample distance\nP: Polarisation\nS: Solid angle\nH: FWHM [\u00B0]')
         self.cor_label.setPos(self.xdim, -self.ydim)
 
     def label_conic_pos_auto(self, x, y):
@@ -801,6 +812,21 @@ class MainWindow(QtWidgets.QMainWindow):
             if isinstance(child, QtWidgets.QWidget):
                 self.change_palette_recursive(child, palette)
     
+    def set_alpha(self, color, alphaF):
+        """
+        Set the alpha (transparency) value of a given color.
+
+        Args:
+            color (QtGui.QColor): The color whose alpha value will be set.
+            alphaF (float): The new alpha value, ranging from 0.0 (fully transparent) to 1.0 (fully opaque).
+
+        Returns:
+            QtGui.QColor: A new QColor object with the specified alpha value.
+        """
+        new_color = QtGui.QColor(color)
+        new_color.setAlphaF(alphaF)
+        return new_color
+
     ##########
     #  MENU  #
     ##########
@@ -872,15 +898,16 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.geo.reference.lower() == 'none':
             ref_action.setChecked(True)
         # menu Reference: add pyFAI library
-        sub_menu_pyFAI = QtWidgets.QMenu('From pyFAI', self)
-        menu_ref.addMenu(sub_menu_pyFAI)
-        for ref_name in sorted(self.ref_pyfai):
-            ref_action = QtGui.QAction(ref_name, self, checkable=True)
-            self.menu_set_action(ref_action, self.change_reference, ref_name)
-            sub_menu_pyFAI.addAction(ref_action)
-            self.group_ref.addAction(ref_action)
-            if ref_name == self.geo.reference:
-                ref_action.setChecked(True)
+        if self.ref_pyfai:
+            sub_menu_pyFAI = QtWidgets.QMenu('From pyFAI', self)
+            menu_ref.addMenu(sub_menu_pyFAI)
+            for ref_name in sorted(self.ref_pyfai):
+                ref_action = QtGui.QAction(ref_name, self, checkable=True)
+                self.menu_set_action(ref_action, self.change_reference, ref_name)
+                sub_menu_pyFAI.addAction(ref_action)
+                self.group_ref.addAction(ref_action)
+                if ref_name == self.geo.reference:
+                    ref_action.setChecked(True)
 
         # menu Reference: add cif
         self.sub_menu_cif = QtWidgets.QMenu('From cif', self)
@@ -1069,9 +1096,9 @@ class MainWindow(QtWidgets.QMainWindow):
         menu_view.addAction(self.action_pxrd_pattern)
 
         # Absorption window
-        #self.action_abs_win = QtGui.QAction('A&bsorption', self)
-        #self.menu_set_action(self.action_abs_win, self.abs_win.show)
-        #menu_view.addAction(self.action_abs_win)
+        self.action_abs_win = QtGui.QAction('Ab&sorption', self)
+        self.menu_set_action(self.action_abs_win, self.abs_win.show)
+        menu_view.addAction(self.action_abs_win)
 
         ############
         # SETTINGS #
@@ -1358,8 +1385,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.geo.hoff = float(val)
             elif self.sender().objectName() == 'ener':
                 self.geo.ener = float(val)
-                #if self.abs_win.isVisible():
-                #    self.abs_win.update_keV(self.geo.ener)
+                if hasattr(self, 'abs_win') and self.abs_win is not None:
+                    self.abs_win.update_keV(self.geo.ener)
             elif self.sender().objectName() == 'bsdx':
                 self.geo.bsdx = float(val)
 
@@ -1369,20 +1396,31 @@ class MainWindow(QtWidgets.QMainWindow):
         self.update_win_generic()
         # draw reference contours
         if self.geo.reference != 'None':
-            self.get_reference()
             self.draw_reference()
 
-    def update_win_generic(self):
+    def update_win_generic(self, force_update=False):
         """
         Updates the window with generic settings.
 
         This method performs updates to the PXRD window and the FWHM window
         by calling the respective update methods.
         """
-        if hasattr(self, 'pxrd_win') and self.pxrd_win is not None and self.pxrd_win.isVisible():
+        if hasattr(self, 'pxrd_win') and self.pxrd_win is not None and self.pxrd_win.isVisible() or force_update:
             self.win_pxrd_update()
-        if hasattr(self, 'fwhm_win'):
+        if hasattr(self, 'fwhm_win') and self.fwhm_win is not None and self.fwhm_win.isVisible() or force_update:
             self.fwhm_win.update()
+        if hasattr(self, 'abs_win') and self.abs_win is not None and self.abs_win.isVisible() or force_update:
+            if self.cont_ref_xtl is not None:
+                self.abs_win.update()
+
+        # close pxrd window if reference is not from cif
+        if self.geo.reference not in self.ref_cif:
+            if self.pxrd_win is not None and self.pxrd_win.isVisible():
+                self.pxrd_win.close()
+            # close abs window if reference is not from cif
+            if hasattr(self, 'abs_win') and self.abs_win is not None:
+                if self.abs_win is not None and self.abs_win.isVisible():
+                    self.abs_win.close()
 
     ##################
     #  DRAW CONICS   #
@@ -1429,7 +1467,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # overlay
         if self.plo.show_polarisation or self.plo.show_solidangle or self.plo.show_unit_hover or self.plo.show_fwhm:
-            _grd, self._tth, self._azi, self._polcor, self._solang, self._fwhm = self.calc_overlays(_omega, res=self.plo.overlay_resolution, pol=self.plo.polarisation_fac)
+            _grd, self._tth, self._mag, self._azi, self._polcor, self._solang, self._fwhm = self.calc_overlays(_omega, res=self.plo.overlay_resolution, pol=self.plo.polarisation_fac)
             self.patches['overlay'].setImage(_grd * self._polcor * self._solang,
                                              autoLevels=False,
                                              levels=[0.0,1.0],
@@ -1471,7 +1509,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 # continue if label can be placed
                 if label_pos is not False:
                     # plot the conic section
-                    self.patches['beamstop'].setData(x, y, fillLevel=y.max())
+                    self.patches['beamstop'].setData(x, y, fillLevel=y.mean())
                     self.patches['beamstop'].setVisible(True)
 
                     _unit = self.calc_unit(self.bs_theta)
@@ -1522,20 +1560,20 @@ class MainWindow(QtWidgets.QMainWindow):
             self.patches['conic'][_n].setVisible(True)
             self.patches['labels'][_n].setVisible(True)
             
-            ## plot azimuthal grid lines
-            if self.plo.show_grid:
-                # calculate the azimuthal grid points
-                grid_vectors = self.calc_azi_grid(_omega)
-                for i,[a, v] in enumerate(grid_vectors.items()):
-                    # plot the azimuthal grid point
-                    # Currently the angle a is not used
-                    # but might be useful for future reference
-                    self.patches['polar_grid'][i].setData(v[:,0],
-                                                        v[:,1],)
-                    self.patches['polar_grid'][i].setVisible(True)
-            else:
-                for i in range(self.plo.azimuth_num):
-                    self.patches['polar_grid'][i].setVisible(False)
+        ## plot azimuthal grid lines
+        if self.plo.show_grid:
+            # calculate the azimuthal grid points
+            grid_vectors = self.calc_azi_grid(_omega)
+            for i,[a, v] in enumerate(grid_vectors.items()):
+                # plot the azimuthal grid point
+                # Currently the angle a is not used
+                # but might be useful for future reference
+                self.patches['polar_grid'][i].setData(v[:,0],
+                                                      v[:,1],)
+                self.patches['polar_grid'][i].setVisible(True)
+        else:
+            for i in range(self.plo.azimuth_num):
+                self.patches['polar_grid'][i].setVisible(False)
 
     def draw_reference(self):
         """
@@ -1697,7 +1735,6 @@ class MainWindow(QtWidgets.QMainWindow):
             if action.text() == self.geo.colormap:
                 action.setChecked(True)
         self.redraw_canvas()
-        #self.update_win_generic()
 
     def change_detector(self, det_name=None, det_size=None):
         """
@@ -1723,7 +1760,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.main_screen_init()
         # center the slider frame
         self.sliderWidget.center_frame()
-        #self.update_win_generic()
 
     def change_units(self, unit_index):
         """
@@ -1759,9 +1795,12 @@ class MainWindow(QtWidgets.QMainWindow):
             ref_name (str): The name of the new reference geometry.
         """
         self.geo.reference = ref_name
+        if self.geo.reference is None or self.geo.reference == 'None':
+            return
         self.get_reference()
         self.draw_reference()
-        self.update_win_generic()
+        self.set_win_title()
+        self.update_win_generic(force_update=True)
 
     #############
     #    GET    #
@@ -1785,19 +1824,20 @@ class MainWindow(QtWidgets.QMainWindow):
             KeyError: If the reference is not found in any of the reference dictionaries.
         """
         # reset the Dans_Diffraction object
-        self.xtl = None
+        self.cont_ref_xtl = None
         # check what type of reference is selected
         if self.geo.reference in self.ref_pyfai:
             # get the d spacings for the calibrtant from pyFAI
-            self.cont_ref_dsp = np.array(calibrant.get_calibrant(self.geo.reference).get_dSpacing()[:self.plo.conic_ref_num])
+            self.cont_ref_dsp = np.array(calibrant.get_calibrant(self.geo.reference).dspacing[:self.plo.conic_ref_num])
             self.cont_ref_hkl = None
         elif self.geo.reference in self.ref_cif:
-            if not self.ref_cif[self.geo.reference].has_hkl or not self.ref_cif[self.geo.reference].has_dsp:
-                self.calc_ref_from_cif(self.ref_cif[self.geo.reference].cif, open_pxrd=True)
+            if not self.ref_cif[self.geo.reference].has_hkl or not self.ref_cif[self.geo.reference].has_dsp or not self.ref_cif[self.geo.reference].has_xtl:
+                self.calc_ref_from_cif(self.ref_cif[self.geo.reference].cif)
             else:
                 # get custom d spacings
                 self.cont_ref_dsp = self.ref_cif[self.geo.reference].dsp
                 self.cont_ref_hkl = self.ref_cif[self.geo.reference].hkl
+                self.cont_ref_xtl = self.ref_cif[self.geo.reference].xtl
         elif self.geo.reference in self.ref_cell:
                 self.cont_ref_dsp = self.ref_cell[self.geo.reference].dsp
                 self.cont_ref_hkl = self.ref_cell[self.geo.reference].hkl
@@ -1805,14 +1845,6 @@ class MainWindow(QtWidgets.QMainWindow):
             # set all d-spacings to 0
             self.cont_ref_dsp = np.zeros(self.plo.conic_ref_num)
             self.cont_ref_hkl = None
-        
-        # close pxrd window if reference is not from cif
-        if self.pxrd_win is not None and self.geo.reference not in self.ref_cif:
-            if self.pxrd_win.isVisible():
-                self.pxrd_win.close()
-        
-        # update window title
-        self.set_win_title()
 
     def get_defaults_geo(self):
         """
@@ -2061,6 +2093,8 @@ class MainWindow(QtWidgets.QMainWindow):
         lmt.bsdx_min =   5   # [int] Beamstop distance minimum [mm]
         lmt.bsdx_max = 1000  # [int] Beamstop distance maximum [mm]
         lmt.bsdx_stp =   1   # [int] Beamstop distance step size [mm]
+
+        lmt.det_thrs = 0.5   # [float] Detector threshold [frac]
         
         return lmt
 
@@ -2212,11 +2246,10 @@ class MainWindow(QtWidgets.QMainWindow):
             'hgp' : 12,     # [px] Module gap (horizontal)
             'vgp' : 38,     # [px] Module gap (vertical)
             'cbh' : 0,      # [px] Central beam hole
-            'size' : {'500K':(1,2),
-                        '1M':(1,2),
-                        '4M':(2,4),
-                        '9M':(3,6),
-                       '16M':(4,8)},
+            'size' : { '1M':(1,2),
+                       '4M':(2,4),
+                       '9M':(3,6),
+                      '16M':(4,8)},
             }
         
         #############################
@@ -2388,7 +2421,7 @@ class MainWindow(QtWidgets.QMainWindow):
             'bssz':'[mm] Current beamstop size (or None)',
             'bsdx':'[mm] Beamstop distance',
             'unit':'[0-3] Contour legend\n0: 2-Theta\n1: d-spacing\n2: q-space\n3: sin(theta)/lambda',
-            'reference':'[str] Plot reference contours\npick from pyFAI or None:\n{}'.format(', '.join(calibrant.names())),
+            'reference':'[str] Plot reference contours\npick from pyFAI or None:\n{}'.format(', '.join(self.ref_pyfai)),
             'darkmode':'[bool] Darkmode',
             'colormap':'[cmap] Contour colormap:\n{}'.format(', '.join(self.colormaps)),
             'bs_list':'[list] Available beamstop sizes',
@@ -2580,8 +2613,8 @@ class MainWindow(QtWidgets.QMainWindow):
                                             'dc':'Show PXRD window'},
                             ('F', None):   {'fn':(self.fwhm_win.show, None),
                                             'dc':'Show FWHM window'},
-                            #('B', None):   {'fn':(self.abs_win.show, None),
-                            #                'dc':'Show Absorption window'},
+                            ('B', None):   {'fn':(self.abs_win.show, None),
+                                            'dc':'Show Absorption window'},
                             ('O', None):   {'fn':(self.detdb_win.show, None),
                                             'dc':'Show Detector DB'},
                             ('E', None):   {'fn':(self.export_win.show, None),
@@ -2839,7 +2872,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.pxrd_scatt.setData(x=None, y=None, data=None)
             return
         
-        if self.geo.reference in self.ref_cif and self.ref_cif[self.geo.reference].is_complete:
+        if self.geo.reference in self.ref_cif and self.ref_cif[self.geo.reference].is_complete():
             dsp = self.ref_cif[self.geo.reference].dsp # np.array
             peak_ttr, idx = self.dsp2tth(dsp)
             inten = np.array(self.ref_cif[self.geo.reference].hkl)[:,4][idx] # list[ (h k l I Irel) ]
@@ -2903,9 +2936,21 @@ class MainWindow(QtWidgets.QMainWindow):
 
         gauss = np.sum(self.gaussian(ttr, np.atleast_2d(peak_ttr).T, np.atleast_2d(fwhm).T) * np.atleast_2d(inten).T, axis=0)
         xval = self.calc_unit(ttr)
+        #for i in range(len(peak_ttr)):
+        #    _g = self.gaussian(ttr, peak_ttr[i], fwhm[i])
+        #    _f = _trapz(_g, x=xval)
+        #    _i = inten[i]
+        #    _w = fwhm[i]
+        #    #print(f'{_f:10.2f} {_i:10.2f} {_f*_i:10.2f}', _w, _g.max(), hkl[i])
+        #    if i > 5:
+        #        #print(xval.min(), xval.max(), gauss.min(), gauss.max())
+        #        #print()
+        #        break
         self.pxrd_curve.setData(x=xval, y=gauss)
         
         peak_xval = self.calc_unit(peak_ttr)
+        #print(peak_xval[0], gauss[0], fwhm[0], inten[0], np.sum(self.gaussian(ttr, np.atleast_2d(peak_ttr).T[0], np.atleast_2d(fwhm).T[0]), axis=0))
+        #print(np.trapz(self.gaussian(ttr, ttr.mean(), 0.02), x=ttr))
         self.pxrd_scatt_offset = -(gauss.max() + gauss.min()) * self.plo.pxrd_marker_offset
         self.pxrd_scatt.setData(x=peak_xval,
                                 y=np.zeros(len(peak_xval))+self.pxrd_scatt_offset,
@@ -3148,9 +3193,11 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         
         ref_menu = QtWidgets.QMenu(name, self)
+        ref_menu.setToolTipsVisible(True)
         self.sub_menu_cif.addMenu(ref_menu)
         self.sub_menu_cif.setEnabled(True)
         cif = self.ref_cif[name].cif
+        ref_menu.setToolTip(cif)
         if os.path.exists(cif):
             ref_action_open = QtGui.QAction('Open', self, checkable=True)
             self.menu_set_action(ref_action_open, self.change_reference, name)
@@ -3165,7 +3212,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # disable/enable menu if empty
         self.sub_menu_cif.setDisabled(self.sub_menu_cif.isEmpty())
 
-    def calc_ref_from_cif(self, fpath, open_pxrd=True):
+    def calc_ref_from_cif(self, fname):
         """
         Calculate reference data from a CIF (Crystallographic Information File).
 
@@ -3174,9 +3221,7 @@ class MainWindow(QtWidgets.QMainWindow):
         object's attributes and can be optionally displayed in a plot.
 
         Args:
-            fpath (str): The file path to the CIF file.
-            open_pxrd (bool, optional): If True, opens the powder X-ray diffraction 
-                plot. Defaults to True.
+            fname (str): The file path to the CIF file.
 
         Returns:
             None
@@ -3189,11 +3234,11 @@ class MainWindow(QtWidgets.QMainWindow):
             ref_cif (dict): Dictionary containing reference data with the CIF file basename as the key.
         """
         # called when a cif is dropped onto the window
-        self.xtl = dif.Crystal(fpath)
+        self.cont_ref_xtl = dif.Crystal(fname)
         # :return xval: arrray : x-axis of powder scan (units)
         # :return inten: array : intensity values at each point in x-axis
         # :return reflections: (h, k, l, xval, intensity) array of reflection positions, grouped by min_overlap
-        xval, inten, reflections = self.xtl.Scatter.powder(scattering_type='xray', units='dspace', powder_average=True, min_overlap=0.02, energy_kev=self.plo.conic_ref_cif_kev)
+        xval, inten, reflections = self.cont_ref_xtl.Scatter.powder(scattering_type='xray', units='dspace', powder_average=True, min_overlap=0.02, energy_kev=self.plo.conic_ref_cif_kev)
         # reject low intensities: based on median or mean?
         # median is always around unity -> useless
         # mean rejects many, add adjustable multiplicator?
@@ -3209,21 +3254,17 @@ class MainWindow(QtWidgets.QMainWindow):
         irel = ordered[:,4]/ordered[:,4].max()
         self.cont_ref_hkl = list(zip(ordered[:,0], ordered[:,1], ordered[:,2], ordered[:,4], irel))
 
-        self.geo.reference = os.path.basename(fpath)
+        self.geo.reference = os.path.basename(fname)
         # update entry, might be incomplete (load on startup only has cif path)
         # and we already did the heavy lifting
-        self.ref_cif[self.geo.reference] = Ref(name=self.geo.reference, dsp=self.cont_ref_dsp, hkl=self.cont_ref_hkl, cif=fpath)
+        self.ref_cif[self.geo.reference] = Ref(name=self.geo.reference,
+                                               dsp=self.cont_ref_dsp,
+                                               hkl=self.cont_ref_hkl,
+                                               cif=fname,
+                                               xtl=self.cont_ref_xtl)
         # add to menu
         self.add_cif_to_menu(self.geo.reference)
-
-        # update window title
-        self.set_win_title()
-
-        if open_pxrd:
-            self.win_pxrd_plot(keep=True)
-
-        self.draw_reference()
-
+        # save the reference database to file
         self.save_ref_db_to_file()
 
     #############
@@ -3308,7 +3349,6 @@ class MainWindow(QtWidgets.QMainWindow):
                - 1: d-spacing in Angstroms
                - 2: sin(Theta)/lambda multiplied by 4π
                - 3: sin(Theta)/lambda
-               - 4: ptycho pixel size in nm
         """
         # calc_unit expects 2-Theta in radians
 
@@ -3317,7 +3357,7 @@ class MainWindow(QtWidgets.QMainWindow):
         stl = np.sin(tth/2)/(12.398/self.geo.ener)
         # d-spacing: l = 2 d sin(t) -> 1/2(sin(t)/l)
         dsp = 1/(2*stl)
-        units = {0:np.rad2deg(tth), 1:dsp, 2:stl*4*np.pi, 3:stl, 4: 0.5*0.1*dsp}
+        units = {0:np.rad2deg(tth), 1:dsp, 2:stl*4*np.pi, 3:stl}
         return units[self.geo.unit]
 
     def calc_tth_max(self, scale=1.0):
@@ -3533,6 +3573,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # reshape to allow matrix multiplication
         # _rot: 3 x 3 @ _norm: 3 x n*m -> _res: 3 x n x m
         _res = np.reshape(_rot @ np.reshape(_vec, (3,-1)), _vec.shape)
+        
+        # the magnitude of the vector from the sample to the pixel on the grid
+        mag = np.sqrt(np.sum(_res**2, axis=0))
 
         # unit hover
         tth = 1.0
@@ -3553,8 +3596,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # polarisation
         pc = 1.0
         if self.plo.show_polarisation:
-            _mag = np.sqrt(np.sum(_res**2, axis=0))
-            _norm = _res / _mag
+            _norm = _res / mag
             # add pol fractions (-> 1.0)
             # this notation is equivalent to cos(psi)**2,
             # psi angle of polarization direction to the observer
@@ -3566,10 +3608,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # solid angle
         sa = 1.0
         if self.plo.show_solidangle:
-            _mag = np.sqrt(np.sum(_vec**2, axis=0))
-            sa = 1 / _mag**3
+            sa = 1 / mag**3
             sa = sa / np.max(sa)
-        
+
         # delta d / d
         fwhm = 1.0
         #fwhm_width = 0.0
@@ -3602,7 +3643,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # H2, FWHM
             fwhm = self.calc_FWHM(dis, dia, thk, mat, pxs, tth_a, nrg, div, dEE)
 
-        return grd, tth, azi, pc, sa, fwhm
+        return grd, tth, mag, azi, pc, sa, fwhm
 
     def calc_azi_grid(self, omega):
         """calculate the azimuthal grid points and return a dictionary with the vectors"""
@@ -3948,6 +3989,10 @@ class MainWindow(QtWidgets.QMainWindow):
             -------
             array: fwhm
             """
+            # correction factor:
+            # average distance from any point on a disc to the center of the disc
+            dia *= 2/3
+
             if len(self.att_lengths[mat]) > int(nrg):
                 thk = min(thk, self.att_lengths[mat][int(nrg)])
             A = 2*np.log(2) / dis**2 * (pxs**2-2*thk**2-dia**2)
@@ -4345,7 +4390,7 @@ class MainWindow(QtWidgets.QMainWindow):
         fpath = event.mimeData().urls()[0].toLocalFile()
         
         if os.path.splitext(fpath)[1] == '.cif':
-            self.calc_ref_from_cif(fpath, open_pxrd=True)
+            self.calc_ref_from_cif(fname=fpath)
         
         if os.path.splitext(fpath)[1] == '.json':
             self.settings_import_win(fname=fpath)
@@ -4432,8 +4477,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # hoverEvent is only called if
         # either or both maps are active
         # -> always show on isEnter event
-        if event.isEnter() and (self.action_funct_fwhm_show.isChecked() or self.action_show_ang.isChecked() or self.action_show_pol.isChecked()):
-            self.cor_label.show()
+        #if event.isEnter() and (self.action_funct_fwhm_show.isChecked() or self.action_show_ang.isChecked() or self.action_show_pol.isChecked()):
+        #    self.cor_label.show()
+        # show always as we now display the sample distance
+        self.cor_label.show()
 
         # cormap displays the product of both corrections
         # but the individual values can be retrieves from their arrays
@@ -4450,7 +4497,9 @@ class MainWindow(QtWidgets.QMainWindow):
         
         _text = []
         # calc_overlays returns either a np.array (if active)
-        # or a float (inactive) for _polcor and _solang. 
+        # or a float (inactive) for _polcor and _solang.
+        if not isinstance(self._mag, float):
+            _text.append(f'D: {self._mag[x,y]:.2f}')
         if not isinstance(self._polcor, float):
             _text.append(f'P: {self._polcor[x,y]:.2f}')
         if not isinstance(self._solang, float):
@@ -4467,13 +4516,23 @@ class Container(object):
     """
     A class used to represent a Container.
     """
+    def __init__(self, *args, **kwargs):
+        """
+        Initializes the Container object with the provided arguments and keyword arguments.
+
+        Parameters:
+        args (tuple): A tuple containing positional arguments.
+        kwargs (dict): A dictionary containing keyword arguments.
+        """
+        self.args = args
+        self.kwargs = kwargs
     pass
 
 class Ref(object):
     """
     Ref is a class that represents a reference object with attributes for name, dsp, hkl, and cif.
     """
-    def __init__(self, name, dsp=None, hkl=None, cif=None):
+    def __init__(self, name, dsp=None, hkl=None, cif=None, xtl=None):
         """
         Initialize a new instance of the class.
 
@@ -4482,22 +4541,27 @@ class Ref(object):
         dsp (optional): The dsp value. Default is None.
         hkl (optional): The hkl value. Default is None.
         cif (optional): The cif value. Default is None.
+        xtl (optional): The xtl value. Default is None.
         """
         self.name = name
         self.dsp = dsp
         self.hkl = hkl
         self.cif = cif
+        self.xtl = xtl
         self.has_dsp = False
         self.has_hkl = False
         self.has_cif = False
+        self.has_xtl = False
         # set falgs
         if dsp is not None:
-            self.has_dsp = True
+            self.add_dsp(dsp)
         if hkl is not None:
-            self.has_hkl = True
+            self.add_hkl(hkl)
         if cif is not None:
-            self.has_cif = True
-        
+            self.add_cif(cif)
+        if xtl is not None:
+            self.add_xtl(xtl)
+
     def add_cif(self, cif):
         """
         Adds a CIF (Crystallographic Information File) to the instance.
@@ -4534,7 +4598,17 @@ class Ref(object):
         """
         self.hkl = hkl
         self.has_hkl = True
-    
+
+    def add_xtl(self, xtl):
+        """
+        Adds the crystal structure (xtl) to the instance and sets the has_xtl flag to True.
+
+        Parameters:
+        xtl (object): The crystal structure object to be added.
+        """
+        self.xtl = xtl
+        self.has_xtl = True
+
     def rem_cif(self):
         """
         Remove the CIF (Crystallographic Information File) from the object.
@@ -4563,7 +4637,17 @@ class Ref(object):
         """
         self.dsp = None
         self.has_dsp = False
-    
+
+    def rem_xtl(self):
+        """
+        Remove the crystal structure (xtl) from the object.
+
+        This method sets the `xtl` attribute to None and the `has_xtl` attribute to False,
+        indicating that the object no longer has an associated crystal structure.
+        """
+        self.xtl = None
+        self.has_xtl = False
+
     def validate_cif(self):
         """
         Validates the existence of the CIF (Crystallographic Information File).
@@ -4587,7 +4671,7 @@ class Ref(object):
         Returns:
             bool: True if all required attributes are present, False otherwise.
         """
-        return np.all([self.has_cif, self.has_dsp, self.has_hkl])
+        return np.all([self.has_cif, self.has_dsp, self.has_hkl, self.has_xtl])
 
 ###############
 #   WIDGETS   #
@@ -5229,21 +5313,16 @@ class HotkeysWindow(HotkeyDialog):
 class AbsorptionWindow(HotkeyDialog):
     def __init__(self, parent, *args, **kwargs):
         super().__init__(parent, *args, **kwargs)
-        self.setWindowTitle(f'Transmission of {self.parent().geo.reference}')
         self.icon = kwargs.get('icon', QtGui.QIcon())
-        self.threshold = kwargs.get('threshold', 2)
+        self.threshold = kwargs.get('threshold', 14)
         self.abs_range = kwargs.get('abs_range', None)
         self.abs_vals = kwargs.get('abs_vals', None)
         self.stepsize = kwargs.get('stepsize', 0.1)
-        self.scat_diam = self.parent().plo.scattering_diameter
-        self.current_keV = None
-
-        keV_lower = self.parent().lmt.ener_min
-        keV_upper = self.parent().lmt.ener_max
-        if abs(keV_upper-keV_lower) < 1:
-            self.keV_range = (np.floor(keV_lower*0.49), np.ceil(keV_lower*1.51))
-        else:
-            self.keV_range = (keV_lower, keV_upper)
+        self.det_thrs = kwargs.get('det_thrs', 0.5)
+        self.current_ref = None
+        self.em_lines = []
+        self.em_width = 25
+        self.ln_width = 3
         self.add_content()
         self.setFixedSize(self.sizeHint())
     
@@ -5251,31 +5330,52 @@ class AbsorptionWindow(HotkeyDialog):
         layout = QtWidgets.QVBoxLayout()
 
         self.abs_plot = pg.PlotWidget(background=self.palette().base().color())
-        self.abs_plot.setTitle(f'', color=self.palette().text().color())
+        self.abs_plot.setTitle('Estimated fluorescence emission and transmission through the sample', color=self.palette().text().color())
         self.abs_plot.viewport().setAttribute(QtCore.Qt.WidgetAttribute.WA_AcceptTouchEvents, False)
         self.abs_plot.setMenuEnabled(False)
-        self.abs_plot.setLabel('left', '-log(I/I\u2080)')
-        self.abs_plot.setLabel('bottom', 'Energy', units='keV')
+        self.abs_plot.setLabel('left', 'Transmission [%]', color=self.palette().text().color())
+        self.abs_plot.setLabel('bottom', 'Energy', units='keV', color=self.palette().text().color())
         self.abs_plot.showGrid(x=True, y=True, alpha=0.5)
-        self.abs_plot.getPlotItem().getViewBox().setDefaultPadding(0.01)
+        self.abs_plot.getPlotItem().getViewBox().setLimits(yMin=-2, yMax=105, xMin=0, xMax=150)
+        self.abs_plot.setYRange(0, 100)
+
         layout.addWidget(self.abs_plot)
         self.abs_scat = pg.ScatterPlotItem(size=5,
                                            symbol='o',
-                                           pen=pg.mkPen('g', width=1),
+                                           pen=pg.mkPen("#4fff4f", width=self.ln_width),
                                            brush='g')
-        self.curve_label = pg.TextItem(anchor=(0.0,1.0), color=self.palette().text().color())
-
-        line_threshold = pg.InfiniteLine(angle=0, movable=False)
-        line_threshold.setPen(pg.mkPen(self.parent().conic_highlight, width=1, style=QtCore.Qt.PenStyle.DashLine))
-        line_threshold.setPos(self.threshold)
-        self.line_current_kev = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen('g', width=1))
-        self.abs_curve = pg.PlotCurveItem(useCache=True)
+        self.curve_label = pg.TextItem(anchor=(-0.1,0.5), color=self.palette().text().color(), fill=pg.mkBrush(self.parent().set_alpha(self.palette().base().color(), 0.5)))
+        line_trans = pg.InfiniteLine(angle=0, movable=False)
+        line_trans.setPen(pg.mkPen(self.parent().conic_highlight, width=self.ln_width, style=QtCore.Qt.PenStyle.DashLine))
+        line_trans.setPos(self.threshold)
+        label_trans = pg.TextItem(anchor=(1.0,1.0), color=self.parent().conic_highlight)
+        label_trans.setText(f'Transmission < {self.threshold:.0f}%')
+        label_trans.setPos(self.parent().lmt.ener_max, self.threshold)
+        self.line_current_kev = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen("#2bff2b", width=self.ln_width))
+        self.line_half_kev = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen("#2bff2baa", width=self.ln_width, style=QtCore.Qt.PenStyle.DashLine))
+        self.kev_label = pg.TextItem(anchor=(-0.1,1.0), color=self.palette().text().color())
+        self.abs_curve = pg.PlotCurveItem(pen=pg.mkPen(self.palette().text().color(), width=self.ln_width))
         # plot item order
         self.abs_plot.addItem(self.abs_curve)
-        self.abs_plot.addItem(line_threshold)
+        self.abs_plot.addItem(line_trans)
+        self.abs_plot.addItem(label_trans)
+        self.abs_plot.addItem(self.line_half_kev, ignoreBounds=True)
         self.abs_plot.addItem(self.line_current_kev)
         self.abs_plot.addItem(self.abs_scat)
+        self.abs_plot.addItem(self.kev_label)
         self.abs_plot.addItem(self.curve_label)
+
+        # Disclimer box info
+        info_box = QtWidgets.QGroupBox()
+        info_box.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        info_box_layout = QtWidgets.QVBoxLayout()
+        info_box_layout.setContentsMargins(6,6,6,6)
+        info_box.setLayout(info_box_layout)
+        self.info_lbl = QtWidgets.QLabel(f'Fluorescence emission shown in blue, red if above detector threshold settings ({self.det_thrs*100:.0f}%, {self.parent().geo.ener*self.det_thrs:.1f} keV).')
+        self.info_lbl.setOpenExternalLinks(True)
+        self.info_lbl.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        info_box_layout.addWidget(self.info_lbl)
+        layout.addWidget(info_box)
 
         self.parm_box = QtWidgets.QGroupBox('')
         self.parm_layout = QtWidgets.QHBoxLayout()
@@ -5286,7 +5386,7 @@ class AbsorptionWindow(HotkeyDialog):
         self.pack_slider.setRange(1, 100)
         self.pack_slider.setSingleStep(1)
         self.pack_slider.setPageStep(10)
-        self.pack_slider.setValue(100)
+        self.pack_slider.setValue(60)
         self.pack_slider.valueChanged.connect(self.update)
         self.pack_label = QtWidgets.QLabel()
         self.pack_label.setText(f'{self.pack_slider.value()} %')
@@ -5294,53 +5394,99 @@ class AbsorptionWindow(HotkeyDialog):
         self.parm_layout.addWidget(self.pack_slider)
         self.parm_layout.addWidget(self.pack_label)
 
-        self.diam_desc = QtWidgets.QLabel(f'Scattering volume \u2300: {int(self.parent().plo.scattering_diameter*1e6)} \u00B5m')
-        self.parm_layout.addWidget(self.diam_desc)
-
+        self.sample_thickness = QtWidgets.QLabel('Sample thickness')
+        self.parm_layout.addWidget(self.sample_thickness)
+        self.thickness_box = QtWidgets.QSpinBox()
+        self.thickness_box.setRange(1, 10000)
+        self.thickness_box.setValue(100)
+        self.thickness_box.setSuffix(' \u00B5m')
+        self.thickness_box.setStepType(QtWidgets.QAbstractSpinBox.StepType.AdaptiveDecimalStepType)
+        self.thickness_box.valueChanged.connect(self.update)
+        self.parm_layout.addWidget(self.thickness_box)
         layout.addWidget(self.parm_box)
 
-        # add description
-        description = QtWidgets.QLabel('This feature is currently in <b>test phase</b>, feedback is very welcome!<br>\
-                                        The estimated FWHM (H, in degrees) is shown in the bottom right corner.')
-        description.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(description)
 
         self.setLayout(layout)
-    
+
+    def get_emission(self):
+        # remove all emission lines
+        for e, line in self.em_lines:
+            self.abs_plot.removeItem(line)
+        self.em_lines = []
+        for el in self.elements:
+            for v in xraydb.xray_lines(el, excitation_energy=self.parent().geo.ener*1e3).values():
+                E = v[0] * 1e-3 # keV
+                if E > self.parent().lmt.ener_min and E < self.parent().lmt.ener_max:
+                    if E < self.parent().geo.ener and E > self.parent().geo.ener/2:
+                        self.em_lines.append((E, pg.InfiniteLine(pos=E, angle=90, movable=False, pen=pg.mkPen("#ff000010", width=self.em_width))))
+                    else:
+                        self.em_lines.append((E, pg.InfiniteLine(pos=E, angle=90, movable=False, pen=pg.mkPen("#6FE2FF10", width=self.em_width))))
+                    self.abs_plot.addItem(self.em_lines[-1][1])
+
     def calc_absorption(self, stepsize=0.1):
         self.stepsize = stepsize
-        self.abs_range = np.arange(*self.keV_range, self.stepsize)
-        self.abs_vals = self.parent().xtl.Properties.absorption(energy_kev=self.abs_range)*1e3 # mm-1
-
+        self.abs_range = np.arange(self.parent().lmt.ener_min, self.parent().lmt.ener_max, self.stepsize)
+        self.abs_vals = self.parent().cont_ref_xtl.Properties.absorption(energy_kev=self.abs_range)*1e3 # mm-1
+        
     def update(self):
-        if self.parent().xtl is None:
-            self.close()
-            return
-        # called by: mainWindow slider, update_screen
+        # change color if theme was changed
+        self.abs_plot.setPalette(self.palette())
+        self.abs_plot.getPlotItem().setLabel('left', 'Transmission [%]', color=self.palette().base().color())
+        self.abs_plot.getPlotItem().setLabel('bottom', 'Energy', units='keV', color=self.palette().base().color())
+        self.abs_curve.setPen(pg.mkPen(self.palette().text().color(), width=self.ln_width))
+        self.abs_plot.setBackground(self.palette().base().color())
+        self.curve_label.setColor(self.palette().text().color())
+        self.curve_label.fill = pg.mkBrush(self.parent().set_alpha(self.palette().base().color(), 0.5))
+        self.kev_label.setColor(self.palette().text().color())
+
+        if self.parent().geo.reference != self.current_ref:
+            # update the current reference
+            self.current_ref = self.parent().geo.reference
+            self.setWindowTitle(f'Transmission and fluorescence of {self.current_ref}')
+            # update the elements in the sample
+            self.elements = set([atom.type for atom in self.parent().cont_ref_xtl.Atoms])
+            # get new absorption values
+            self.calc_absorption()
+            # get new emission lines
+            self.get_emission()
+            # adjust the plot range to the new absorption values
+            self.abs_plot.setXRange(self.parent().lmt.ener_min, self.parent().lmt.ener_max)
         pack_density = self.pack_slider.value()*1e-2
         self.pack_label.setText(f'{pack_density*100:.0f}%')
         if self.abs_range is None or self.abs_vals is None:
             self.calc_absorption()
-        self.abs_curve.setData(self.abs_range, self.abs_vals*pack_density*self.scat_diam*1e3)
-        if self.current_keV != self.parent().geo.ener:
-            self.update_keV(self.parent().geo.ener)
+        self.abs_curve.setData(self.abs_range, np.exp(-self.abs_vals * pack_density * self.thickness_box.value() * 1e-3)*100)
+        self.update_keV(self.parent().geo.ener)
 
     def update_keV(self, keV):
         self.line_current_kev.setPos(keV)
-        abs_val = self.abs_curve.getData()[1][np.argmin(np.abs(self.abs_range-keV))]
+        self.line_half_kev.setPos(keV*self.det_thrs)
+        curve_data = self.abs_curve.getData()[1]
+        abs_val = curve_data[np.argmin(np.abs(self.abs_range - keV))]
         self.curve_label.setPos(keV, abs_val)
         self.abs_scat.setData([keV], [abs_val])
-        self.curve_label.setText(f'{np.exp(-abs_val)*100:.0f}%')
-        self.current_keV = keV
-
-    def update_scat_diameter(self, value):
-        self.diam_desc.setText(f'Scattering volume \u2300: {value*1e6} \u00B5m')
-        self.scat_diam = value
-        #self.update()
+        self.kev_label.setPos(keV, 100)
+        self.kev_label.setText(f'{keV:.0f} keV')
+        self.curve_label.setText(f'{abs_val:.0f}%')
+        self.info_lbl.setText(f'Fluorescence emission shown in blue, red if above detector threshold settings ({self.det_thrs*100:.0f}%, {self.parent().geo.ener * self.det_thrs:.1f} keV).')
+        self.get_emission()
 
     def show(self, keep=False):
-        self.update()
-        return super().show(keep)
+        """
+        Shows the dialog and sets the focus to the dialog window.
+        """
+        if self.parent().cont_ref_xtl is None:
+            return
+        # Move to the last position if available
+        #if self.has_pos is not None:
+        if self.pos():
+            self.move(self.pos())
+        # Show/hide the dialog
+        if self.isVisible() and not keep:
+            self.close()
+        else:
+            super().show()
+            self.setFocus()
 
 # references to parent
 class DetdbWindow(HotkeyDialog):
@@ -5377,7 +5523,7 @@ class DetdbWindow(HotkeyDialog):
         layout_qbox_detbank = QtWidgets.QVBoxLayout()
         qbox_detbank.setLayout(layout_qbox_detbank)
 
-        self._db_dict = self.parent().detector_db.copy()
+        self._db_dict = deepcopy(self.parent().detector_db)
 
         tooltips = {'hmp' : 'Module size (horizontal) [px]',
                     'vmp' : 'Module size (vertical) [px]',
@@ -6453,7 +6599,7 @@ class FwhmWindow(HotkeyDialog):
         self.fwhm_plot.setLabel(axis='left', text='FWHM [\u00B0]', color=self.palette().text().color())
         self.fwhm_plot.scale(sx=2, sy=3)
         self.fwhm_plot.addItem(self.fwhm_curve)
-        # Thomas-Cox-Hastings curve
+        # Thompson-Cox-Hastings curve
         self.tch_curve = pg.PlotCurveItem()
         self.tch_curve.setPen(pg.mkPen(color=self.palette().highlight().color(), width=6))
         self.fwhm_plot.addItem(self.tch_curve)
@@ -6462,8 +6608,8 @@ class FwhmWindow(HotkeyDialog):
         preview_box_layout.addWidget(self.fwhm_plot)
         layout.addWidget(preview_box)
 
-        # Thomas-Cox-Hastings
-        tch_box = QtWidgets.QGroupBox('Estimate Thomas-Cox-Hastings parameters')
+        # Thompson-Cox-Hastings
+        tch_box = QtWidgets.QGroupBox('Estimate Thompson-Cox-Hastings parameters')
         tch_box_layout = QtWidgets.QHBoxLayout()
         tch_box.setLayout(tch_box_layout)
         tch_btn_est = QtWidgets.QPushButton('Estimate')
@@ -6485,8 +6631,7 @@ class FwhmWindow(HotkeyDialog):
         layout.addWidget(tch_box)
 
         # add description
-        description = QtWidgets.QLabel('This feature is currently in <b>test phase</b>, feedback is very welcome!<br>\
-                                        The estimated FWHM (H, in degrees) is shown in the bottom right corner.')
+        description = QtWidgets.QLabel('The estimated FWHM (H, in degrees) is shown in the bottom right corner.')
         description.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(description)
         # Add the apply & reset buttons
@@ -6556,8 +6701,6 @@ class FwhmWindow(HotkeyDialog):
                 self.param_dict_tr[idx] = val * div
             else:
                 self.param_dict_tr[idx] = val
-            #if idx == '4' and hasattr(self.parent(), 'abs_win'):
-            #    self.parent().abs_win.update_scat_diameter(val*div)
 
         if len(self.parent().att_lengths[self.param_dict_tr['1']]) > int(self.parent().geo.ener):
             t = min(self.param_dict_tr['0'], self.parent().att_lengths[self.param_dict_tr['1']][int(self.parent().geo.ener)])
@@ -6567,6 +6710,9 @@ class FwhmWindow(HotkeyDialog):
         phi = self.param_dict_tr['2']
         dE_E = self.param_dict_tr['3']
         c = self.param_dict_tr['4']
+        # correction for scattering volume to use the
+        # average distance of any point on a disc to the center
+        c_eff = c*2/3
 
         dist = self.parent().geo.dist * 1e-3
         tth = np.linspace(0, np.pi/2, 180)
@@ -6575,8 +6721,8 @@ class FwhmWindow(HotkeyDialog):
         # to get max tth for the current setup
 
         # H2, FWHM
-        A = 2*np.log(2) / dist**2 * (p**2-2*t**2-c**2)
-        B = 2*np.log(2) / dist**2 * (2*t**2 + 2*c**2)
+        A = 2*np.log(2) / dist**2 * (p**2-2*t**2-c_eff**2)
+        B = 2*np.log(2) / dist**2 * (2*t**2 + 2*c_eff**2)
         C = 2*np.log(2) * phi**2
         M = (4*np.sqrt(2*np.log(2)) * dE_E)**2 * ((1-np.cos(tth))/(1+np.cos(tth)))
         X = np.cos(tth)
@@ -6682,7 +6828,7 @@ class FwhmWindow(HotkeyDialog):
     def highlight(self, index):
         # called by HoverableCurveItem:highlight
         self.fwhm_line.setPen(pg.mkPen(self.parent().conic_highlight))
-        self.fwhm_line.setPos(float(np.rad2deg(self.parent().dsp2tth(self.parent().cont_ref_dsp[index])[0])))
+        self.fwhm_line.setPos(float(np.rad2deg(self.parent().dsp2tth(self.parent().cont_ref_dsp[index])[0][0])))
 
     def lowlight(self):
         # called by HoverableCurveItem:lowlight
