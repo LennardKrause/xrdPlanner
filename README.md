@@ -232,7 +232,7 @@ where $SDD$ is the sample to detector distance.
 
 #### Absorption, transmission and fluorescence
 ##### Display the X-ray absorption spectra and analyse the sample transmission and fluorescence emission bands of the current cif file.
-<img src="https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_7_abs.png" width="50%">
+<img src="https://github.com/LennardKrause/xrdPlanner/blob/main/examples/Figure_7_Abs.png" width="50%">
 
 ## Hotkeys
 
