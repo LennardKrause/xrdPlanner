@@ -1,5 +1,5 @@
 # xrdPlanner
-## Version 2.5.0 (released 12.10.2026)
+## Version 2.5.1 (released 13.10.2026)
 #### A tool to project X-ray diffraction cones on a detector screen at different geometries (tilt, rotation, offset) and X-ray energies
  - Article published in [_J. Synchrotron Rad._ (2024). **31**](https://doi.org/10.1107/S1600577523011086).
  - Main application is to visualize the maximum achievable resolution at a given geometry.
@@ -26,7 +26,6 @@
 > - Hover over the grey line at the top to show the sliders. Click it to make it stay open.
 > - Drag the sliders to change energy and geometry.
 > - Use [hotkeys](#hotkeys) to streamline your experience.
-> - Set the environmental variable 'XRDPLANNER' to specify the settings file directory.
 >
 >## Customisation:
 >  - Use the [export window](#export-window) from the settings menu.
@@ -90,16 +89,11 @@ S_{ij} = \left(\frac{|\vec{v}_{ij}|}{SDD}\right)^{-3}
 where $SDD$ is the sample to detector distance.
 
 >[!NOTE]
->## Update to Version 2.0.0 and later (released 23.09.2024)
-> - The definition of detector modules was changed from mm to px to be more accurate and consistent.
-> - Consequently, custom detectors added to the detector_db file pre 2.0.0 are no longer working.
-> - A new [detector db editor](#detector-db-editor) was added (_Settings_ > _Detector db editor_) to make the addition of custom detectors more feasible.
-> - Define and add whatever detector you collect your data with, now more easily.
-> - If something goes wrong use _Settings_ > _Reset detector db_.
-> - There is a backup of your _custom_ detector_db (detector_db.json.bak) in the xrdPlanner folder (_Help_ > _xrdPlanner_).
-> - A new parameter was added to allow for detector screen padding (plo.plot_padding), default is 0.
+> - Set the environmental variable 'XRDPLANNER' to specify the settings file directory.
 
 ## Latest updates:
+  - 2026-10-13 Update: Added a new limit variable to determine the detector energy threshold settings (PILATUS, EIGER, ...).
+  - 2026-10-13 Bugfix: Fixed a bug in the variable range startup check.
   - 2026-10-12 Update: Added a correction factor to calculate the instrumental FWHM (effective sample diameter).
   - 2026-10-12 Update: Added the environmental variable 'XRDPLANNER' to specify the settings file directory.
   - 2026-10-12 Update: Added the effective sample to detector distance (D) to the hover overlay. 
