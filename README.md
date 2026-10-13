@@ -439,6 +439,8 @@ where $SDD$ is the sample to detector distance.
     bsdx_min = 5     # [int] Beamstop distance minimum [mm]
     bsdx_max = 1000  # [int] Beamstop distance maximum [mm]
     bsdx_stp = 1     # [int] Beamstop distance step size [mm]
+    
+    det_thrs = 0.5   # [float] Detector threshold [frac]
 
 </details>
 
