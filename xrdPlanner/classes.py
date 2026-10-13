@@ -4210,13 +4210,13 @@ class MainWindow(QtWidgets.QMainWindow):
         # is within 'minimum' and 'maximum', if not it
         # is set to 'default'
         #
-        # Add 'key':('minimum', 'maximum', 'default') to the dict
+        # Add 'key':('minimum', 'maximum', 'step', 'default') to the dict
         _warn = {'conic_ref_cif_kev':( 5,   25,  12),
                     #'conic_tth_min':( 1,   10,   5),
                     #'conic_tth_max':(10,  180,  90),
                     #'conic_tth_num':( 1,  100,  20),
                     #'conic_ref_num':( 1,  500, 200),
-                    'conic_steps':(10, 1000, 100),
+                     'conic_steps':(10, 1000, 100),
                         'ener_stp':( 1,  100,   1),
                         'dist_stp':( 1,  100,   1),
                         'hoff_stp':( 1,  100,   1),
@@ -4224,6 +4224,7 @@ class MainWindow(QtWidgets.QMainWindow):
                         'rota_stp':( 1,  100,   1),
                         'tilt_stp':( 1,  100,   1),
                         'bsdx_stp':( 1,  100,   1),
+                        'det_thrs':( 0,    1, 0.5),
                 }
         # Add 'key':'val to the dict to enforce 'key' to be set to 'val'
         _force = {'show_fwhm':False}
@@ -4244,7 +4245,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     # this is bad!
                     if isinstance(x, str) and x.lower() == 'none':
                         x = 'None'
-                    if p in _warn and x not in range(_warn[p][0], _warn[p][1]+1):
+                    if p in _warn and not _warn[p][0] <= x <= _warn[p][1]:
                             print(f'WARNING: {p} set to {x}!\nAllowed values are within {_warn[p][0], _warn[p][1]}, parameter set to {_warn[p][2]}.')
                             x = _warn[p][2]
                     if p in _force:
@@ -5318,7 +5319,7 @@ class AbsorptionWindow(HotkeyDialog):
         self.abs_range = kwargs.get('abs_range', None)
         self.abs_vals = kwargs.get('abs_vals', None)
         self.stepsize = kwargs.get('stepsize', 0.1)
-        self.det_thrs = kwargs.get('det_thrs', 0.5)
+        self.det_thrs = max(0.0, min(float(self.parent().lmt.det_thrs), 1.0))
         self.current_ref = None
         self.em_lines = []
         self.em_width = 25
@@ -5405,7 +5406,6 @@ class AbsorptionWindow(HotkeyDialog):
         self.parm_layout.addWidget(self.thickness_box)
         layout.addWidget(self.parm_box)
 
-
         self.setLayout(layout)
 
     def get_emission(self):
@@ -5417,7 +5417,7 @@ class AbsorptionWindow(HotkeyDialog):
             for v in xraydb.xray_lines(el, excitation_energy=self.parent().geo.ener*1e3).values():
                 E = v[0] * 1e-3 # keV
                 if E > self.parent().lmt.ener_min and E < self.parent().lmt.ener_max:
-                    if E < self.parent().geo.ener and E > self.parent().geo.ener/2:
+                    if E < self.parent().geo.ener and E > self.parent().geo.ener*self.det_thrs:
                         self.em_lines.append((E, pg.InfiniteLine(pos=E, angle=90, movable=False, pen=pg.mkPen("#ff000010", width=self.em_width))))
                     else:
                         self.em_lines.append((E, pg.InfiniteLine(pos=E, angle=90, movable=False, pen=pg.mkPen("#6FE2FF10", width=self.em_width))))
@@ -5439,18 +5439,22 @@ class AbsorptionWindow(HotkeyDialog):
         self.curve_label.fill = pg.mkBrush(self.parent().set_alpha(self.palette().base().color(), 0.5))
         self.kev_label.setColor(self.palette().text().color())
 
+        # update the current reference if it has changed
         if self.parent().geo.reference != self.current_ref:
             # update the current reference
             self.current_ref = self.parent().geo.reference
             self.setWindowTitle(f'Transmission and fluorescence of {self.current_ref}')
             # update the elements in the sample
             self.elements = set([atom.type for atom in self.parent().cont_ref_xtl.Atoms])
-            # get new absorption values
-            self.calc_absorption()
-            # get new emission lines
-            self.get_emission()
+            # reset the absorption values to force recalculation
+            self.abs_range = None 
+            self.abs_vals = None
             # adjust the plot range to the new absorption values
             self.abs_plot.setXRange(self.parent().lmt.ener_min, self.parent().lmt.ener_max)
+        # update the detector threshold based on the parent settings
+        if self.parent().lmt.det_thrs != self.det_thrs:
+            self.det_thrs = max(0.0, min(float(self.parent().lmt.det_thrs), 1.0))
+            self.info_lbl.setText(f'Fluorescence emission shown in blue, red if above detector threshold settings ({self.det_thrs*100:.0f}%, {self.parent().geo.ener*self.det_thrs:.1f} keV).')
         pack_density = self.pack_slider.value()*1e-2
         self.pack_label.setText(f'{pack_density*100:.0f}%')
         if self.abs_range is None or self.abs_vals is None:
