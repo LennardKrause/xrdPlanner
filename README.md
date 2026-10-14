@@ -11,7 +11,7 @@
  - The math used is not meant to bring people to the moon but to provide a quick and simple preview.
  - This is not meant to accurately simulate a diffraction experiment, the step sizes are integer values in mm or degrees.
  - The module building code is designed for [Dectris](https://www.dectris.com) [PILATUS3](https://www.dectris.com/detectors/x-ray-detectors/pilatus3/) / [EIGER2](https://www.dectris.com/detectors/x-ray-detectors/eiger2/) or [SACLA](https://sacla.xfel.jp/?lang=en) MPCCD Detectors (central hole geometry) but one-module systems like the [Bruker](https://www.bruker.com/en.html) [Photon II](https://www.bruker.com/en/products-and-solutions/diffractometers-and-scattering-systems/single-crystal-x-ray-diffractometers/sc-xrd-components/detectors.html) and [Rayonix](https://www.rayonix.com/) [MX-HS](https://www.rayonix.com/rayonix-mx-hs-series/) are possible as well.
- - It uses [python3](https://www.python.org), [numpy](https://numpy.org), [pyqt6](https://www.riverbankcomputing.com/software/pyqt/), [pyqtgraph](https://pyqtgraph.readthedocs.io/en/latest/), [pyFAI](https://pyfai.readthedocs.io/en/v2023.1/) and [Dans_Diffraction](https://github.com/DanPorter/Dans_Diffraction).
+ - It uses [python3](https://www.python.org), [numpy](https://numpy.org), [pyqt6](https://www.riverbankcomputing.com/software/pyqt/), [pyqtgraph](https://pyqtgraph.readthedocs.io/en/latest/), [xraydb](https://github.com/xraypy/XrayDB), [Dans_Diffraction](https://github.com/DanPorter/Dans_Diffraction) and [pyFAI](https://pyfai.readthedocs.io/en/v2023.1/) (optional).
 
 >[!TIP]
 >## Short how-to:
@@ -19,13 +19,15 @@
 > - Type _xrdPlanner_ in a terminal and hit enter.
 > - Choose a detector and a model from the _Detector_ menu.
 > - Plot diffraction cone contours:
->   - Pick a reference from the _Reference_ menu ([pyFAI](https://pyfai.readthedocs.io/en/v2023.1/)), no hkl tooltip available.
+>   - Pick a reference from the _Reference_ menu ([pyFAI](https://pyfai.readthedocs.io/en/v2023.1/)), if available.
 >   - Drop a .cif file onto the window ([Dans_Diffraction](https://github.com/DanPorter/Dans_Diffraction)), click a contour to get a hkl tooltip.
 >   - Enter custom unit cell dimensions, click a contour to get a hkl tooltip.
 > - Use the units from the _Units_ menu you are the most comfortable with.
 > - Hover over the grey line at the top to show the sliders. Click it to make it stay open.
 > - Drag the sliders to change energy and geometry.
 > - Use [hotkeys](#hotkeys) to streamline your experience.
+> - Check out the [PXRD plot window](#pxrd-pattern-plot) and set the [intrumental peak broadening](#instrumental-broadening).
+> - Have a look at the [absorption](#absorption-transmission-and-fluorescence) spectrum of the sample and check the fluorescence.
 >
 >## Customisation:
 >  - Use the [export window](#export-window) from the settings menu.
@@ -42,6 +44,9 @@
 >  - Use pre-set beamline settings files:
 >    - Download a settings file from here (e.g. settings/DanMAX.json).
 >    - Use the import settings function from the GUI to import.
+
+>[!NOTE]
+> - Set the environmental variable 'XRDPLANNER' to specify the settings file directory.
 
 ## Conventions
 The geometry is defined with the center of rotation at the sample position, such that the radius of the rotation circle is equal to the sample to detector distance (SDD). That is, the rotation moves the detector along the goniometer circle, keeping the point of normal incidence (PONI) at the same position relative to the detector surface. At 0° the detector is vertical and at 90° the detector is horizontal with the detector normal pointing down.
@@ -87,9 +92,6 @@ The solid-angle correction factor $S_{ij}$ is defined as the normalized reciproc
 S_{ij} = \left(\frac{|\vec{v}_{ij}|}{SDD}\right)^{-3}
 ```
 where $SDD$ is the sample to detector distance.
-
->[!NOTE]
-> - Set the environmental variable 'XRDPLANNER' to specify the settings file directory.
 
 ## Latest updates:
   - 2026-10-13 Update: Added a new limit variable to determine the detector energy threshold settings (PILATUS, EIGER, ...).
