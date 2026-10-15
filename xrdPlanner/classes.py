@@ -1,5 +1,4 @@
 import os
-import pwd
 import sys
 import json
 import glob
@@ -44,7 +43,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # set path home
         self.path_home = os.getenv('XRDPLANNER', os.path.dirname(__file__))
-        #self.setMouseTracking(True)
 
         # enable antialiasing
         pg.setConfigOptions(antialias=True, imageAxisOrder='row-major')
@@ -65,7 +63,12 @@ class MainWindow(QtWidgets.QMainWindow):
         # set path to settings folder
         self.path_settings = os.path.join(self.path_home, 'settings',)
         # set path to active settings token
-        self.path_settings_token = os.path.join(self.path_settings, f'.active_{pwd.getpwuid(os.getuid())[0]}',)
+        if sys.platform == 'win32':
+            import getpass
+            self.path_settings_token = os.path.join(self.path_settings, f'.active_{getpass.getuser()}',)
+        else:
+            import pwd
+            self.path_settings_token = os.path.join(self.path_settings, f'.active_{pwd.getpwuid(os.getuid()).pw_name}',)
         # set path to default settings file
         self.path_settings_default = os.path.join(self.path_settings, 'default.json')
         # set path to current settings file
@@ -410,7 +413,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ax.addItem(self.patches['beamstop'])
 
         # initialize the reference contours
-        self.change_reference(self.geo.reference)
+        self.change_reference(self.geo.reference, self.geo.ref_type)
         # add empty plot per reference contour line
         for i in range(self.plo.conic_ref_num):
             ref = HoverableCurveItem(self, useCache=True, mouseWidth=1)
@@ -426,6 +429,7 @@ class MainWindow(QtWidgets.QMainWindow):
         ref_hkl_curve.setVisible(False)
         ref_hkl_curve.index = None
         self.patches['ref_hl_curve'] = ref_hkl_curve
+        self.patches['ref_hl_curve'].state = 'off'
         self.ax.addItem(ref_hkl_curve)
 
         # add hkl annotation label
@@ -903,7 +907,7 @@ class MainWindow(QtWidgets.QMainWindow):
             menu_ref.addMenu(sub_menu_pyFAI)
             for ref_name in sorted(self.ref_pyfai):
                 ref_action = QtGui.QAction(ref_name, self, checkable=True)
-                self.menu_set_action(ref_action, self.change_reference, ref_name)
+                self.menu_set_action(ref_action, self.change_reference, ref_name, 'pyFAI')
                 sub_menu_pyFAI.addAction(ref_action)
                 self.group_ref.addAction(ref_action)
                 if ref_name == self.geo.reference:
@@ -923,7 +927,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.ref_cell:
             for name in self.ref_cell.keys():
                 ref_action = QtGui.QAction(name, self, checkable=True)
-                self.menu_set_action(ref_action, self.change_reference, name)
+                self.menu_set_action(ref_action, self.change_reference, name, 'cell')
                 self.sub_menu_cell.addAction(ref_action)
                 self.group_ref.addAction(ref_action)
                 if name == self.geo.reference:
@@ -1385,18 +1389,15 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.geo.hoff = float(val)
             elif self.sender().objectName() == 'ener':
                 self.geo.ener = float(val)
-                if hasattr(self, 'abs_win') and self.abs_win is not None:
-                    self.abs_win.update_keV(self.geo.ener)
             elif self.sender().objectName() == 'bsdx':
                 self.geo.bsdx = float(val)
 
         # re-calculate cones and re-draw contours
         self.draw_conics()
+        # draw reference contours
+        self.draw_reference()
         # update child windows
         self.update_win_generic()
-        # draw reference contours
-        if self.geo.reference != 'None':
-            self.draw_reference()
 
     def update_win_generic(self, force_update=False):
         """
@@ -1417,10 +1418,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.geo.reference not in self.ref_cif:
             if self.pxrd_win is not None and self.pxrd_win.isVisible():
                 self.pxrd_win.close()
-            # close abs window if reference is not from cif
-            if hasattr(self, 'abs_win') and self.abs_win is not None:
-                if self.abs_win is not None and self.abs_win.isVisible():
-                    self.abs_win.close()
+        # close abs window if reference is not from cif
+        if hasattr(self, 'abs_win') and self.abs_win is not None:
+            if self.abs_win is not None and self.abs_win.isVisible():
+                self.abs_win.close()
 
     ##################
     #  DRAW CONICS   #
@@ -1683,16 +1684,12 @@ class MainWindow(QtWidgets.QMainWindow):
                                                                              width=max(self.plo.conic_ref_cif_lw_min, 
                                                                                        self.plo.conic_ref_linewidth * width)))
                 self.patches['reference'][_n].setVisible(True)
-        
-        # update highlighted curve position and hkl label
-        _index_hl = self.patches['ref_hl_curve'].index
-        if _index_hl is None:
-            pass
-        elif self.patches['reference'][_index_hl].isVisible():
+
+        # update highlighted curve
+        if self.patches['ref_hl_curve'].state == 'on':
+            _index_hl = self.patches['ref_hl_curve'].index
             self.patches['reference'][_index_hl].highlight()
-        else:
-            self.patches['reference'][_index_hl].lowlight()
-    
+
     ############
     #  CHANGE  #
     ############
@@ -1783,7 +1780,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.draw_conics()
         self.update_win_generic()
 
-    def change_reference(self, ref_name):
+    def change_reference(self, ref_name, ref_type=None):
         """
         Change the reference geometry to the specified reference name.
 
@@ -1793,14 +1790,18 @@ class MainWindow(QtWidgets.QMainWindow):
 
         Args:
             ref_name (str): The name of the new reference geometry.
+            ref_type (str, optional): The type of the new reference (None, pyFAI, cif, or cell). Defaults to None.
         """
         self.geo.reference = ref_name
-        if self.geo.reference is None or self.geo.reference == 'None':
-            return
+        self.geo.ref_type = ref_type
         self.get_reference()
         self.draw_reference()
         self.set_win_title()
         self.update_win_generic(force_update=True)
+        # reset highlighted reference curve if any
+        # pick one of the reference curves to call the lowlight() method on
+        if len(self.patches['reference']) > 0:
+            self.patches['reference'][0].lowlight()
 
     #############
     #    GET    #
@@ -1826,11 +1827,11 @@ class MainWindow(QtWidgets.QMainWindow):
         # reset the Dans_Diffraction object
         self.cont_ref_xtl = None
         # check what type of reference is selected
-        if self.geo.reference in self.ref_pyfai:
+        if self.geo.reference in self.ref_pyfai and self.geo.ref_type == 'pyFAI':
             # get the d spacings for the calibrtant from pyFAI
             self.cont_ref_dsp = np.array(calibrant.get_calibrant(self.geo.reference).dspacing[:self.plo.conic_ref_num])
             self.cont_ref_hkl = None
-        elif self.geo.reference in self.ref_cif:
+        elif self.geo.reference in self.ref_cif and self.geo.ref_type == 'cif':
             if not self.ref_cif[self.geo.reference].has_hkl or not self.ref_cif[self.geo.reference].has_dsp or not self.ref_cif[self.geo.reference].has_xtl:
                 self.calc_ref_from_cif(self.ref_cif[self.geo.reference].cif)
             else:
@@ -1838,7 +1839,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.cont_ref_dsp = self.ref_cif[self.geo.reference].dsp
                 self.cont_ref_hkl = self.ref_cif[self.geo.reference].hkl
                 self.cont_ref_xtl = self.ref_cif[self.geo.reference].xtl
-        elif self.geo.reference in self.ref_cell:
+        elif self.geo.reference in self.ref_cell and self.geo.ref_type == 'cell':
                 self.cont_ref_dsp = self.ref_cell[self.geo.reference].dsp
                 self.cont_ref_hkl = self.ref_cell[self.geo.reference].hkl
         else:
@@ -1874,6 +1875,7 @@ class MainWindow(QtWidgets.QMainWindow):
                                  #          3: sin(theta)/lambda
         geo.reference = 'None'   # [str]  Plot reference contours
                                  #          pick from pyFAI
+        geo.ref_type = 'None'    # [str]  Reference type (None, pyFAI, cif, cell)
         geo.darkmode = True      # [bool] Darkmode
         geo.colormap = 'viridis' # [cmap] Contour colormap
         geo.bs_list = [1.5,      # [list] Available beamstop sizes
@@ -3019,7 +3021,7 @@ class MainWindow(QtWidgets.QMainWindow):
     
     def win_pxrd_highlight(self, index):
         # highlight from main window
-        if self.pxrd_win is not None:
+        if self.pxrd_win is not None and self.pxrd_scatt is not None:
             self.win_pxrd_lowlight()
             point = self.pxrd_scatt.points()[index]
             point.setPen(pg.mkPen(self.conic_highlight))
@@ -3135,7 +3137,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         temp = {}
         with open(self.path_cif_db, 'w') as wf:
-            for k in self.ref_cif:
+            for k in sorted(self.ref_cif.keys()):
                 if self.ref_cif[k].has_cif:
                     temp[k] = {}
                     temp[k]['cif'] = self.ref_cif[k].cif
@@ -3200,11 +3202,12 @@ class MainWindow(QtWidgets.QMainWindow):
         ref_menu.setToolTip(cif)
         if os.path.exists(cif):
             ref_action_open = QtGui.QAction('Open', self, checkable=True)
-            self.menu_set_action(ref_action_open, self.change_reference, name)
+            self.menu_set_action(ref_action_open, self.change_reference, name, 'cif')
             ref_menu.addAction(ref_action_open)
             self.group_ref.addAction(ref_action_open)
             if self.geo.reference == name:
                 ref_action_open.setChecked(True)
+                
         ref_action_del = QtGui.QAction('Delete', self)
         self.menu_set_action(ref_action_del, self.remove_ref_from_db, name)
         ref_menu.addAction(ref_action_del)
@@ -3254,7 +3257,7 @@ class MainWindow(QtWidgets.QMainWindow):
         irel = ordered[:,4]/ordered[:,4].max()
         self.cont_ref_hkl = list(zip(ordered[:,0], ordered[:,1], ordered[:,2], ordered[:,4], irel))
 
-        self.geo.reference = os.path.basename(fname)
+        self.geo.reference = os.path.splitext(os.path.basename(fname))[0]
         # update entry, might be incomplete (load on startup only has cif path)
         # and we already did the heavy lifting
         self.ref_cif[self.geo.reference] = Ref(name=self.geo.reference,
@@ -4510,6 +4513,15 @@ class MainWindow(QtWidgets.QMainWindow):
             #_text.append(f'H: {self.calc_unit(self._fwhm[x,y]):.4f}')
         self.cor_label.setText('\n'.join(_text))
 
+    # possible new approach to select the closest curve to the mouse position
+    #def mouseHoverEvent(self, a0):
+    #    pos = QtCore.QPointF(self.ax.mapToScene(a0.pos()))
+    #    items = self.ax.scene().items(pos, mode=QtCore.Qt.ItemSelectionMode.IntersectsItemShape)
+    #    for i in items:
+    #        if isinstance(i, xrdPlanner.classes.HoverableCurveItem):
+    #            i.highlight(pos)
+    #    return super().mousePressEvent(a0)
+
 ############
 #   MISC   #
 ############
@@ -5325,7 +5337,8 @@ class AbsorptionWindow(HotkeyDialog):
         self.em_width = 25
         self.ln_width = 3
         self.add_content()
-        self.setFixedSize(self.sizeHint())
+        self.resize(self.sizeHint())
+        #self.setFixedSize(self.sizeHint())
     
     def add_content(self):
         layout = QtWidgets.QVBoxLayout()
@@ -5481,6 +5494,8 @@ class AbsorptionWindow(HotkeyDialog):
         """
         if self.parent().cont_ref_xtl is None:
             return
+        # update the absorption plot with the current settings
+        self.update()
         # Move to the last position if available
         #if self.has_pos is not None:
         if self.pos():
@@ -5492,7 +5507,6 @@ class AbsorptionWindow(HotkeyDialog):
             super().show()
             self.setFocus()
 
-# references to parent
 class DetdbWindow(HotkeyDialog):
     def __init__(self, parent, *args, **kwargs):
         super().__init__(parent, *args, **kwargs)
@@ -5947,7 +5961,6 @@ class DetdbWindow(HotkeyDialog):
             json.dump(self.parent().detector_db, wf, indent=4)
         self.close()
 
-# references to parent
 class ExportWindow(HotkeyDialog):
     def __init__(self, parent, *args, **kwargs):
         super().__init__(parent, *args, **kwargs)
@@ -6301,7 +6314,6 @@ class ExportWindow(HotkeyDialog):
     #  UNIT CELL  #
     ###############
 
-# references to parent
 class UnitCellWindow(HotkeyDialog):
     def __init__(self, parent, *args, **kwargs):
         super().__init__(parent, *args, **kwargs)
@@ -6451,7 +6463,7 @@ class UnitCellWindow(HotkeyDialog):
         6. Closes the unit cell window.
         """
         self.win_uc_apply(self.uc_dict_change)
-        self.parent().change_reference(self.parent().geo.reference)
+        self.parent().change_reference(self.parent().geo.reference, 'cell')
         self.win_uc_add_to_menu(self.parent().geo.reference)
         self.close()
     
@@ -6504,7 +6516,7 @@ class UnitCellWindow(HotkeyDialog):
     def win_uc_add_to_menu(self, name):
         # Doesn't work on windows, menus won't show up!
         ref_action = QtGui.QAction(name, self, checkable=True)
-        self.parent().menu_set_action(ref_action, self.parent().change_reference, name)
+        self.parent().menu_set_action(ref_action, self.parent().change_reference, name, 'cell')
         self.parent().sub_menu_cell.addAction(ref_action)
         self.parent().group_ref.addAction(ref_action)
         ref_action.setChecked(True)
@@ -6514,7 +6526,6 @@ class UnitCellWindow(HotkeyDialog):
     #  FWHM  #
     ##########
 
-# references to parent
 class FwhmWindow(HotkeyDialog):
     def __init__(self, parent, *args, **kwargs):
         super().__init__(parent, *args, **kwargs)
@@ -6842,12 +6853,15 @@ class FwhmWindow(HotkeyDialog):
 #   PLOT ITEMS   #
 ##################
 class HoverableCurveItem(pg.PlotCurveItem):
+    # A subclass of PlotCurveItem that adds hover and click event
+    # handling for highlighting curves and displaying labels.
     def __init__(self, parent=None, hoverable=True, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.parent = parent
         self.basePen = self.opts['pen']
         self.hoverable = hoverable
         self.setAcceptHoverEvents(hoverable)
+        self.last_pos = pg.Point(0,0)
 
     def setData(self, *args, **kargs):
         # added the pen re-assignment to the function.
@@ -6856,23 +6870,33 @@ class HoverableCurveItem(pg.PlotCurveItem):
         return super().setData(*args, **kargs)
 
     def highlight(self, pos=None):
+        if self.name is None:
+            return
+        self.parent.patches['ref_hl_curve'].state = 'on'
         self.parent.patches['ref_hl_curve'].setData(self.xData, self.yData)
         self.parent.patches['ref_hl_curve'].setVisible(True)
         self.parent.patches['ref_hl_curve'].index = self.index
         self.parent.patches['ref_hl_label'].setText(str(self.name))
         self.parent.patches['ref_hl_label'].setVisible(True)
-        if pos is None:
-            self.parent.patches['ref_hl_label'].setPos(self.xData[0], self.yData[0])
+        # set the position of the label to the last position or the closest point to the mouse
+        # if the last position is not on the curve, find the closest point on the curve to the last position
+        if pos is not None:
+            self.last_pos = pos
         else:
-            self.parent.patches['ref_hl_label'].setPos(pos)
-
+            self.last_pos = pg.Point(*min(zip(self.xData, self.yData), key=lambda p: (p[0] - self.last_pos.x())**2 + (p[1] - self.last_pos.y())**2))
+        self.parent.patches['ref_hl_label'].setPos(self.last_pos)
+        # highlight the corresponding peak in the PXRD plot and FWHM plot
         self.parent.win_pxrd_highlight(self.index)
         self.parent.fwhm_win.highlight(self.index)
 
     def lowlight(self):
         self.setPen(self.basePen)
-        self.parent.patches['ref_hl_label'].setVisible(False)
+        self.parent.patches['ref_hl_curve'].state = 'off'
+        self.parent.patches['ref_hl_curve'].setData(None, None)
         self.parent.patches['ref_hl_curve'].setVisible(False)
+        self.parent.patches['ref_hl_curve'].index = None
+        self.parent.patches['ref_hl_label'].setText('')
+        self.parent.patches['ref_hl_label'].setVisible(False)
         self.parent.win_pxrd_lowlight()
         self.parent.fwhm_win.lowlight()
 
