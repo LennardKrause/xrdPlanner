@@ -1,5 +1,5 @@
 # xrdPlanner
-## Version 2.5.1 (released 13.10.2026)
+## Version 2.6.0 (released 29.10.2026)
 #### A tool to project X-ray diffraction cones on a detector screen at different geometries (tilt, rotation, offset) and X-ray energies
  - Article published in [_J. Synchrotron Rad._ (2024). **31**](https://doi.org/10.1107/S1600577523011086).
  - Main application is to visualize the maximum achievable resolution at a given geometry.
@@ -47,6 +47,11 @@
 
 >[!NOTE]
 > - Set the environmental variable 'XRDPLANNER' to specify the settings file directory.
+> - New menu system for settings files, set tokens to categorize the menu entries:
+>   - ```geo.facility```, e.g. MAX IV, ESRF, PETRA III, ...
+>   - ```geo.beamline```, e.g. DanMAX, ID15, P21, ...
+>   - ```geo.instrument```, e.g. PXRD, PDF, ...
+> - There is an 'info' popup for cif files to show structure information
 
 ## Conventions
 The geometry is defined with the center of rotation at the sample position, such that the radius of the rotation circle is equal to the sample to detector distance (SDD). That is, the rotation moves the detector along the goniometer circle, keeping the point of normal incidence (PONI) at the same position relative to the detector surface. At 0° the detector is vertical and at 90° the detector is horizontal with the detector normal pointing down.
