@@ -1,5 +1,7 @@
 import os
 import sys
+import getpass
+import re
 import json
 import glob
 import shutil
@@ -24,6 +26,7 @@ except ImportError:
   from numpy import trapz as _trapz
 
 # out-class pxrd window
+# added update_win_generic(force_true) to reload_settings -> Check if working properly
 
 # debug fn to show who is calling what and when to find out why.
 #import inspect
@@ -35,27 +38,18 @@ except ImportError:
 #        print('\n'.join([f"{x.lineno:>5}| {x.function}" for x in inspect.stack()][1:][::-1]))
 
 class MainWindow(QtWidgets.QMainWindow):
+    # internal settings files that should not be deleted by the user
     def __init__(self, *args, **kwargs):
         """
         Initializes the main application window and sets up various components and configurations.
         """
         super().__init__(*args, **kwargs)
-
         # set path home
         self.path_home = os.getenv('XRDPLANNER', os.path.dirname(__file__))
-
         # enable antialiasing
         pg.setConfigOptions(antialias=True, imageAxisOrder='row-major')
-
-        # Drag-and-Drop cif-file
-        #  dropEvent()
-        #  - check dropped file is a cif
-        #  calc_ref_from_cif()
-        #  - use Dans_Diffraction to get d_spacings
-        #  - dif.Crystal()
-        #  - xtl.Scatter.powder()
+        # Drag-and-Drop cif and json files
         self.setAcceptDrops(True)
-
         # list to keep track of currently highlighted contours
         self.highlight_timers = []
         # default unit cell parameters for custom cell window
@@ -63,12 +57,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # set path to settings folder
         self.path_settings = os.path.join(self.path_home, 'settings',)
         # set path to active settings token
-        if sys.platform == 'win32':
-            import getpass
-            self.path_settings_token = os.path.join(self.path_settings, f'.active_{getpass.getuser()}',)
-        else:
-            import pwd
-            self.path_settings_token = os.path.join(self.path_settings, f'.active_{pwd.getpwuid(os.getuid()).pw_name}',)
+        self.path_settings_token = os.path.join(self.path_settings, f'.active_{getpass.getuser()}',)
         # set path to default settings file
         self.path_settings_default = os.path.join(self.path_settings, 'default.json')
         # set path to current settings file
@@ -77,7 +66,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # set path to detector database
         self.path_detdb = os.path.join(self.path_home, 'detector_db.json')
         # set path to cif file paths
-        self.path_cif_db = os.path.join(self.path_settings, 'cif_db.json')
+        self.path_cif_db = os.path.join(self.path_home, 'cif_db.json')
+        # paths have changed, e.g. move old cif_db.json to new location
+        self.backward_compatibility()
         # initialize powder diffraction plot window
         self.pxrd_win = None
         # dicts to store custom reference data
@@ -185,6 +176,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.uc_win = UnitCellWindow(parent=self, hotkeys=False)
         # initialize absorption window
         self.abs_win = AbsorptionWindow(parent=self)
+        # initialize cif fetch window
+        #self.cif_win = CifFetchDialog(parent=self)
 
         # get the hotkeys
         # self.hotkey_desc: list of tuples [(hotkey, description)]
@@ -213,6 +206,11 @@ class MainWindow(QtWidgets.QMainWindow):
         # make sure that everything
         # that is needed is initialised
         self.sliderWidget = SliderWidget(self)
+
+    def backward_compatibility(self):
+        if os.path.exists(os.path.join(self.path_settings, 'cif_db.json')):
+            # set path to cif file paths
+            shutil.move(os.path.join(self.path_settings, 'cif_db.json'), os.path.join(self.path_home, 'cif_db.json'))
 
     def modifiables_init(self):
         """
@@ -916,6 +914,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # menu Reference: add cif
         self.sub_menu_cif = QtWidgets.QMenu('From cif', self)
         menu_ref.addMenu(self.sub_menu_cif)
+
         if self.ref_cif:
             for name in self.ref_cif.keys():
                 self.add_cif_to_menu(name)
@@ -935,10 +934,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sub_menu_cell.setDisabled(self.sub_menu_cell.isEmpty())
 
         menu_ref.addSeparator()
-        # menu Reference: add None
+        # menu Reference: add calculate from cell
         cell_action = QtGui.QAction('Calculate from Cell', self)
         cell_action.triggered.connect(self.uc_win.show)
         menu_ref.addAction(cell_action)
+
+        # menu Reference: add fetch from COD
+        #cod_action = QtGui.QAction('Fetch cif from COD', self)
+        #cod_action.triggered.connect(self.cif_win.show)
+        #menu_ref.addAction(cod_action)
         
         ############
         # BEAMSTOP #
@@ -1114,9 +1118,24 @@ class MainWindow(QtWidgets.QMainWindow):
         self.group_cset = QtGui.QActionGroup(self)
         self.group_cset.setExclusive(True)
         for cset_name in self.settings_get_files():
-            cset_action = QtGui.QAction(cset_name, self, checkable=True)
+            with open(os.path.join(self.path_settings, cset_name), 'r') as f:
+                try:
+                    settings = json.load(f)
+                except json.decoder.JSONDecodeError:
+                    print(f"Warning: Failed to load settings from {cset_name}. Skipping this file.")
+                    continue
+            _fac, _bl, _inst = [settings.get('geo', {}).get(key, None) for key in ['facility', 'beamline', 'instrument']]
+            if all([_fac, _bl, _inst]):
+                menu_fac = next((m for m in self.menu_custom_settings.findChildren(QtWidgets.QMenu) if m.title() == _fac), None)
+                if not menu_fac:
+                    menu_fac = self.menu_custom_settings.addMenu(_fac)
+                cset_action = QtGui.QAction(f"{_bl} | {_inst}", self, checkable=True)
+                cset_action.objectName = cset_name
+                menu_fac.addAction(cset_action)
+            else:
+                cset_action = QtGui.QAction(cset_name, self, checkable=True)
+                self.menu_custom_settings.addAction(cset_action)
             self.menu_set_action(cset_action, self.settings_change_file, cset_name)
-            self.menu_custom_settings.addAction(cset_action)
             self.group_cset.addAction(cset_action)
             if cset_name == self.active_settings:
                 cset_action.setChecked(True)
@@ -1414,14 +1433,14 @@ class MainWindow(QtWidgets.QMainWindow):
             if self.cont_ref_xtl is not None:
                 self.abs_win.update()
 
-        # close pxrd window if reference is not from cif
         if self.geo.reference not in self.ref_cif:
+            # close pxrd window if reference is not from cif
             if self.pxrd_win is not None and self.pxrd_win.isVisible():
                 self.pxrd_win.close()
-        # close abs window if reference is not from cif
-        if hasattr(self, 'abs_win') and self.abs_win is not None:
-            if self.abs_win is not None and self.abs_win.isVisible():
-                self.abs_win.close()
+            # close abs window if reference is not from cif
+            if hasattr(self, 'abs_win') and self.abs_win is not None:
+                if self.abs_win is not None and self.abs_win.isVisible():
+                    self.abs_win.close()
 
     ##################
     #  DRAW CONICS   #
@@ -1889,6 +1908,10 @@ class MainWindow(QtWidgets.QMainWindow):
                                  # 'value': Detector model/size/type
                                  # e.g. {'PLATUS3:['1M', '2M'], 'EIGER2':['4M']}
                                  # empty dict enables all detectors
+        geo.facility = ''        # [str]  Facility name (ESRF, APS, MAXIV, LU, AU, ...)
+        geo.beamline = ''        # [str]  Beamline name (P21.1, DanMAX, Dept. of Chemistry, ...)
+        geo.instrument = ''      # [str]  Instrument name (PXRD, WAXS, R2D2, ...)
+
         return geo
 
     def get_defaults_plo(self):
@@ -2938,21 +2961,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         gauss = np.sum(self.gaussian(ttr, np.atleast_2d(peak_ttr).T, np.atleast_2d(fwhm).T) * np.atleast_2d(inten).T, axis=0)
         xval = self.calc_unit(ttr)
-        #for i in range(len(peak_ttr)):
-        #    _g = self.gaussian(ttr, peak_ttr[i], fwhm[i])
-        #    _f = _trapz(_g, x=xval)
-        #    _i = inten[i]
-        #    _w = fwhm[i]
-        #    #print(f'{_f:10.2f} {_i:10.2f} {_f*_i:10.2f}', _w, _g.max(), hkl[i])
-        #    if i > 5:
-        #        #print(xval.min(), xval.max(), gauss.min(), gauss.max())
-        #        #print()
-        #        break
         self.pxrd_curve.setData(x=xval, y=gauss)
         
         peak_xval = self.calc_unit(peak_ttr)
-        #print(peak_xval[0], gauss[0], fwhm[0], inten[0], np.sum(self.gaussian(ttr, np.atleast_2d(peak_ttr).T[0], np.atleast_2d(fwhm).T[0]), axis=0))
-        #print(np.trapz(self.gaussian(ttr, ttr.mean(), 0.02), x=ttr))
         self.pxrd_scatt_offset = -(gauss.max() + gauss.min()) * self.plo.pxrd_marker_offset
         self.pxrd_scatt.setData(x=peak_xval,
                                 y=np.zeros(len(peak_xval))+self.pxrd_scatt_offset,
@@ -3207,13 +3218,82 @@ class MainWindow(QtWidgets.QMainWindow):
             self.group_ref.addAction(ref_action_open)
             if self.geo.reference == name:
                 ref_action_open.setChecked(True)
-                
-        ref_action_del = QtGui.QAction('Delete', self)
+
+            ref_action_inf = QtGui.QAction('Info', self)
+            self.menu_set_action(ref_action_inf, self.cif_info, name)
+            ref_menu.addAction(ref_action_inf)
+
+        ref_action_del = QtGui.QAction('Remove', self)
         self.menu_set_action(ref_action_del, self.remove_ref_from_db, name)
         ref_menu.addAction(ref_action_del)
 
         # disable/enable menu if empty
         self.sub_menu_cif.setDisabled(self.sub_menu_cif.isEmpty())
+
+    def cif_info(self, ref_name):
+        """
+        Displays information about a reference CIF in a message box.
+
+        This method retrieves the CIF file path associated with the given reference name
+        and displays it in a message box. If the reference does not exist, an error message
+        is shown instead.
+
+        Args:
+            ref_name (str): The name of the reference for which to display information.
+
+        Returns:
+            None
+        """
+        if ref_name not in self.ref_cif:
+            return
+
+        # Create a Crystal object from the CIF file
+        xtl = dif.Crystal(self.ref_cif[ref_name].cif)
+        # Format the output string with relevant information about the crystal
+        # This includes the name, formula, magnetic properties, space group, cell information, and density.
+        out = '<h2>{}</h2>'.format(xtl.name)
+        out += '<p>Formula: {}<br>'.format(self.chemical_formula_to_html(xtl.Properties.molname()))
+        #out += 'Magnetic: {}\n'.format(xtl.Structure.ismagnetic())
+        out += 'Spacegroup: {} ({:.0f})<br>'.format(self.format_space_group(xtl.Symmetry.spacegroup), xtl.Symmetry.spacegroup_number)
+        out += 'a = {:6.3f} \u00c5, b = {:6.3f} \u00C5, c = {:6.3f} \u00C5<br>\u03B1 = {:7.2f}\u00B0, \u03B2 = {:7.2f}\u00B0, \u03B3 = {:7.2f}\u00B0<br>'.format(*xtl.Cell.lp())
+        out += 'Volume: {:6.2f} \u00c5\u00B3<br>'.format(xtl.Cell.volume())
+        out += 'Density: {:.3f} g/cm\u00B3<br>'.format(xtl.Properties.density())
+        tmp = '<h3>Publication Info</h3>'
+        tmp += '<p>'
+        for key in xtl.cif.keys():
+            if 'citation' in key or 'journal' in key or 'author' in key or 'doi' in key or 'title' in key:
+                if isinstance(xtl.cif[key], list):
+                    tmp += f'{key}: {", ".join(xtl.cif[key])}<br>'
+                else:
+                    tmp += f'{key}: {xtl.cif[key]}<br>'
+        tmp += '</p>'
+        if tmp != '<h3>Publication Info</h3><p></p>':
+            out += tmp
+        else:
+            out += '<p>No publication info found in cif.</p>'
+
+        QtWidgets.QMessageBox.information(self, f'Info for {ref_name}', f'<pre style="font:monospace;">{out}</pre>')
+
+    def chemical_formula_to_html(self, formula: str) -> str:
+        """
+        Converts a chemical formula string into HTML format, 
+        supporting both whole numbers and decimals for subscripts.
+        """
+        # Match an element or closing parenthesis, followed by a number that can include a decimal
+        pattern = r'([A-Za-z\)])(\d+(?:\.\d+)?)'
+        
+        return re.sub(pattern, r'\1<sub>\2</sub>', formula)
+
+    def format_space_group(self, space_group: str) -> str:
+        """
+        Converts screw axis notations in a space group string 
+        to HTML format by subscripting the screw component.
+        """
+        # Match a digit/letter (rotation axis), followed by a digit (screw component)
+        # ensuring it's not part of a fraction (e.g., skips /m or /n)
+        pattern = r'\b([2346])([1-5])(?=/)'
+        
+        return re.sub(pattern, r'\1<sub>\2</sub>', space_group)
 
     def calc_ref_from_cif(self, fname):
         """
@@ -3237,7 +3317,11 @@ class MainWindow(QtWidgets.QMainWindow):
             ref_cif (dict): Dictionary containing reference data with the CIF file basename as the key.
         """
         # called when a cif is dropped onto the window
-        self.cont_ref_xtl = dif.Crystal(fname)
+        try:
+            self.cont_ref_xtl = dif.Crystal(fname)
+        except Exception as e:
+            print(f'Error while processing {os.path.basename(fname)}: {e}')
+            return
         # :return xval: arrray : x-axis of powder scan (units)
         # :return inten: array : intensity values at each point in x-axis
         # :return reflections: (h, k, l, xval, intensity) array of reflection positions, grouped by min_overlap
@@ -3257,18 +3341,29 @@ class MainWindow(QtWidgets.QMainWindow):
         irel = ordered[:,4]/ordered[:,4].max()
         self.cont_ref_hkl = list(zip(ordered[:,0], ordered[:,1], ordered[:,2], ordered[:,4], irel))
 
-        self.geo.reference = os.path.splitext(os.path.basename(fname))[0]
+        tmp_ref = self.get_cifname_from_filename(fname)
         # update entry, might be incomplete (load on startup only has cif path)
         # and we already did the heavy lifting
-        self.ref_cif[self.geo.reference] = Ref(name=self.geo.reference,
-                                               dsp=self.cont_ref_dsp,
-                                               hkl=self.cont_ref_hkl,
-                                               cif=fname,
-                                               xtl=self.cont_ref_xtl)
-        # add to menu
-        self.add_cif_to_menu(self.geo.reference)
-        # save the reference database to file
-        self.save_ref_db_to_file()
+        self.ref_cif[tmp_ref] = Ref(name=tmp_ref,
+                                    dsp=self.cont_ref_dsp,
+                                    hkl=self.cont_ref_hkl,
+                                    cif=fname,
+                                    xtl=self.cont_ref_xtl)
+
+    def get_cifname_from_filename(self, fname):
+        """
+        Extracts the base name of a CIF file from its full file path.
+
+        This method takes a full file path to a CIF file and returns the base name
+        without the directory path and without the '.cif' extension.
+
+        Args:
+            fname (str): The full file path to the CIF file.
+
+        Returns:
+            str: The base name of the CIF file without the directory path and '.cif' extension.
+        """
+        return os.path.splitext(os.path.basename(fname))[0]
 
     #############
     #  UTILITY  #
@@ -3298,10 +3393,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ax.setXRange(-self.xdim, self.xdim, padding=0, update=True)
         self.ax.setYRange(-self.ydim, self.ydim, padding=0, update=True)
 
-        if self.plo.plot_size <= 0:
-            _app = QtWidgets.QApplication.instance()
-            _height = _app.primaryScreen().availableGeometry().height()
-            self.plo.plot_size = int(np.ceil(_height*0.9))
+        if self.plo.plot_size_fixed:
+            _height = QtWidgets.QApplication.instance().primaryScreen().availableGeometry().height()
+            if self.plo.plot_size <= 0:
+                self.plo.plot_size = int(np.ceil(_height*0.9))
+            elif self.plo.plot_size > _height:
+                print(f'Plot size ({self.plo.plot_size}) exceeds screen size ({_height}). Set \'plo.plot_size\' to 0 for automatic readjustment.')
         
         # get proper dimensions
         self.win_width = int(np.ceil(self.plo.plot_size * self.xdim / self.ydim))
@@ -3330,10 +3427,13 @@ class MainWindow(QtWidgets.QMainWindow):
             det (object): An object containing the detector name.
             active_settings (str): The current active settings.
         """
+        settings_str = f'{os.path.basename(self.active_settings)}'
+        if self.geo.facility and self.geo.beamline and self.geo.instrument:
+            settings_str = f'{self.geo.facility} | {self.geo.beamline} | {self.geo.instrument}'
         if self.geo.reference.lower() == 'none':
-            self.setWindowTitle(f'{self.det.name} - {self.active_settings}')
+            self.setWindowTitle(f'{self.det.name} - {settings_str}')
         else:
-            self.setWindowTitle(f'{self.det.name} - {self.geo.reference} - {self.active_settings}')
+            self.setWindowTitle(f'{self.det.name} - {self.geo.reference} - {settings_str}')
 
     def calc_unit(self, tth):
         """
@@ -4120,9 +4220,32 @@ class MainWindow(QtWidgets.QMainWindow):
         if fnames:
             for fname in fnames:
                 os.remove(fname)
-                for action in self.menu_custom_settings.actions():
-                    if action.text() == os.path.basename(fname):
-                        self.menu_custom_settings.removeAction(action)
+                # remove from menu
+                self.remove_action_recursively(self.menu_custom_settings, fname)
+
+    def remove_action_recursively(self, parent_menu: QtWidgets.QMenu, target_filename: str):
+        """
+        Recursively traverses a menu and its submenus to remove actions 
+        matching the given filename by text or objectName.
+        """
+        target_name = os.path.basename(target_filename)
+        
+        # Iterate over a copy of the actions list to avoid mutation issues while removing
+        for action in list(parent_menu.actions()):
+            # Check if this action matches the target
+            if action.text() == target_name or action.objectName == target_name:
+                parent_menu.removeAction(action)
+                # Optional: action.deleteLater() if you want to completely destroy it
+                continue  
+            
+            # If the action has a submenu, recurse into it
+            submenu = action.menu()
+            if submenu:
+                self.remove_action_recursively(submenu, target_filename)
+                
+                # Optional cleanup: If the submenu is now completely empty, remove it too
+                if not submenu.actions():
+                    parent_menu.removeAction(action)
 
     def settings_save_current(self):
         """
@@ -4231,6 +4354,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 }
         # Add 'key':'val to the dict to enforce 'key' to be set to 'val'
         _force = {'show_fwhm':False}
+        # Add 'key' to the list to ignore it when loading settings
+        _ignore = ['args', 'kwargs']
         # Opening JSON file as dict
         try:
             with open(self.path_settings_current, 'r') as of:
@@ -4255,7 +4380,8 @@ class MainWindow(QtWidgets.QMainWindow):
                         x = _force[p]
                     setattr(conv[key], p, x)
                 else:
-                    print(f'WARNING: "{p}" is not a valid key!')
+                    if p not in _ignore:
+                        print(f'WARNING: "{p}" is not a valid key!')
         if 'geo' not in skip:
             # store the initial values of geo
             self._geo.__dict__.update(self.geo.__dict__)
@@ -4269,7 +4395,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         os.system(f'{command} {self.path_settings_current}')
 
-    def settings_get_files(self):
+    def settings_get_files(self) -> list[str]:
         """
         Retrieve a sorted list of JSON filenames from the settings directory.
 
@@ -4357,6 +4483,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.settings_save_to_file()
         self.redraw_canvas()
         self.menu_init(reset=True)
+        self.update_win_generic(force_update=True)
 
     #############
     #   EVENT   #
@@ -4391,13 +4518,36 @@ class MainWindow(QtWidgets.QMainWindow):
         Returns:
             None
         """
-        fpath = event.mimeData().urls()[0].toLocalFile()
-        
-        if os.path.splitext(fpath)[1] == '.cif':
-            self.calc_ref_from_cif(fname=fpath)
-        
-        if os.path.splitext(fpath)[1] == '.json':
-            self.settings_import_win(fname=fpath)
+        urls = event.mimeData().urls()
+        if len(urls) > 1:
+            for url in urls:
+                fpath = url.toLocalFile()
+                if os.path.splitext(fpath)[1] == '.cif':
+                    self.calc_ref_from_cif(fname=fpath)
+                    tmp_ref = self.get_cifname_from_filename(fpath)
+                    if tmp_ref not in self.ref_cif.keys():
+                        continue
+                    self.add_cif_to_menu(tmp_ref)
+                elif os.path.splitext(fpath)[1] == '.json':
+                    self.settings_import_win(fname=fpath)
+                else:
+                    print(f'File {os.path.basename(fpath)} is not a valid .cif or .json file.')
+        else:
+            fpath = urls[0].toLocalFile()
+            if os.path.splitext(fpath)[1] == '.cif':
+                self.calc_ref_from_cif(fname=fpath)
+                tmp_ref = self.get_cifname_from_filename(fpath)
+                if tmp_ref not in self.ref_cif.keys():
+                    return
+                # add to menu
+                self.add_cif_to_menu(tmp_ref)
+                self.change_reference(ref_name=tmp_ref, ref_type='cif')
+            elif os.path.splitext(fpath)[1] == '.json':
+                self.settings_import_win(fname=fpath)
+            else:
+                print(f'File {os.path.basename(fpath)} is not a valid .cif or .json file.')
+        # save the reference database to file
+        self.save_ref_db_to_file()
 
     def keyReleaseEvent(self, event):
         """
@@ -4513,15 +4663,6 @@ class MainWindow(QtWidgets.QMainWindow):
             #_text.append(f'H: {self.calc_unit(self._fwhm[x,y]):.4f}')
         self.cor_label.setText('\n'.join(_text))
 
-    # possible new approach to select the closest curve to the mouse position
-    #def mouseHoverEvent(self, a0):
-    #    pos = QtCore.QPointF(self.ax.mapToScene(a0.pos()))
-    #    items = self.ax.scene().items(pos, mode=QtCore.Qt.ItemSelectionMode.IntersectsItemShape)
-    #    for i in items:
-    #        if isinstance(i, xrdPlanner.classes.HoverableCurveItem):
-    #            i.highlight(pos)
-    #    return super().mousePressEvent(a0)
-
 ############
 #   MISC   #
 ############
@@ -4537,9 +4678,9 @@ class Container(object):
         args (tuple): A tuple containing positional arguments.
         kwargs (dict): A dictionary containing keyword arguments.
         """
-        self.args = args
-        self.kwargs = kwargs
-    pass
+        #self.args = args
+        #self.kwargs = kwargs
+        pass
 
 class Ref(object):
     """
