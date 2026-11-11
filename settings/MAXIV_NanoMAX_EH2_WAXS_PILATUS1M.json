@@ -1,6 +1,6 @@
 {
     "geo": {
-        "det_type": "PILATUS3",
+        "det_type": "DECTRIS PILATUS3",
         "det_size": "1M",
         "ener": 15.0,
         "dist": 150.0,
@@ -23,7 +23,7 @@
             5.0
         ],
         "det_bank": {
-            "PILATUS3": [
+            "DECTRIS PILATUS3": [
                 "1M"
             ]
         },
