@@ -28,6 +28,22 @@ except ImportError:
 # out-class pxrd window
 # added update_win_generic(force_true) to reload_settings -> Check if working properly
 
+def official_det_name(name, known):
+    """
+    DECTRIS detectors carry the official 'DECTRIS' prefix.
+    Translate a former name without the prefix (e.g. 'EIGER2')
+    to the official name ('DECTRIS EIGER2') if that is known.
+    """
+    if name not in known and f'DECTRIS {name}' in known:
+        return f'DECTRIS {name}'
+    return name
+
+# Detector menu: DECTRIS detectors are grouped by product line,
+# Detector > DECTRIS > <product line> > <rest of the name> <size>.
+# The product line is the first word after 'DECTRIS'. Lines not
+# listed here (e.g. user entries) are appended alphabetically.
+DECTRIS_MENU_ORDER = ['PILATUS4', 'PILATUS3', 'EIGER2', 'JUNGFRAU', 'POLLUX', 'SELUN']
+
 # debug fn to show who is calling what and when to find out why.
 #import inspect
 #def print_stack(context=True):
@@ -258,6 +274,11 @@ class MainWindow(QtWidgets.QMainWindow):
         # - update: overwrite existing file after load
         # - reset: overwrite existing file with defaults
         self.detector_db = self.get_det_library(update=self.plo.update_det_bank, reset=self.plo.reset_det_bank)
+
+        # translate former detector names (e.g. EIGER2 -> DECTRIS EIGER2)
+        self.geo.det_type = official_det_name(self.geo.det_type, self.detector_db)
+        if self.geo.det_bank:
+            self.geo.det_bank = {official_det_name(k, self.detector_db):v for k, v in self.geo.det_bank.items()}
 
         # pick current detector
         self.det = self.get_det_params()
@@ -874,16 +895,41 @@ class MainWindow(QtWidgets.QMainWindow):
         # DETECTORS #
         #############
         # menu Detectors
-        for d in sorted(self.detector_db):
-            d_menu = QtWidgets.QMenu(d, self)
-            menu_det.addMenu(d_menu)
+        def add_det_actions(menu, d, prefix=''):
             for s in self.detector_db[d]['size']:
-                det_action = QtGui.QAction(s, self, checkable=True)
+                det_action = QtGui.QAction(f'{prefix} {s}'.strip(), self, checkable=True)
                 self.menu_set_action(det_action, self.change_detector, d, s)
-                d_menu.addAction(det_action)
+                menu.addAction(det_action)
                 group_det.addAction(det_action)
                 if d == self.geo.det_type and s == self.geo.det_size:
                     det_action.setChecked(True)
+
+        # DECTRIS: Detector > DECTRIS > product line > rest of name + size
+        # e.g. 'DECTRIS EIGER2 CdTe' 4M -> DECTRIS > EIGER2 > CdTe 4M
+        dectris = {}
+        for d in self.detector_db:
+            if d.startswith('DECTRIS '):
+                line = d.split(' ')[1]
+                dectris.setdefault(line, []).append(d)
+        if dectris:
+            menu_dectris = menu_det.addMenu('DECTRIS')
+            order = {l:i for i,l in enumerate(DECTRIS_MENU_ORDER)}
+            for line in sorted(dectris, key=lambda l: (order.get(l, len(order)), l)):
+                line_menu = menu_dectris.addMenu(line)
+                # base model first, then variants (CdTe, R, PANORAMA, ...)
+                for i, d in enumerate(sorted(dectris[line])):
+                    if i > 0:
+                        line_menu.addSeparator()
+                    add_det_actions(line_menu, d, prefix=d[len(f'DECTRIS {line}'):])
+            menu_det.addSeparator()
+
+        # all other detectors: Detector > name > size
+        for d in sorted(self.detector_db):
+            if d.startswith('DECTRIS '):
+                continue
+            d_menu = QtWidgets.QMenu(d, self)
+            menu_det.addMenu(d_menu)
+            add_det_actions(d_menu, d)
         
         #############
         # REFERENCE #
@@ -1877,7 +1923,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Setup the geometry #
         ######################
         geo = Container()
-        geo.det_type = 'EIGER2'  # [str]  Pilatus3 / Eiger2
+        geo.det_type = 'DECTRIS EIGER2'  # [str]  DECTRIS PILATUS3 / DECTRIS EIGER2
         geo.det_size = '4M'      # [str]  300K 1M 2M 6M / 1M 4M 9M 16M
         geo.ener = 25            # [keV]  Beam energy
         geo.dist = 100           # [mm]   Detector distance
@@ -1906,7 +1952,7 @@ class MainWindow(QtWidgets.QMainWindow):
                                  # 'key':['value'] or ['value1', 'value2']
                                  # 'key': Detector name
                                  # 'value': Detector model/size/type
-                                 # e.g. {'PLATUS3:['1M', '2M'], 'EIGER2':['4M']}
+                                 # e.g. {'DECTRIS PILATUS3':['1M', '2M'], 'DECTRIS EIGER2':['4M']}
                                  # empty dict enables all detectors
         geo.facility = ''        # [str]  Facility name (ESRF, APS, MAXIV, LU, AU, ...)
         geo.beamline = ''        # [str]  Beamline name (P21.1, DanMAX, Dept. of Chemistry, ...)
@@ -2175,6 +2221,8 @@ class MainWindow(QtWidgets.QMainWindow):
             det.hmp = self.detector_db[det_type]['hmp']
             det.vmp = self.detector_db[det_type]['vmp']
             det.pxs = self.detector_db[det_type]['pxs']
+            det.pys = self.detector_db[det_type].get('pys', det.pxs)
+            det.igp = self.detector_db[det_type].get('igp', 0)
             det.hgp = self.detector_db[det_type]['hgp']
             det.vgp = self.detector_db[det_type]['vgp']
             det.cbh = self.detector_db[det_type]['cbh']
@@ -2201,9 +2249,12 @@ class MainWindow(QtWidgets.QMainWindow):
         Returns:
         dict: A dictionary containing the specifications for various detectors.
         Detector Specifications:
-        - PILATUS3
-        - PILATUS4
-        - EIGER2
+        - PILATUS3 (+ CdTe)
+        - PILATUS4 (+ CdTe)
+        - EIGER2 (+ CdTe, R 250K)
+        - SELUN
+        - JUNGFRAU
+        - POLLUX (PANORAMA, PANORAMA HR)
         - MPCCD
         - RAYONIX
         - PHOTON-II
@@ -2212,11 +2263,13 @@ class MainWindow(QtWidgets.QMainWindow):
         - VAREX XRpad2
         - CITIUS
         Each detector specification includes:
-        - pxs: Pixel size in mm
+        - pxs: Pixel size (horizontal) in mm
+        - pys: Pixel size (vertical) in mm
         - hmp: Module size (horizontal) in pixels
         - vmp: Module size (vertical) in pixels
         - hgp: Module gap (horizontal) in pixels
         - vgp: Module gap (vertical) in pixels
+        - igp: Intra-module gap (horizontal) in pixels, e.g. CdTe sensor gap
         - cbh: Central beam hole in pixels
         - size: Dictionary mapping detector model to its dimensions (rows, columns)
         Raises:
@@ -2226,57 +2279,214 @@ class MainWindow(QtWidgets.QMainWindow):
         # Detector Specifications #
         ###########################
         detectors = dict()
+        #######################################################
+        # DECTRIS detectors                                   #
+        # - Geometries are given for the BORDERLESS           #
+        #   configuration (outermost module pixels discarded) #
+        #   as delivered by the detectors.                    #
+        # - 'igp': dead columns in the centre of every module #
+        #   (sensor gap of CdTe modules).                     #
+        # - 'pys': vertical pixel size, differs from 'pxs'    #
+        #   only for non-square pixels.                       #
+        #######################################################
+
         ###############################
-        # Specifications for Pilatus3 #
+        # Specifications for PILATUS4 #
         ###############################
-        detectors['PILATUS3'] = {
-            'pxs' : 172e-3, # [mm] Pixel size
-            'hmp' : 487,    # [px] Module size (horizontal
-            'vmp' : 195,    # [px] Module size (vertical)
-            'hgp' : 7,      # [px] Module gap (horizontal)
-            'vgp' : 17,     # [px] Module gap (vertical)
-            'cbh' : 0,      # [px] Central beam hole
-            'size' : {'300K':(1,3),
-                        '1M':(2,5),
-                        '2M':(3,8),
-                        '6M':(5,12)},
-            }
-        
-        ###############################
-        # Specifications for Pilatus4 #
-        ###############################
-        # Note: These are probably not
-        # the correct PILATUS4 specs
-        # and are only meant to play
-        # around!
-        detectors['PILATUS4'] = {
-            'pxs' : 150e-3, # [mm] Pixel size
-            'hmp' : 513,    # [px] Module size (horizontal
+        detectors['DECTRIS PILATUS4'] = {
+            'pxs' : 150e-3, # [mm] Pixel size (horizontal)
+            'pys' : 150e-3, # [mm] Pixel size (vertical)
+            'hmp' : 513,    # [px] Module size (horizontal)
             'vmp' : 255,    # [px] Module size (vertical)
             'hgp' : 7,      # [px] Module gap (horizontal)
             'vgp' : 20,     # [px] Module gap (vertical)
+            'igp' : 0,      # [px] Intra-module gap (horizontal)
             'cbh' : 0,      # [px] Central beam hole
-            'size' : {'1M':(2,4),
+            'size' : {'260K':(1,2),
+                      '260K-W':(2,1),
+                      '1M':(2,4),
                       '2M':(3,6),
-                      '4M':(4,8)}
+                      '4M':(4,8)},
             }
-        
+
+        detectors['DECTRIS PILATUS4 CdTe'] = {
+            'pxs' : 150e-3, # [mm] Pixel size (horizontal)
+            'pys' : 150e-3, # [mm] Pixel size (vertical)
+            'hmp' : 513,    # [px] Module size (horizontal)
+            'vmp' : 255,    # [px] Module size (vertical)
+            'hgp' : 7,      # [px] Module gap (horizontal)
+            'vgp' : 20,     # [px] Module gap (vertical)
+            'igp' : 1,      # [px] Intra-module gap (horizontal)
+            'cbh' : 0,      # [px] Central beam hole
+            'size' : {'260K-W':(2,1),
+                      '1M':(2,4),
+                      '2M':(3,6),
+                      '4M':(4,8)},
+            }
+
+        ###############################
+        # Specifications for PILATUS3 #
+        ###############################
+        detectors['DECTRIS PILATUS3'] = {
+            'pxs' : 172e-3, # [mm] Pixel size (horizontal)
+            'pys' : 172e-3, # [mm] Pixel size (vertical)
+            'hmp' : 487,    # [px] Module size (horizontal)
+            'vmp' : 195,    # [px] Module size (vertical)
+            'hgp' : 7,      # [px] Module gap (horizontal)
+            'vgp' : 17,     # [px] Module gap (vertical)
+            'igp' : 0,      # [px] Intra-module gap (horizontal)
+            'cbh' : 0,      # [px] Central beam hole
+            'size' : {'100K':(1,1),
+                      '200K':(1,2),
+                      '300K':(1,3),
+                      '300K-W':(3,1),
+                      '1M':(2,5),
+                      '2M':(3,8),
+                      '6M':(5,12)},
+            }
+
+        detectors['DECTRIS PILATUS3 CdTe'] = {
+            'pxs' : 172e-3, # [mm] Pixel size (horizontal)
+            'pys' : 172e-3, # [mm] Pixel size (vertical)
+            'hmp' : 487,    # [px] Module size (horizontal)
+            'vmp' : 195,    # [px] Module size (vertical)
+            'hgp' : 7,      # [px] Module gap (horizontal)
+            'vgp' : 17,     # [px] Module gap (vertical)
+            'igp' : 1,      # [px] Intra-module gap (horizontal)
+            'cbh' : 0,      # [px] Central beam hole
+            'size' : {'300K':(1,3),
+                      '300K-W':(3,1),
+                      '1M':(2,5),
+                      '2M':(3,8)},
+            }
+
         #############################
-        # Specifications for Eiger2 #
+        # Specifications for EIGER2 #
         #############################
-        detectors['EIGER2'] = {
-            'pxs' : 75e-3,  # [mm] Pixel size
-            'hmp' : 1028,   # [px] Module size (horizontal
+        detectors['DECTRIS EIGER2'] = {
+            'pxs' : 75e-3,  # [mm] Pixel size (horizontal)
+            'pys' : 75e-3,  # [mm] Pixel size (vertical)
+            'hmp' : 1028,   # [px] Module size (horizontal)
             'vmp' : 512,    # [px] Module size (vertical)
             'hgp' : 12,     # [px] Module gap (horizontal)
             'vgp' : 38,     # [px] Module gap (vertical)
+            'igp' : 0,      # [px] Intra-module gap (horizontal)
             'cbh' : 0,      # [px] Central beam hole
-            'size' : { '1M':(1,2),
+            'size' : {'500K':(1,1),
+                       '1M':(1,2),
+                     '1M-W':(2,1),
+                     '2M-W':(4,1),
                        '4M':(2,4),
                        '9M':(3,6),
                       '16M':(4,8)},
             }
-        
+
+        detectors['DECTRIS EIGER2 CdTe'] = {
+            'pxs' : 75e-3,  # [mm] Pixel size (horizontal)
+            'pys' : 75e-3,  # [mm] Pixel size (vertical)
+            'hmp' : 1028,   # [px] Module size (horizontal)
+            'vmp' : 512,    # [px] Module size (vertical)
+            'hgp' : 12,     # [px] Module gap (horizontal)
+            'vgp' : 38,     # [px] Module gap (vertical)
+            'igp' : 2,      # [px] Intra-module gap (horizontal)
+            'cbh' : 0,      # [px] Central beam hole
+            'size' : {'500K':(1,1),
+                       '1M':(1,2),
+                     '1M-W':(2,1),
+                     '2M-W':(4,1),
+                       '4M':(2,4),
+                       '9M':(3,6),
+                      '16M':(4,8)},
+            }
+
+        # EIGER2 R 250K: 512 x 512 px, half a module wide
+        detectors['DECTRIS EIGER2 R'] = {
+            'pxs' : 75e-3,  # [mm] Pixel size (horizontal)
+            'pys' : 75e-3,  # [mm] Pixel size (vertical)
+            'hmp' : 512,    # [px] Module size (horizontal)
+            'vmp' : 512,    # [px] Module size (vertical)
+            'hgp' : 0,      # [px] Module gap (horizontal)
+            'vgp' : 0,      # [px] Module gap (vertical)
+            'igp' : 0,      # [px] Intra-module gap (horizontal)
+            'cbh' : 0,      # [px] Central beam hole
+            'size' : {'250K':(1,1)},
+            }
+
+        ###############################
+        # Specifications for JUNGFRAU #
+        ###############################
+        # DECTRIS JUNGFRAU 4M, charge-integrating, 2 x 4 modules
+        detectors['DECTRIS JUNGFRAU'] = {
+            'pxs' : 75e-3,  # [mm] Pixel size (horizontal)
+            'pys' : 75e-3,  # [mm] Pixel size (vertical)
+            'hmp' : 1028,   # [px] Module size (horizontal)
+            'vmp' : 512,    # [px] Module size (vertical)
+            'hgp' : 12,     # [px] Module gap (horizontal)
+            'vgp' : 40,     # [px] Module gap (vertical)
+            'igp' : 0,      # [px] Intra-module gap (horizontal)
+            'cbh' : 0,      # [px] Central beam hole
+            'size' : {'4M':(2,4)},
+            }
+
+        #############################
+        # Specifications for POLLUX #
+        #############################
+        # PANORAMA: 3 ASICs, the pixels between the ASICs are
+        # virtual pixels (sensitive), so the head has no gaps
+        detectors['DECTRIS POLLUX'] = {
+            'pxs' : 75e-3,  # [mm] Pixel size (horizontal)
+            'pys' : 75e-3,  # [mm] Pixel size (vertical)
+            'hmp' : 256,    # [px] Module size (horizontal)
+            'vmp' : 192,    # [px] Module size (vertical)
+            'hgp' : 0,      # [px] Module gap (horizontal)
+            'vgp' : 0,      # [px] Module gap (vertical)
+            'igp' : 0,      # [px] Intra-module gap (horizontal)
+            'cbh' : 0,      # [px] Central beam hole
+            'size' : {'Si':(1,1)},
+            }
+
+        detectors['DECTRIS POLLUX PANORAMA'] = {
+            'pxs' : 75e-3,  # [mm] Pixel size (horizontal)
+            'pys' : 75e-3,  # [mm] Pixel size (vertical)
+            'hmp' : 772,    # [px] Module size (horizontal)
+            'vmp' : 192,    # [px] Module size (vertical)
+            'hgp' : 0,      # [px] Module gap (horizontal)
+            'vgp' : 0,      # [px] Module gap (vertical)
+            'igp' : 0,      # [px] Intra-module gap (horizontal)
+            'cbh' : 0,      # [px] Central beam hole
+            'size' : {'Si':(1,1)},
+            }
+
+        # non-square pixels: 37.5 um (horizontal) x 150 um (vertical)
+        detectors['DECTRIS POLLUX PANORAMA HR'] = {
+            'pxs' : 37.5e-3, # [mm] Pixel size (horizontal)
+            'pys' : 150e-3,  # [mm] Pixel size (vertical)
+            'hmp' : 1544,    # [px] Module size (horizontal)
+            'vmp' : 96,      # [px] Module size (vertical)
+            'hgp' : 0,       # [px] Module gap (horizontal)
+            'vgp' : 0,       # [px] Module gap (vertical)
+            'igp' : 0,       # [px] Intra-module gap (horizontal)
+            'cbh' : 0,       # [px] Central beam hole
+            'size' : {'Si':(1,1)},
+            }
+
+        ############################
+        # Specifications for SELUN #
+        ############################
+        # single chip, full resolution (no 2x2 binning)
+        detectors['DECTRIS SELUN'] = {
+            'pxs' : 100e-3, # [mm] Pixel size (horizontal)
+            'pys' : 100e-3, # [mm] Pixel size (vertical)
+            'hmp' : 190,    # [px] Module size (horizontal)
+            'vmp' : 190,    # [px] Module size (vertical)
+            'hgp' : 0,      # [px] Module gap (horizontal)
+            'vgp' : 0,      # [px] Module gap (vertical)
+            'igp' : 0,      # [px] Intra-module gap (horizontal)
+            'cbh' : 0,      # [px] Central beam hole
+            'size' : {'Si':(1,1),
+                      'High-Z':(1,1)},
+            }
+
         #############################
         # Specifications for MPCCD #
         #############################
@@ -2377,6 +2587,13 @@ class MainWindow(QtWidgets.QMainWindow):
             'size' : {'20.2':(6,12)},
             }
         
+        # add defaults for keys introduced later
+        # 'pys': vertical pixel size (square pixels if not given)
+        # 'igp': intra-module gap (horizontal)
+        for _det in detectors.values():
+            _det.setdefault('pys', _det['pxs'])
+            _det.setdefault('igp', 0)
+
         # make file dump
         if not os.path.exists(self.path_detdb) or reset:
             with open(self.path_detdb, 'w') as wf:
@@ -2399,7 +2616,17 @@ class MainWindow(QtWidgets.QMainWindow):
                     # save db in new detector format
                     update = True
                 else:
-                    detectors.update(temp)
+                    for key, vals in temp.items():
+                        # former DECTRIS names -> official names
+                        key = official_det_name(key, detectors)
+                        # entries from file take precedence, but
+                        # add keys/sizes that were introduced later
+                        if key in detectors:
+                            vals = {**detectors[key], **vals,
+                                    'size':{**detectors[key]['size'], **vals.get('size', {})}}
+                        vals.setdefault('pys', vals['pxs'])
+                        vals.setdefault('igp', 0)
+                        detectors[key] = vals
             except: # any error is critical here!
                 print(f"Error parsing Detector db at: {self.path_detdb}")
                 raise SystemExit
@@ -2450,7 +2677,7 @@ class MainWindow(QtWidgets.QMainWindow):
             'darkmode':'[bool] Darkmode',
             'colormap':'[cmap] Contour colormap:\n{}'.format(', '.join(self.colormaps)),
             'bs_list':'[list] Available beamstop sizes',
-            'det_bank':'Available detector bank\nkey:[value] or [value1, value2]\nkey: Detector name\nvalue: Detector model/size/type\ne.g. {PLATUS3:[1M, 2M], EIGER2:[4M]}\nempty dict enables all detectors',
+            'det_bank':'Available detector bank\nkey:[value] or [value1, value2]\nkey: Detector name\nvalue: Detector model/size/type\ne.g. {DECTRIS PILATUS3:[1M, 2M], DECTRIS EIGER2:[4M]}\nempty dict enables all detectors',
         }
         self.tooltips['plo'] = {
             'conic_tth_min':'[int] Minimum 2-theta contour line',
@@ -2708,7 +2935,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.det.cbh (float): Central beam hole size in pixels.
             self.det.hmn (int): Number of horizontal modules.
             self.det.vmn (int): Number of vertical modules.
-            self.det.pxs (float): Pixel size in millimeters.
+            self.det.pxs (float): Pixel size (horizontal) in millimeters.
+            self.det.pys (float): Pixel size (vertical) in millimeters.
+            self.det.igp (float): Intra-module gap (horizontal) in pixels.
             self.det_module_color (QColor): Color of the module outline.
             self.plo.det_module_width (int): Width of the module outline.
             self.det_module_fill (QColor): Fill color of the module.
@@ -2721,10 +2950,14 @@ class MainWindow(QtWidgets.QMainWindow):
         # build detector modules
         # pixel -> mm
         _hms = self.det.hmp * self.det.pxs
-        _vms = self.det.vmp * self.det.pxs
+        _vms = self.det.vmp * self.det.pys
         _hgs = self.det.hgp * self.det.pxs
-        _vgs = self.det.vgp * self.det.pxs
+        _vgs = self.det.vgp * self.det.pys
         _cbh = self.det.cbh * self.det.pxs
+        # intra-module gap (e.g. CdTe sensor gap)
+        # -> module is drawn as two halves
+        _igs = self.det.igp * self.det.pxs
+        _hhs = (_hms - _igs) / 2
         # beam position is between the modules (even) or at the center module (odd)
         # determined by the "+det.hmn%2" part
         for i in range(-self.det.hmn//2+self.det.hmn%2, self.det.hmn-self.det.hmn//2):
@@ -2746,11 +2979,16 @@ class MainWindow(QtWidgets.QMainWindow):
                              + (_vgs/2) \
                              + (_cbh/2) * (1-2*(i & self.det.hmn) // self.det.hmn)
                 # add the module
-                rect_item = QtWidgets.QGraphicsRectItem(origin_x, origin_y,  _hms, _vms)
-                rect_item.setPen(pg.mkPen(color = self.det_module_color, width = self.plo.det_module_width))
-                rect_item.setBrush(pg.mkBrush(color = self.det_module_fill))
-                rect_item.setOpacity(self.plo.det_module_alpha)
-                self.ax.addItem(rect_item)
+                if _igs > 0:
+                    _rects = [(origin_x, _hhs), (origin_x + _hhs + _igs, _hhs)]
+                else:
+                    _rects = [(origin_x, _hms)]
+                for _ox, _w in _rects:
+                    rect_item = QtWidgets.QGraphicsRectItem(_ox, origin_y,  _w, _vms)
+                    rect_item.setPen(pg.mkPen(color = self.det_module_color, width = self.plo.det_module_width))
+                    rect_item.setBrush(pg.mkBrush(color = self.det_module_fill))
+                    rect_item.setOpacity(self.plo.det_module_alpha)
+                    self.ax.addItem(rect_item)
 
     ##########
     #  PXRD  #
@@ -3387,7 +3625,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # to remove:  + self.det.hgp * (self.det.hmn -1)
         #             + self.det.vgp * (self.det.hmn -1)
         self.xdim = (self.det.hmp * self.det.hmn + self.det.hgp * (self.det.hmn-1) + self.det.cbh)/2 * self.det.pxs + self.plo.plot_padding
-        self.ydim = (self.det.vmp * self.det.vmn + self.det.vgp * (self.det.vmn-1) + self.det.cbh)/2 * self.det.pxs + self.plo.plot_padding
+        self.ydim = (self.det.vmp * self.det.vmn + self.det.vgp * (self.det.vmn-1) + self.det.cbh)/2 * self.det.pys + self.plo.plot_padding
         
         # limit the axis x and y
         self.ax.setXRange(-self.xdim, self.xdim, padding=0, update=True)
@@ -5686,7 +5924,9 @@ class DetdbWindow(HotkeyDialog):
 
         tooltips = {'hmp' : 'Module size (horizontal) [px]',
                     'vmp' : 'Module size (vertical) [px]',
-                    'pxs' : 'Pixel size [mm]',
+                    'pxs' : 'Pixel size (horizontal) [mm]',
+                    'pys' : 'Pixel size (vertical) [mm]',
+                    'igp' : 'Intra-module gap (horizontal) [px], e.g. CdTe sensor gap',
                     'hgp' : 'Module gap (horizontal) [px]',
                     'vgp' : 'Module gap (vertical) [px]',
                     'cbh' : 'Central beam hole [px]',
@@ -5754,7 +5994,7 @@ class DetdbWindow(HotkeyDialog):
         for idx, (par, val) in enumerate(self._db_dict[det].items()):
             if par == 'size':
                 pass
-            elif par == 'pxs':
+            elif par in ['pxs', 'pys']:
                 widget_label = QtWidgets.QLabel(par)
                 widget_label.setToolTip(tooltips[par])
                 widget_value = QtWidgets.QDoubleSpinBox()
@@ -5805,11 +6045,13 @@ class DetdbWindow(HotkeyDialog):
             item.setFlags(item.flags()|QtCore.Qt.ItemFlag.ItemIsEditable)
 
             self._db_dict[new] = {
-                'pxs' : 100e-3, # [mm] Pixel size
+                'pxs' : 100e-3, # [mm] Pixel size (horizontal)
+                'pys' : 100e-3, # [mm] Pixel size (vertical)
                 'hmp' : 100,    # [px] Module size (horizontal)
                 'vmp' : 100,    # [px] Module size (vertical)
                 'hgp' : 0,      # [px] Gap between modules (horizontal)
                 'vgp' : 0,      # [px] Gap between modules (vertical)
+                'igp' : 0,      # [px] Intra-module gap (horizontal)
                 'cbh' : 0,      # [px] Central beam hole
                 'size' : {'ONE':(1,1)},
                 }
@@ -5933,9 +6175,10 @@ class DetdbWindow(HotkeyDialog):
         hmn = int(self.table_size.item(size_row, 1).text())
         vmn = int(self.table_size.item(size_row, 2).text())
         pxs = self._db_dict[det]['pxs']
+        pys = self._db_dict[det].get('pys', pxs)
         xdim = self._db_dict[det]['hmp'] * hmn + self._db_dict[det]['hgp'] * (hmn-1) + self._db_dict[det]['cbh']
         ydim = self._db_dict[det]['vmp'] * vmn + self._db_dict[det]['vgp'] * (vmn-1) + self._db_dict[det]['cbh']
-        self._dim_mm.setText(f'{xdim * pxs:.1f} \u00D7 {ydim * pxs:.1f} mm\u00B2')
+        self._dim_mm.setText(f'{xdim * pxs:.1f} \u00D7 {ydim * pys:.1f} mm\u00B2')
         self._dim_px.setText(f'{xdim:.0f} \u00D7 {ydim:.0f} px')
     
     def win_detdb_par_change(self, val):

@@ -1,6 +1,6 @@
 {
     "geo": {
-        "det_type": "EIGER2",
+        "det_type": "DECTRIS EIGER2",
         "det_size": "4M",
         "ener": 12.0,
         "dist": 7100.0,
@@ -23,7 +23,7 @@
             5.0
         ],
         "det_bank": {
-            "EIGER2": [
+            "DECTRIS EIGER2": [
                 "1M",
                 "4M"
             ]

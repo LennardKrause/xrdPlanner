@@ -270,7 +270,7 @@ where $SDD$ is the sample to detector distance.
 <details>
 <summary>geo - startup defaults</summary>
  
-    det_type = 'EIGER2'  # [str]  Pilatus3 / Eiger2 / etc.
+    det_type = 'DECTRIS EIGER2'  # [str]  DECTRIS PILATUS3 / DECTRIS EIGER2 / etc.
                          #        -> Detector menu entry
     det_size = '4M'      # [str]  300K 1M 2M 6M / 1M 4M 9M 16M
                          #        -> Detector submenu entry
@@ -455,7 +455,7 @@ where $SDD$ is the sample to detector distance.
 <summary>Detector db entries</summary>
 
 The detector_db.json is stored as a dictionary
-- key: detector name e.g. PILATUS3
+- key: detector name e.g. DECTRIS PILATUS3
 - value: dictionary {Entry:Value,}, see table below
  
  | Entry |  Value  | Hint |
@@ -473,8 +473,8 @@ The size Entry is a dictionary {key:value,}
   - hmn: [int]  Number of modules (horizontal)
   - vmn: [int]  Number of modules (vertical)
  
-#### Example of the PILATUS3 entry
-    "PILATUS3": {
+#### Example of the DECTRIS PILATUS3 entry
+    "DECTRIS PILATUS3": {
         "pxs": 0.172,
         "hmp": 487,
         "vmp": 195,
